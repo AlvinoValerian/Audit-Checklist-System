@@ -2,10 +2,14 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Mail, Lock, Eye, EyeOff, Loader2 } from "lucide-react";
 import { Toaster, toast } from "sonner";
 
+import { AuthService } from "@/lib/auth";
+
 export default function LoginPage() {
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -29,8 +33,19 @@ export default function LoginPage() {
 
     try {
       // Mock login validation / simulated delay
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      await new Promise((resolve) => setTimeout(resolve, 600));
+
+      AuthService.setCurrentUser({
+        id: "adm-4",
+        email: email.trim(),
+        fullName: email.includes("admin") ? "Super Admin" : "Auditor User",
+        role: "Super Admin",
+      });
+
       toast.success("Login berhasil! Mengalihkan ke dashboard...");
+      setTimeout(() => {
+        router.push("/workspaces");
+      }, 500);
     } catch {
       toast.error("Terjadi kesalahan saat mencoba login. Silakan coba lagi.");
     } finally {
@@ -187,7 +202,7 @@ export default function LoginPage() {
           <div className="mt-8 text-center text-xs text-slate-500">
             <span>Belum memiliki akun? </span>
             <Link
-              href="/auth/register"
+              href="/register"
               className="font-bold text-slate-800 hover:text-[#193f53] transition-colors"
             >
               Daftar sekarang

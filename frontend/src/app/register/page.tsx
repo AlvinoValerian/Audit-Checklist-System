@@ -380,7 +380,7 @@ export default function RegisterPage() {
           <div className="mt-6 text-center text-xs text-slate-500">
             <span>Sudah memiliki akun? </span>
             <Link
-              href="/auth/login"
+              href="/login"
               className="text-blue-600 hover:underline font-semibold transition-colors"
             >
               Masuk sekarang
