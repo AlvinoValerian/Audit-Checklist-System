@@ -107,7 +107,7 @@ export default function LandingPage() {
     {
       question: "Bagaimana cara login bagi Super Admin?",
       answer:
-        "Super Admin dapat mengakses portal manajemen dengan mengklik tombol 'Masuk' di pojok kanan atas atau menuju ke halaman login khusus di /auth/login menggunakan kredensial terdaftar.",
+        "Super Admin dapat mengakses portal manajemen dengan mengklik tombol 'Masuk' di pojok kanan atas atau menuju ke halaman login khusus di /login menggunakan kredensial terdaftar.",
     },
   ];
 
@@ -152,13 +152,13 @@ export default function LandingPage() {
           {/* Action CTAs */}
           <div className="flex items-center gap-3">
             <Link
-              href="/auth/login"
+              href="/login"
               className="px-4 py-2 text-sm font-semibold text-[#26455E] hover:text-[#1a3143] border border-slate-200 hover:border-[#26455E] rounded-lg transition-all"
             >
               Masuk
             </Link>
             <Link
-              href="/auth/register"
+              href="/register"
               className="hidden sm:inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-[#26455E] hover:bg-[#1e384b] rounded-lg shadow-sm hover:shadow transition-all"
             >
               <span>Registrasi</span>
@@ -202,14 +202,14 @@ export default function LandingPage() {
             {/* CTA Buttons */}
             <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3.5">
               <Link
-                href="/auth/register"
+                href="/register"
                 className="w-full sm:w-auto px-6 py-3.5 rounded-lg bg-[#26455E] hover:bg-[#1e384b] text-white font-semibold text-sm shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2"
               >
                 <span>Daftar Akun Baru</span>
                 <ArrowRight className="w-4 h-4" />
               </Link>
               <Link
-                href="/auth/login"
+                href="/login"
                 className="w-full sm:w-auto px-6 py-3.5 rounded-lg bg-white hover:bg-slate-50 text-slate-700 font-semibold text-sm border border-slate-200 transition-all flex items-center justify-center gap-2"
               >
                 <span>Masuk ke Akun</span>
@@ -598,14 +598,14 @@ export default function LandingPage() {
 
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
             <Link
-              href="/auth/register"
+              href="/register"
               className="w-full sm:w-auto px-7 py-3.5 rounded-lg bg-white hover:bg-slate-100 text-[#26455E] font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2"
             >
               <span>Daftar Akun Baru Sekarang</span>
               <ArrowRight className="w-4 h-4" />
             </Link>
             <Link
-              href="/auth/login"
+              href="/login"
               className="w-full sm:w-auto px-7 py-3.5 rounded-lg border border-white/30 hover:bg-white/10 text-white font-semibold text-sm transition-all flex items-center justify-center gap-2"
             >
               <span>Sudah Punya Akun? Masuk</span>
@@ -636,10 +636,10 @@ export default function LandingPage() {
               <a href="#keunggulan" className="hover:text-white transition-colors">
                 Keunggulan
               </a>
-              <Link href="/auth/login" className="hover:text-white transition-colors">
+              <Link href="/login" className="hover:text-white transition-colors">
                 Portal Login
               </Link>
-              <Link href="/auth/register" className="hover:text-white transition-colors">
+              <Link href="/register" className="hover:text-white transition-colors">
                 Registrasi
               </Link>
             </div>
