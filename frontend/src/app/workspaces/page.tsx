@@ -139,12 +139,12 @@ export default function WorkspacesPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-800 mb-1.5">
-                    Nama Workspace <span className="text-rose-500 font-bold">*</span>
+                    Nama Perusahaan <span className="text-rose-500 font-bold">*</span>
                   </label>
                   <input
                     type="text"
                     required
-                    placeholder="Masukkan nama workspace"
+                    placeholder="Masukkan nama Perusahaan"
                     value={createFormData.name}
                     onChange={(e) =>
                       setCreateFormData({ ...createFormData, name: e.target.value })
@@ -155,12 +155,12 @@ export default function WorkspacesPage() {
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-800 mb-1.5">
-                    Nama Perusahaan <span className="text-rose-500 font-bold">*</span>
+                    Kategori Perusahaan<span className="text-rose-500 font-bold">*</span>
                   </label>
                   <input
                     type="text"
                     required
-                    placeholder="Masukkan nama workspace"
+                    placeholder="Masukkan kategori perusahaan"
                     value={createFormData.companyName}
                     onChange={(e) =>
                       setCreateFormData({
