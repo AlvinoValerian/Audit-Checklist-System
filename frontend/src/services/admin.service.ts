@@ -1,35 +1,35 @@
 import { AdminUser, AdminStatsData } from "@/types/admin";
 
-const STORAGE_KEY = "audit_pro_admins_data";
+const STORAGE_KEY = "audit_pro_admins_v2_data";
 
 export const INITIAL_ADMINS: AdminUser[] = [
   {
     id: "adm-1",
-    fullName: "Rian Hidayat",
-    email: "rian.hidayat@storeaudit.com",
+    fullName: "Andi Setiawan",
+    email: "andi@example.com",
     phone: "0812-8822-1920",
     role: "Admin",
-    workspaceName: "Workspace A (Jabodetabek)",
+    workspaceName: "Workspace A",
     status: "Aktif",
     createdAt: "12 Okt 2023",
   },
   {
     id: "adm-2",
-    fullName: "Budi Pratama",
-    email: "budi.pratama@storeaudit.com",
+    fullName: "Budi Santoso",
+    email: "budi@example.com",
     phone: "0813-7711-4455",
-    role: "Staff",
-    workspaceName: "Workspace B (Jawa Timur)",
+    role: "Admin",
+    workspaceName: "Workspace B",
     status: "Aktif",
     createdAt: "15 Nov 2023",
   },
   {
     id: "adm-3",
     fullName: "Siti Rahmawati",
-    email: "siti.rahma@storeaudit.com",
+    email: "siti@example.com",
     phone: "0856-9933-2211",
     role: "Admin",
-    workspaceName: "Workspace C (Jawa Barat)",
+    workspaceName: "Workspace C",
     status: "Nonaktif",
     createdAt: "01 Jan 2024",
   },
@@ -97,6 +97,18 @@ export const AdminService = {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
     }
     return updatedAdmin;
+  },
+
+  softDelete(id: string): AdminUser | null {
+    return this.update(id, { status: "Nonaktif" });
+  },
+
+  deactivate(id: string): AdminUser | null {
+    return this.update(id, { status: "Nonaktif" });
+  },
+
+  activate(id: string): AdminUser | null {
+    return this.update(id, { status: "Aktif" });
   },
 
   delete(id: string): boolean {

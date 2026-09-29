@@ -14,9 +14,24 @@ const nextConfig: NextConfig = {
         permanent: true,
       },
       {
+        source: "/workspaces",
+        destination: "/workspace",
+        permanent: false,
+      },
+      {
+        source: "/superadmin/workspaces",
+        destination: "/workspace",
+        permanent: false,
+      },
+      {
         source: "/superadmin",
-        destination: "/workspaces",
-        permanent: true,
+        destination: "/kelola-admin",
+        permanent: false,
+      },
+      {
+        source: "/admins",
+        destination: "/kelola-admin",
+        permanent: false,
       },
     ];
   },

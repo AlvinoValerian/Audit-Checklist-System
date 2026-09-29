@@ -44,7 +44,7 @@ export default function LoginPage() {
 
       toast.success("Login berhasil! Mengalihkan ke dashboard...");
       setTimeout(() => {
-        router.push("/workspaces");
+        router.push("/workspace");
       }, 500);
     } catch {
       toast.error("Terjadi kesalahan saat mencoba login. Silakan coba lagi.");

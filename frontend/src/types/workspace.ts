@@ -2,6 +2,8 @@ export interface Workspace {
   id: string;
   name: string;
   companyName?: string;
+  category?: string;
+  companyCategory?: string;
   companyDescription?: string;
   headquartersAddress?: string;
   storeCount: number;
