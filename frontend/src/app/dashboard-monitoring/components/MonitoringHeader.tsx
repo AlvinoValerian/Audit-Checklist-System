@@ -131,7 +131,7 @@ export default function MonitoringHeader({
           className="flex items-center gap-1.5 px-3.5 py-2 bg-[#193f53] hover:bg-[#143343] text-white text-xs sm:text-sm font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
         >
           <Filter className="w-3.5 h-3.5" />
-          <span>Filter Lainnya</span>
+          <span>Filter</span>
         </button>
       </div>
 

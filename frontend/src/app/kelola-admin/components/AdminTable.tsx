@@ -48,7 +48,7 @@ export default function AdminTable({
   }, [admins, searchQuery, workspaceFilter, statusFilter]);
 
   // Pagination
-  const itemsPerPage = 8;
+  const itemsPerPage = 10;
   const [currentPage, setCurrentPage] = useState(1);
   const totalPages = Math.ceil(filteredAdmins.length / itemsPerPage) || 1;
   const paginatedAdmins = useMemo(() => {
