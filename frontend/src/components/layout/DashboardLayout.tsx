@@ -1,8 +1,8 @@
 "use client";
 
 import React from "react";
-import Sidebar from "./Sidebar";
 import { Toaster } from "sonner";
+import Sidebar from "./Sidebar";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -14,7 +14,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       <Toaster position="top-right" richColors />
       <Sidebar />
       <div className="flex-1 min-w-0 md:h-screen md:overflow-y-auto">
-        <main className="p-6 md:p-8 lg:p-10 max-w-7xl mx-auto w-full">
+        <main className="p-3.5 sm:p-6 md:p-8 lg:p-10 max-w-7xl mx-auto w-full">
           {children}
         </main>
       </div>
