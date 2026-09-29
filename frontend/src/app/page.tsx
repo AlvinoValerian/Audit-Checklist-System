@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   Monitor,
@@ -13,6 +13,7 @@ import {
   ChevronRight,
   ChevronDown,
   ArrowRight,
+  ArrowUp,
   Layers,
   Store,
   BarChart3,
@@ -21,6 +22,50 @@ import {
 
 export default function LandingPage() {
   const [activeFaq, setActiveFaq] = useState<number | null>(0);
+  const [showBackToTop, setShowBackToTop] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      if (window.scrollY > 300) {
+        setShowBackToTop(true);
+      } else {
+        setShowBackToTop(false);
+      }
+    };
+    window.addEventListener("scroll", handleScroll);
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  const scrollToTop = () => {
+    window.scrollTo({
+      top: 0,
+      behavior: "smooth",
+    });
+  };
+
+  const scrollToSection = (
+    e: React.MouseEvent<HTMLAnchorElement>,
+    targetId: string
+  ) => {
+    e.preventDefault();
+    if (targetId === "#home" || targetId === "#" || targetId === "") {
+      scrollToTop();
+      if (typeof window !== "undefined") {
+        window.history.pushState(null, "", window.location.pathname);
+      }
+      return;
+    }
+
+    const element = document.querySelector(targetId);
+    if (element) {
+      element.scrollIntoView({
+        behavior: "smooth",
+      });
+      if (typeof window !== "undefined") {
+        window.history.pushState(null, "", targetId);
+      }
+    }
+  };
 
   const toggleFaq = (index: number) => {
     setActiveFaq(activeFaq === index ? null : index);
@@ -112,14 +157,21 @@ export default function LandingPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-white text-slate-900 font-sans selection:bg-[#26455E] selection:text-white">
+    <div
+      id="home"
+      className="min-h-screen bg-white text-slate-900 font-sans selection:bg-[#26455E] selection:text-white scroll-mt-24"
+    >
       {/* =========================================================================
           1. STICKY NAVBAR
          ========================================================================= */}
       <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-slate-100 shadow-xs">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
           {/* Brand Logo */}
-          <Link href="/" className="flex items-center gap-3">
+          <a
+            href="#home"
+            onClick={(e) => scrollToSection(e, "#home")}
+            className="flex items-center gap-3 cursor-pointer"
+          >
             <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-[#26455E] text-white shadow-sm">
               <Monitor className="w-5 h-5 stroke-[2.2]" />
             </div>
@@ -131,20 +183,43 @@ export default function LandingPage() {
                 ENTERPRISE SYSTEM
               </span>
             </div>
-          </Link>
+          </a>
 
           {/* Nav Links */}
           <nav className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-600">
-            <a href="#fitur" className="hover:text-[#26455E] transition-colors">
+            <a
+              href="#home"
+              onClick={(e) => scrollToSection(e, "#home")}
+              className="hover:text-[#26455E] transition-colors"
+            >
+              Home
+            </a>
+            <a
+              href="#fitur"
+              onClick={(e) => scrollToSection(e, "#fitur")}
+              className="hover:text-[#26455E] transition-colors"
+            >
               Fitur
             </a>
-            <a href="#alur" className="hover:text-[#26455E] transition-colors">
+            <a
+              href="#alur"
+              onClick={(e) => scrollToSection(e, "#alur")}
+              className="hover:text-[#26455E] transition-colors"
+            >
               Alur Kerja
             </a>
-            <a href="#keunggulan" className="hover:text-[#26455E] transition-colors">
+            <a
+              href="#keunggulan"
+              onClick={(e) => scrollToSection(e, "#keunggulan")}
+              className="hover:text-[#26455E] transition-colors"
+            >
               Keunggulan
             </a>
-            <a href="#faq" className="hover:text-[#26455E] transition-colors">
+            <a
+              href="#faq"
+              onClick={(e) => scrollToSection(e, "#faq")}
+              className="hover:text-[#26455E] transition-colors"
+            >
               FAQ
             </a>
           </nav>
@@ -627,13 +702,32 @@ export default function LandingPage() {
             </div>
 
             <div className="flex items-center gap-6 text-xs text-slate-400">
-              <a href="#fitur" className="hover:text-white transition-colors">
+              <a
+                href="#home"
+                onClick={(e) => scrollToSection(e, "#home")}
+                className="hover:text-white transition-colors"
+              >
+                Home
+              </a>
+              <a
+                href="#fitur"
+                onClick={(e) => scrollToSection(e, "#fitur")}
+                className="hover:text-white transition-colors"
+              >
                 Fitur
               </a>
-              <a href="#alur" className="hover:text-white transition-colors">
+              <a
+                href="#alur"
+                onClick={(e) => scrollToSection(e, "#alur")}
+                className="hover:text-white transition-colors"
+              >
                 Alur Kerja
               </a>
-              <a href="#keunggulan" className="hover:text-white transition-colors">
+              <a
+                href="#keunggulan"
+                onClick={(e) => scrollToSection(e, "#keunggulan")}
+                className="hover:text-white transition-colors"
+              >
                 Keunggulan
               </a>
               <Link href="/login" className="hover:text-white transition-colors">
@@ -651,6 +745,18 @@ export default function LandingPage() {
           </div>
         </div>
       </footer>
+
+      {/* Floating Back to Top Button */}
+      {showBackToTop && (
+        <button
+          type="button"
+          onClick={scrollToTop}
+          aria-label="Kembali ke atas"
+          className="fixed bottom-6 right-6 z-50 p-3 rounded-full bg-[#26455E] text-white shadow-lg hover:bg-[#1e384b] hover:shadow-xl transition-all duration-300 focus:outline-none cursor-pointer flex items-center justify-center group"
+        >
+          <ArrowUp className="w-5 h-5 group-hover:-translate-y-0.5 transition-transform" />
+        </button>
+      )}
     </div>
   );
 }
