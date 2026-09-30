@@ -30,7 +30,6 @@ export default function CreateAdminModal({
   const [formData, setFormData] = useState({
     fullName: "",
     email: "",
-    phone: "",
     role: "Admin" as "Admin" | "Super Admin" | "Staff",
     password: "",
     confirmPassword: "",
@@ -46,7 +45,6 @@ export default function CreateAdminModal({
       setFormData({
         fullName: "",
         email: "",
-        phone: "",
         role: "Admin",
         password: "",
         confirmPassword: "",
@@ -94,7 +92,7 @@ export default function CreateAdminModal({
     onSubmit({
       fullName: formData.fullName.trim(),
       email: formData.email.trim(),
-      phone: formData.phone.trim() || "-",
+      phone: "-",
       role: formData.role,
       workspaceName: formData.workspaceName,
       status: formData.status,
@@ -129,38 +127,21 @@ export default function CreateAdminModal({
           />
         </div>
 
-        {/* Email & No Telepon */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-          <div>
-            <label className="block text-xs font-semibold text-slate-800 mb-1.5">
-              Email <span className="text-rose-500 font-bold">*</span>
-            </label>
-            <input
-              type="email"
-              required
-              placeholder="contoh@perusahaan.com"
-              value={formData.email}
-              onChange={(e) =>
-                setFormData({ ...formData, email: e.target.value })
-              }
-              className="w-full px-3.5 py-2.5 text-xs sm:text-sm bg-white border border-slate-200 rounded-lg outline-none focus:border-[#193f53] focus:ring-1 focus:ring-[#193f53]/20 transition-all placeholder:text-slate-400 text-slate-800"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-800 mb-1.5">
-              No. Telepon / WhatsApp
-            </label>
-            <input
-              type="text"
-              placeholder="0812-xxxx-xxxx"
-              value={formData.phone}
-              onChange={(e) =>
-                setFormData({ ...formData, phone: e.target.value })
-              }
-              className="w-full px-3.5 py-2.5 text-xs sm:text-sm bg-white border border-slate-200 rounded-lg outline-none focus:border-[#193f53] focus:ring-1 focus:ring-[#193f53]/20 transition-all placeholder:text-slate-400 text-slate-800"
-            />
-          </div>
+        {/* Email */}
+        <div>
+          <label className="block text-xs font-semibold text-slate-800 mb-1.5">
+            Email <span className="text-rose-500 font-bold">*</span>
+          </label>
+          <input
+            type="email"
+            required
+            placeholder="contoh@perusahaan.com"
+            value={formData.email}
+            onChange={(e) =>
+              setFormData({ ...formData, email: e.target.value })
+            }
+            className="w-full px-3.5 py-2.5 text-xs sm:text-sm bg-white border border-slate-200 rounded-lg outline-none focus:border-[#193f53] focus:ring-1 focus:ring-[#193f53]/20 transition-all placeholder:text-slate-400 text-slate-800"
+          />
         </div>
 
         {/* Password & Konfirmasi Password */}
@@ -285,8 +266,8 @@ export default function CreateAdminModal({
               }
               className="w-full appearance-none px-3.5 py-2.5 pr-10 text-xs sm:text-sm bg-white border border-slate-200 rounded-lg outline-none focus:border-[#193f53] focus:ring-1 focus:ring-[#193f53]/20 transition-all text-slate-800 cursor-pointer"
             >
-              <option value="Aktif">Aktif (Dapat langsung login)</option>
-              <option value="Nonaktif">Nonaktif (Akses ditangguhkan)</option>
+              <option value="Aktif">Aktif</option>
+              <option value="Nonaktif">Nonaktif</option>
             </select>
             <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           </div>

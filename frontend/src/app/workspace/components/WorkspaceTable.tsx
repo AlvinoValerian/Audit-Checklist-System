@@ -7,6 +7,7 @@ import {
   Eye,
   Pencil,
   Trash2,
+  RotateCcw,
 } from "lucide-react";
 import { Workspace } from "@/types/workspace";
 
@@ -25,6 +26,8 @@ export default function WorkspaceTable({
 }: WorkspaceTableProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"Semua" | "Aktif" | "Nonaktif">("Semua");
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
   // Filter Logic
   const filteredWorkspaces = useMemo(() => {
@@ -39,6 +42,13 @@ export default function WorkspaceTable({
     });
   }, [workspaces, searchQuery, statusFilter]);
 
+  // Pagination Logic
+  const totalPages = Math.ceil(filteredWorkspaces.length / itemsPerPage) || 1;
+  const paginatedWorkspaces = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage;
+    return filteredWorkspaces.slice(start, start + itemsPerPage);
+  }, [filteredWorkspaces, currentPage]);
+
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden">
       {/* Search & Filter Header */}
@@ -49,9 +59,12 @@ export default function WorkspaceTable({
           <input
             type="text"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Cari workspace..."
-            className="w-full pl-10 pr-4 py-2 text-xs sm:text-sm bg-white border border-slate-200 rounded-lg outline-none focus:border-[#193f53] focus:ring-1 focus:ring-[#193f53]/20 transition-all placeholder:text-slate-400"
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setCurrentPage(1);
+            }}
+            placeholder="Cari nama, perusahaan, atau deskripsi..."
+            className="w-full pl-10 pr-4 py-2 text-xs sm:text-sm bg-white border border-slate-200 rounded-lg outline-none focus:border-[#193f53] focus:ring-1 focus:ring-[#193f53]/20 transition-all placeholder:text-slate-400 text-slate-800"
           />
         </div>
 
@@ -60,7 +73,10 @@ export default function WorkspaceTable({
           <div className="relative w-full sm:w-44">
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as any)}
+              onChange={(e) => {
+                setStatusFilter(e.target.value as "Semua" | "Aktif" | "Nonaktif");
+                setCurrentPage(1);
+              }}
               className="w-full appearance-none bg-white border border-slate-200 text-slate-700 text-xs sm:text-sm font-medium rounded-lg px-3.5 py-2 pr-8 outline-none focus:border-[#193f53] cursor-pointer"
             >
               <option value="Semua">Semua Status</option>
@@ -76,75 +92,85 @@ export default function WorkspaceTable({
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
-            <tr className="border-b border-slate-100 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-              <th className="py-3.5 px-5">NAMA</th>
-              <th className="py-3.5 px-4 text-center">JUMLAH TOKO</th>
-              <th className="py-3.5 px-4">DESKRIPSI</th>
-              <th className="py-3.5 px-4">STATUS</th>
-              <th className="py-3.5 px-4">DIBUAT</th>
-              <th className="py-3.5 px-5 text-center">AKSI</th>
+            <tr className="border-b border-slate-100 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50/50">
+              <th className="py-3.5 px-6 text-center">WORKSPACE</th>
+              <th className="py-3.5 px-4 text-center">TOTAL TOKO</th>
+              <th className="py-3.5 px-5 text-center">DESKRIPSI OPERASIONAL</th>
+              <th className="py-3.5 px-4 text-center">STATUS</th>
+              <th className="py-3.5 px-5 text-center">TANGGAL DIBUAT</th>
+              <th className="py-3.5 px-6 text-center">AKSI</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100 text-xs text-slate-700">
-            {filteredWorkspaces.length === 0 ? (
+          <tbody className="divide-y divide-slate-100 text-xs sm:text-sm">
+            {paginatedWorkspaces.length === 0 ? (
               <tr>
-                <td colSpan={6} className="py-8 text-center text-slate-400">
+                <td colSpan={6} className="py-12 text-center text-slate-400">
                   Tidak ada data workspace ditemukan.
                 </td>
               </tr>
             ) : (
-              filteredWorkspaces.map((ws) => (
+              paginatedWorkspaces.map((ws) => (
                 <tr
                   key={ws.id}
-                  className="hover:bg-slate-50/60 transition-colors"
+                  className="hover:bg-slate-50/70 transition-colors group"
                 >
-                  {/* Nama */}
-                  <td className="py-4 px-5">
-                    <div className="font-semibold text-slate-900 text-sm">
-                      {ws.name}
+                  {/* 1. Workspace Identity (Di tengah) */}
+                  <td className="py-4 px-6 text-center">
+                    <div className="min-w-0 mx-auto text-center">
+                      <div className="font-semibold text-slate-900 text-sm truncate">
+                        {ws.name}
+                      </div>
+                      {ws.companyName && (
+                        <div className="text-xs text-slate-500 truncate mt-0.5">
+                          {ws.companyName}
+                        </div>
+                      )}
                     </div>
                   </td>
 
-                  {/* Jumlah Toko */}
-                  <td className="py-4 px-4 text-center">
+                  {/* 2. Total Toko (Angka polos di tengah) */}
+                  <td className="py-4 px-4 text-center whitespace-nowrap">
                     <span className="font-semibold text-slate-900 text-sm">
                       {ws.storeCount}
                     </span>
                   </td>
 
-                  {/* Deskripsi */}
-                  <td className="py-4 px-4 max-w-xs text-slate-500 truncate" title={ws.description}>
-                    {ws.description}
+                  {/* 3. Deskripsi Operasional (Di tengah) */}
+                  <td className="py-4 px-5 text-center max-w-sm">
+                    <p
+                      className="text-xs text-slate-600 line-clamp-2 leading-relaxed mx-auto text-center"
+                      title={ws.description}
+                    >
+                      {ws.description || "-"}
+                    </p>
                   </td>
 
-                  {/* Status */}
-                  <td className="py-4 px-4 whitespace-nowrap">
-                    {ws.status === "Aktif" ? (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-600 border border-emerald-200/50">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                        Aktif
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-50 text-rose-600 border border-rose-200/50">
-                        <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                        Nonaktif
-                      </span>
-                    )}
+                  {/* 4. Status (Di tengah) */}
+                  <td className="py-4 px-4 text-center whitespace-nowrap">
+                    <span
+                      className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${
+                        ws.status === "Aktif"
+                          ? "bg-emerald-50 text-emerald-600 border border-emerald-200/50"
+                          : "bg-rose-50 text-rose-600 border border-rose-200/50"
+                      }`}
+                    >
+                      {ws.status}
+                    </span>
                   </td>
 
-                  {/* Dibuat */}
-                  <td className="py-4 px-4 text-slate-500 text-xs whitespace-nowrap">
+                  {/* 5. Dibuat (Di tengah) */}
+                  <td className="py-4 px-5 text-slate-600 text-xs text-center whitespace-nowrap">
                     {ws.createdAt}
                   </td>
 
-                  {/* Actions */}
-                  <td className="py-4 px-5 text-center whitespace-nowrap">
+                  {/* 6. Aksi (Di tengah) */}
+                  <td className="py-4 px-6 text-center whitespace-nowrap">
                     <div className="flex items-center justify-center gap-2">
-                      {/* View Detail Modal Button */}
+                      {/* Detail */}
                       <button
                         onClick={() => onDetail?.(ws)}
                         title="Lihat Detail Workspace"
-                        className="p-1.5 text-slate-400 hover:text-slate-700 rounded-md hover:bg-slate-100 transition-colors cursor-pointer"
+                        className="text-slate-400 hover:text-slate-700 p-1.5 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
                       >
                         <Eye className="w-4 h-4" />
                       </button>
@@ -153,19 +179,29 @@ export default function WorkspaceTable({
                       <button
                         onClick={() => onEdit?.(ws)}
                         title="Edit Workspace"
-                        className="p-1.5 text-slate-400 hover:text-[#193f53] rounded-md hover:bg-slate-100 transition-colors cursor-pointer"
+                        className="text-sky-500 hover:text-sky-600 p-1.5 hover:bg-sky-50 rounded-lg transition-colors cursor-pointer"
                       >
                         <Pencil className="w-4 h-4" />
                       </button>
 
-                      {/* Delete / Soft Delete */}
-                      <button
-                        onClick={() => onDelete?.(ws)}
-                        title="Nonaktifkan Workspace (Soft Delete)"
-                        className="p-1.5 text-rose-400 hover:text-rose-600 rounded-md hover:bg-rose-50 transition-colors cursor-pointer"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {/* Delete / Soft Delete / Toggle Status */}
+                      {ws.status === "Aktif" ? (
+                        <button
+                          onClick={() => onDelete?.(ws)}
+                          title="Nonaktifkan Workspace (Soft Delete)"
+                          className="text-rose-500 hover:text-rose-600 p-1.5 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => onDelete?.(ws)}
+                          title="Aktifkan Kembali Workspace"
+                          className="text-emerald-600 hover:text-emerald-700 p-1.5 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -180,42 +216,37 @@ export default function WorkspaceTable({
         <div>
           Menampilkan{" "}
           <span className="font-semibold text-slate-700">
-            1 - {filteredWorkspaces.length}
+            {filteredWorkspaces.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0}
+          </span>{" "}
+          -{" "}
+          <span className="font-semibold text-slate-700">
+            {Math.min(currentPage * itemsPerPage, filteredWorkspaces.length)}
           </span>{" "}
           dari{" "}
           <span className="font-semibold text-slate-700">
-            {workspaces.length}
+            {filteredWorkspaces.length}
           </span>{" "}
-          data
+          workspace
         </div>
 
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2">
-            <span>Tampilkan:</span>
-            <select className="border border-slate-200 rounded-md px-2 py-1 text-slate-700 text-xs bg-white outline-none cursor-pointer">
-              <option value="10">10 / hal</option>
-              <option value="25">25 / hal</option>
-              <option value="50">50 / hal</option>
-            </select>
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            <button
-              disabled
-              className="px-2.5 py-1 text-slate-300 font-medium cursor-not-allowed"
-            >
-              &lt; Sebelumnya
-            </button>
-            <button className="w-7 h-7 flex items-center justify-center rounded-md bg-[#193f53] text-white font-bold text-xs">
-              1
-            </button>
-            <button
-              disabled
-              className="px-2.5 py-1 text-slate-300 font-medium cursor-not-allowed"
-            >
-              Selanjutnya &gt;
-            </button>
-          </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            disabled={currentPage === 1}
+            className="px-3 py-1.5 border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+          >
+            Sebelumnya
+          </button>
+          <span className="px-2 font-medium text-slate-700">
+            {currentPage} / {totalPages}
+          </span>
+          <button
+            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            disabled={currentPage === totalPages}
+            className="px-3 py-1.5 border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+          >
+            Selanjutnya
+          </button>
         </div>
       </div>
     </div>

@@ -242,8 +242,8 @@ export default function EditAdminModal({
               }
               className="w-full appearance-none px-3.5 py-2.5 pr-10 text-xs sm:text-sm bg-white border border-slate-200 rounded-lg outline-none focus:border-[#193f53] focus:ring-1 focus:ring-[#193f53]/20 transition-all text-slate-800 cursor-pointer"
             >
-              <option value="Aktif">Aktif (Dapat mengakses sistem)</option>
-              <option value="Nonaktif">Nonaktif (Akses ditangguhkan)</option>
+              <option value="Aktif">Aktif</option>
+              <option value="Nonaktif">Nonaktif</option>
             </select>
             <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           </div>

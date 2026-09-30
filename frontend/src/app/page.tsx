@@ -258,7 +258,7 @@ export default function LandingPage() {
             {/* Pill Tag */}
             <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-[#26455E]/10 text-[#26455E] border border-[#26455E]/20 mb-6">
               <Sparkles className="w-3.5 h-3.5 text-[#26455E]" />
-              <span>Platform Audit &amp; Checklist Toko Terintegrasi No. 1</span>
+              <span>Platform Audit &amp; Checklist Toko Terintegrasi</span>
             </div>
 
             {/* Headline */}

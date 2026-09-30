@@ -106,9 +106,14 @@ export default function WorkspacePage() {
 
   const handleConfirmDelete = () => {
     if (!deleteTargetWorkspace) return;
-    WorkspaceService.update(deleteTargetWorkspace.id, { status: "Nonaktif" });
+    const isDeactivating = deleteTargetWorkspace.status === "Aktif";
+    const newStatus = isDeactivating ? "Nonaktif" : "Aktif";
+
+    WorkspaceService.update(deleteTargetWorkspace.id, { status: newStatus });
     toast.success(
-      `Workspace "${deleteTargetWorkspace.name}" berhasil dinonaktifkan.`
+      isDeactivating
+        ? `Workspace "${deleteTargetWorkspace.name}" berhasil dinonaktifkan.`
+        : `Workspace "${deleteTargetWorkspace.name}" berhasil diaktifkan kembali.`
     );
     setIsDeleteModalOpen(false);
     setDeleteTargetWorkspace(null);
