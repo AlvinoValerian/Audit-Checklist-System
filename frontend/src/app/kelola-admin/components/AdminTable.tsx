@@ -3,6 +3,7 @@
 import React, { useState, useMemo } from "react";
 import { Search, ChevronDown, Pencil, Trash2, RotateCcw } from "lucide-react";
 import { AdminUser } from "@/types/admin";
+import ActionButtons from "@/components/ui/ActionButtons";
 
 interface AdminTableProps {
   admins: AdminUser[];
@@ -173,32 +174,14 @@ export default function AdminTable({
 
                   {/* 5. ACTION */}
                   <td className="py-4 px-6 text-right whitespace-nowrap">
-                    <div className="flex items-center justify-end gap-2.5">
-                      <button
-                        onClick={() => onEdit?.(adm)}
-                        title="Edit Admin"
-                        className="text-sky-500 hover:text-sky-600 p-1 hover:bg-sky-50 rounded transition-colors cursor-pointer"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      {adm.status === "Aktif" ? (
-                        <button
-                          onClick={() => (onToggleStatus || onDelete)?.(adm)}
-                          title="Nonaktifkan Admin"
-                          className="text-rose-500 hover:text-rose-600 p-1 hover:bg-rose-50 rounded transition-colors cursor-pointer"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => (onToggleStatus || onDelete)?.(adm)}
-                          title="Aktifkan Kembali Admin"
-                          className="text-emerald-600 hover:text-emerald-700 p-1 hover:bg-emerald-50 rounded transition-colors cursor-pointer"
-                        >
-                          <RotateCcw className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
+                    <ActionButtons
+                      onEdit={() => onEdit?.(adm)}
+                      onDelete={adm.status === "Aktif" ? () => (onToggleStatus || onDelete)?.(adm) : undefined}
+                      onRestore={adm.status !== "Aktif" ? () => (onToggleStatus || onDelete)?.(adm) : undefined}
+                      editTitle="Edit Admin"
+                      deleteTitle="Nonaktifkan Admin"
+                      restoreTitle="Aktifkan Kembali Admin"
+                    />
                   </td>
                 </tr>
               ))

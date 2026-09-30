@@ -12,7 +12,7 @@ export default function Header({ title, subtitle, action }: HeaderProps) {
   return (
     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
       <div>
-        <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
+        <h2 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
           {title}
         </h2>
         {subtitle && (
