@@ -12,7 +12,7 @@ import DetailHolidayModal from "./components/DetailHolidayModal";
 import SoftDeleteModal from "./components/SoftDeleteModal";
 import RestoreHolidayModal from "./components/RestoreHolidayModal";
 import ActionButtons from "@/components/ui/ActionButtons";
-
+ 
 export default function LiburTokoPage() {
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [stats, setStats] = useState({ total: 0, active: 0, cancelled: 0 });

@@ -172,7 +172,7 @@ export default function DetailHolidayModal({ isOpen, holiday, onClose, onEdit }:
                     )}
                   </div>
                 );
-              })}
+              })}  
             </div>
           </div>
         </div>

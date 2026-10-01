@@ -12,5 +12,5 @@ export interface Holiday {
   creatorRole: string;
   status: HolidayStatus;
   liburType?: "full" | "partial";
-  schedules?: string[];
+  schedules?: string[]; 
 }

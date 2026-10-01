@@ -9,7 +9,7 @@ interface DeleteHolidayModalProps {
   isOpen: boolean;
   holiday: Holiday | null;
   onClose: () => void;
-  onConfirm: () => void;
+  onConfirm: () => void;  
 }
 
 export default function DeleteHolidayModal({
