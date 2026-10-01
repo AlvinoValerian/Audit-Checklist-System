@@ -9,7 +9,7 @@ interface EditHolidayModalProps {
   isOpen: boolean;
   holiday: Holiday | null;
   onClose: () => void;
-  onSubmit: (data: any) => void;
+  onSubmit: (data: any) => void;  
 }
 
 export default function EditHolidayModal({

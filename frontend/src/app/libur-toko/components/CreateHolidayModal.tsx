@@ -128,7 +128,7 @@ export default function CreateHolidayModal({
         <div className="space-y-1.5">
           <label className="block text-xs font-bold text-slate-700">Status</label>
           <select
-            value={status}
+            value={status}  
             onChange={(e) => setStatus(e.target.value as HolidayStatus)}
             className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#193f53]/20 focus:border-[#193f53] transition-colors cursor-pointer"
           >

@@ -7,59 +7,63 @@ import { Calendar as CalendarIcon, CheckCircle2, XCircle, Search, Filter, Plus, 
 import { HolidayService } from "@/services/holiday.service";
 import { Holiday, HolidayStatus } from "@/types/holiday";
 import { toast } from "sonner";
-import CreateHolidayModal from "./components/CreateHolidayModal";
-import EditHolidayModal from "./components/EditHolidayModal";
-import DeleteHolidayModal from "./components/DeleteHolidayModal";
+import CreateHolidayView from "./components/CreateHolidayView";
+import DetailHolidayModal from "./components/DetailHolidayModal";
+import SoftDeleteModal from "./components/SoftDeleteModal";
+import RestoreHolidayModal from "./components/RestoreHolidayModal";
 import ActionButtons from "@/components/ui/ActionButtons";
-
+ 
 export default function LiburTokoPage() {
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [stats, setStats] = useState({ total: 0, active: 0, cancelled: 0 });
 
-  // Modal States
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isCreatingView, setIsCreatingView] = useState(false);
   const [selectedHolidayToEdit, setSelectedHolidayToEdit] = useState<Holiday | null>(null);
+
+  // View Modal States
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [selectedHolidayToView, setSelectedHolidayToView] = useState<Holiday | null>(null);
+
+  // Soft Delete Modal States
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [deleteTargetHoliday, setDeleteTargetHoliday] = useState<Holiday | null>(null);
 
+  // Restore Modal States
+  const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false);
+  const [restoreTargetHoliday, setRestoreTargetHoliday] = useState<Holiday | null>(null);
+
+  // Search & Filter State
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filterStatus, setFilterStatus] = useState<"Semua" | "Terjadwal" | "Selesai" | "Dibatalkan">("Semua");
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+
   const refreshData = () => {
     const list = HolidayService.getAll();
-    setHolidays(list);
-    setStats(HolidayService.getStats(list));
+    const now = new Date();
+    
+    // Sembunyikan jadwal (Selesai/Dibatalkan) yang sudah terlewat lebih dari 15 hari
+    const filteredList = list.filter(holiday => {
+      if (holiday.status === "Selesai" || holiday.status === "Dibatalkan") {
+        const endDate = new Date(holiday.endDate);
+        const diffTime = now.getTime() - endDate.getTime();
+        const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+        if (diffDays > 15) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    setHolidays(filteredList);
+    setStats(HolidayService.getStats(filteredList));
   };
 
   useEffect(() => {
     refreshData();
   }, []);
 
-  const handleCreateSubmit = (data: Omit<Holiday, "id">) => {
-    HolidayService.create(data);
-    toast.success(`Jadwal libur untuk ${data.storeName} berhasil ditambahkan!`);
-    setIsCreateModalOpen(false);
-    refreshData();
-  };
-
-  const handleEditSubmit = (data: Partial<Holiday>) => {
-    if (!selectedHolidayToEdit) return;
-    HolidayService.update(selectedHolidayToEdit.id, data);
-    toast.success(`Jadwal libur untuk ${data.storeName} berhasil diperbarui!`);
-    setIsEditModalOpen(false);
-    setSelectedHolidayToEdit(null);
-    refreshData();
-  };
-
-  const handleConfirmDelete = () => {
-    if (!deleteTargetHoliday) return;
-    HolidayService.delete(deleteTargetHoliday.id);
-    toast.success(`Jadwal libur untuk ${deleteTargetHoliday.storeName} berhasil dihapus.`);
-    setIsDeleteModalOpen(false);
-    setDeleteTargetHoliday(null);
-    refreshData();
-  };
-
   const getStatusColor = (status: HolidayStatus) => {
-    if (status === "Terjadwal") return { bg: "bg-[#f0f5ff] border-[#d6e4ff] text-[#1e4ed8]", dot: "bg-[#2563eb]" };
+    if (status === "Terjadwal") return { bg: "bg-purple-50 border-purple-200 text-purple-700", dot: "bg-purple-600" };
     if (status === "Selesai") return { bg: "bg-[#ecfdf5] border-[#a7f3d0] text-[#047857]", dot: "bg-[#10b981]" };
     return { bg: "bg-[#fef2f2] border-[#fecaca] text-[#b91c1c]", dot: "bg-[#ef4444]" };
   };
@@ -79,13 +83,84 @@ export default function LiburTokoPage() {
   };
 
   const [isCalendarExpanded, setIsCalendarExpanded] = useState(false);
+  const [currentMonth, setCurrentMonth] = useState<Date | null>(null);
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    setCurrentMonth(new Date());
+    setIsMounted(true);
+  }, []);
+
+  const handlePrevMonth = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (currentMonth) {
+      setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1));
+    }
+  };
+
+  const handleNextMonth = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (currentMonth) {
+      setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
+    }
+  };
+
+  const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+  
+  const cYear = currentMonth ? currentMonth.getFullYear() : 2024;
+  const cMonth = currentMonth ? currentMonth.getMonth() : 7;
+  
+  const firstDay = new Date(cYear, cMonth, 1).getDay();
+  const daysInMonth = new Date(cYear, cMonth + 1, 0).getDate();
+  const daysInPrevMonth = new Date(cYear, cMonth, 0).getDate();
+  
+  const prevMonthDays = Array.from({ length: firstDay }).map((_, i) => daysInPrevMonth - firstDay + 1 + i);
+  const currentMonthDays = Array.from({ length: daysInMonth }).map((_, i) => i + 1);
+
+  // Helper to check if a date has holidays
+  const getHolidayStatus = (day: number) => {
+    const checkDateStr = `${cYear}-${String(cMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const dayHolidays = holidays.filter(h => {
+      const hEnd = h.endDate || h.startDate;
+      return checkDateStr >= h.startDate && checkDateStr <= hEnd;
+    });
+    
+    if (dayHolidays.length === 0) return null;
+    
+    // Priority: Terjadwal (purple) > Dibatalkan (rose) > Selesai (emerald)
+    if (dayHolidays.some(h => h.status === "Terjadwal")) return "bg-purple-500";
+    if (dayHolidays.some(h => h.status === "Dibatalkan")) return "bg-rose-500";
+    return "bg-emerald-500";
+  };
 
   return (
     <DashboardLayout>
-      <Header
-        title="Libur Toko & Pengecualian"
-        subtitle="Kelola dan pantau jadwal operasional khusus dan hari libur untuk semua cabang toko."
-      />
+      {isCreatingView ? (
+        <CreateHolidayView 
+          initialData={selectedHolidayToEdit}
+          onBack={() => {
+            setIsCreatingView(false);
+            setSelectedHolidayToEdit(null);
+          }} 
+          onSave={(data) => { 
+            if (selectedHolidayToEdit) {
+              HolidayService.update(selectedHolidayToEdit.id, data);
+              toast.success(`Jadwal libur untuk ${data.storeName} berhasil diperbarui!`);
+            } else {
+              HolidayService.create(data); 
+              toast.success(`Jadwal libur untuk ${data.storeName} berhasil ditambahkan!`); 
+            }
+            setIsCreatingView(false); 
+            setSelectedHolidayToEdit(null);
+            refreshData(); 
+          }} 
+        />
+      ) : (
+        <>
+          <Header
+            title="Libur Toko & Pengecualian"
+            subtitle="Kelola dan pantau jadwal operasional khusus dan hari libur untuk semua cabang toko."
+          />
 
       {/* Stats and Calendar Section */}
       <div className="flex flex-col lg:flex-row gap-5 mb-8 items-start">
@@ -95,13 +170,13 @@ export default function LiburTokoPage() {
           <div className="bg-[#fefdfa] rounded-xl border border-slate-200 p-5 shadow-xs flex flex-col">
             <div className="flex justify-between items-start">
               <h3 className="text-[11px] font-bold text-slate-500 tracking-wider uppercase">TOTAL LIBUR</h3>
-              <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+              <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
                 <CalendarIcon className="w-4 h-4" />
               </div>
             </div>
             <div className="mt-4">
               <div className="text-2xl font-extrabold text-slate-900">{stats.total}</div>
-              <p className="text-xs text-slate-500 mt-1">Semua libur tercatat</p>
+              <p className="text-xs text-emerald-500 mt-1">Semua libur tercatat</p>
             </div>
           </div>
 
@@ -109,13 +184,13 @@ export default function LiburTokoPage() {
           <div className="bg-[#fefdfa] rounded-xl border border-slate-200 p-5 shadow-xs flex flex-col">
             <div className="flex justify-between items-start">
               <h3 className="text-[11px] font-bold text-slate-500 tracking-wider uppercase">LIBUR AKTIF</h3>
-              <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+              <div className="w-8 h-8 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center">
                 <CheckCircle2 className="w-4 h-4" />
               </div>
             </div>
             <div className="mt-4">
               <div className="text-2xl font-extrabold text-slate-900">{stats.active}</div>
-              <div className="flex items-center gap-1 mt-1 text-emerald-600 text-xs font-medium">
+              <div className="flex items-center gap-1 mt-1 text-purple-600 text-xs font-medium">
                 {stats.total > 0 ? `${Math.round((stats.active / stats.total) * 100)}% dari total` : "0% dari total"}
               </div>
             </div>
@@ -138,6 +213,7 @@ export default function LiburTokoPage() {
 
         {/* Calendar Widget (Right Side) */}
         <div 
+          suppressHydrationWarning
           className={`shrink-0 bg-[#fefdfa] rounded-xl border border-slate-200 shadow-xs flex flex-col relative overflow-hidden transition-all duration-500 ease-in-out ${
             isCalendarExpanded ? 'max-w-[400px] max-h-[500px] opacity-100' : 'max-w-[48px] max-h-[48px] opacity-100 cursor-pointer hover:bg-slate-50 hover:border-blue-200'
           }`}
@@ -159,17 +235,17 @@ export default function LiburTokoPage() {
             <div className="flex items-center justify-between mb-5">
               <div className="flex items-center gap-2">
                 <CalendarIcon className="w-4 h-4 text-blue-600" />
-                <h3 className="text-[13px] font-bold text-slate-900 whitespace-nowrap">Agustus 2024</h3>
+                <h3 className="text-[13px] font-bold text-slate-900 whitespace-nowrap">{monthNames[cMonth]} {cYear}</h3>
               </div>
               <div className="flex gap-1.5 items-center">
                 <button 
-                  onClick={(e) => e.stopPropagation()}
+                  onClick={handlePrevMonth}
                   className="p-1 rounded bg-white hover:bg-slate-50 border border-slate-200 text-slate-500 transition-colors cursor-pointer"
                 >
                   <ChevronLeft className="w-3.5 h-3.5" />
                 </button>
                 <button 
-                  onClick={(e) => e.stopPropagation()}
+                  onClick={handleNextMonth}
                   className="p-1 rounded bg-white hover:bg-slate-50 border border-slate-200 text-slate-500 transition-colors cursor-pointer mr-1"
                 >
                   <ChevronRight className="w-3.5 h-3.5" />
@@ -194,29 +270,25 @@ export default function LiburTokoPage() {
               ))}
 
               {/* Previous month days */}
-              <div className="text-[11px] font-medium text-slate-300">28</div>
-              <div className="text-[11px] font-medium text-slate-300">29</div>
-              <div className="text-[11px] font-medium text-slate-300">30</div>
-              <div className="text-[11px] font-medium text-slate-300">31</div>
+              {prevMonthDays.map((day, i) => (
+                <div key={`prev-${i}`} className="text-[11px] font-medium text-slate-300">{day}</div>
+              ))}
 
               {/* Current month days */}
-              {[...Array(31)].map((_, i) => {
-                const day = i + 1;
-                const hasDot = day === 25; // green dot
-
+              {currentMonthDays.map((day) => {
+                const dotColor = getHolidayStatus(day);
                 return (
-                  <div key={day} className="text-[11px] font-medium text-slate-800 relative flex flex-col items-center justify-center">
+                  <div key={`curr-${day}`} className="text-[11px] font-medium text-slate-800 relative flex flex-col items-center justify-center">
                     {day}
-                    {hasDot && <div className="absolute -bottom-2 w-1 h-1 rounded-full bg-emerald-500"></div>}
+                    {dotColor && <div className={`absolute -bottom-2 w-1 h-1 rounded-full ${dotColor}`}></div>}
                   </div>
                 );
               })}
             </div>
 
-            <div className="flex items-center justify-between text-[10px] font-medium text-slate-600 border-t border-slate-100 pt-4 mt-auto">
-              <div className="flex items-center gap-1.5 whitespace-nowrap"><div className="w-1.5 h-1.5 rounded-full bg-blue-600 shrink-0"></div> 12 Terjadwal</div>
-              <div className="flex items-center gap-1.5 whitespace-nowrap"><div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></div> 10 Libur Aktif</div>
-              <div className="flex items-center gap-1.5 whitespace-nowrap"><div className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0"></div> 2 Dibatalkan</div>
+            <div className="flex items-center justify-around text-[10px] font-medium text-slate-600 border-t border-slate-100 pt-4 mt-auto px-4">
+              <div className="flex items-center gap-1.5 whitespace-nowrap"><div className="w-1.5 h-1.5 rounded-full bg-purple-500 shrink-0"></div> {stats.active} Terjadwal</div>
+              <div className="flex items-center gap-1.5 whitespace-nowrap"><div className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0"></div> {stats.cancelled} Dibatalkan</div>
             </div>
           </div>
         </div>
@@ -230,17 +302,47 @@ export default function LiburTokoPage() {
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
-              placeholder="Cari toko atau auditor..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Cari toko"
               className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#193f53]/20 focus:border-[#193f53] transition-all placeholder:text-slate-400"
             />
           </div>
           <div className="flex items-center gap-2.5">
-            <button className="flex items-center gap-2 px-3.5 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg text-xs font-semibold hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer">
-              <Filter className="w-3.5 h-3.5" />
-              Filter
-            </button>
+            <div className="relative">
+              <button 
+                onClick={() => setIsFilterOpen(!isFilterOpen)}
+                className={`flex items-center gap-2 px-3.5 py-2 bg-white border ${filterStatus !== "Semua" ? "border-blue-500 text-blue-600" : "border-slate-200 text-slate-700"} rounded-lg text-xs font-semibold hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer`}
+              >
+                <Filter className="w-3.5 h-3.5" />
+                {filterStatus === "Semua" ? "Filter" : filterStatus}
+              </button>
+              
+              {isFilterOpen && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setIsFilterOpen(false)}></div>
+                  <div className="absolute right-0 mt-2 w-40 bg-white rounded-xl shadow-lg border border-slate-100 py-1.5 z-20 overflow-hidden">
+                    {["Semua", "Terjadwal", "Selesai", "Dibatalkan"].map((status) => (
+                      <button
+                        key={status}
+                        onClick={() => {
+                          setFilterStatus(status as any);
+                          setIsFilterOpen(false);
+                        }}
+                        className={`w-full text-left px-4 py-2 text-xs font-medium transition-colors ${filterStatus === status ? "bg-blue-50 text-blue-600" : "text-slate-600 hover:bg-slate-50"}`}
+                      >
+                        {status}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
             <button
-              onClick={() => setIsCreateModalOpen(true)}
+              onClick={() => {
+                setSelectedHolidayToEdit(null);
+                setIsCreatingView(true);
+              }}
               className="flex items-center gap-2 px-4 py-2 bg-[#193f53] hover:bg-[#143343] text-white rounded-lg text-xs font-semibold transition-colors shadow-2xs cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
@@ -263,11 +365,15 @@ export default function LiburTokoPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {holidays.map((row) => {
+              {holidays
+                .filter(row => row.storeName.toLowerCase().includes(searchTerm.toLowerCase()))
+                .filter(row => filterStatus === "Semua" || row.status === filterStatus)
+                .map((row) => {
                 const colors = getStatusColor(row.status);
+                const isSoftDeleted = row.status === "Dibatalkan";
                 return (
                   <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="px-5 py-3.5">
+                    <td className={`px-5 py-3.5 ${isSoftDeleted ? 'opacity-40 grayscale' : ''}`}>
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 shrink-0">
                           <Store className="w-3.5 h-3.5" />
@@ -278,16 +384,16 @@ export default function LiburTokoPage() {
                         </div>
                       </div>
                     </td>
-                    <td className="px-5 py-3.5">
+                    <td className={`px-5 py-3.5 ${isSoftDeleted ? 'opacity-40 grayscale' : ''}`}>
                       <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-white border border-slate-200 text-[11px] text-slate-700 font-bold shadow-2xs">
                         <CalendarIcon className="w-3.5 h-3.5 text-slate-400" />
                         {formatDuration(row.startDate, row.endDate, row.durationDays)}
                       </div>
                     </td>
-                    <td className="px-5 py-3.5">
+                    <td className={`px-5 py-3.5 ${isSoftDeleted ? 'opacity-40 grayscale' : ''}`}>
                       <p className="text-xs text-slate-700 max-w-[160px] leading-relaxed font-medium">{row.reason}</p>
                     </td>
-                    <td className="px-5 py-3.5">
+                    <td className={`px-5 py-3.5 ${isSoftDeleted ? 'opacity-40 grayscale' : ''}`}>
                       <p className="text-[11px] font-bold text-slate-900">{row.createdBy}</p>
                       <p className="text-[10px] text-slate-500 mt-0.5">{row.creatorRole}</p>
                     </td>
@@ -299,15 +405,22 @@ export default function LiburTokoPage() {
                     </td>
                     <td className="px-5 py-3.5 text-right">
                       <ActionButtons
-                        onView={() => { }} // Placeholder
-                        onEdit={() => {
-                          setSelectedHolidayToEdit(row);
-                          setIsEditModalOpen(true);
+                        onView={isSoftDeleted ? undefined : () => {
+                          setSelectedHolidayToView(row);
+                          setIsViewModalOpen(true);
                         }}
-                        onDelete={() => {
+                        onEdit={isSoftDeleted ? undefined : () => {
+                          setSelectedHolidayToEdit(row);
+                          setIsCreatingView(true);
+                        }}
+                        onDelete={isSoftDeleted ? undefined : () => {
                           setDeleteTargetHoliday(row);
                           setIsDeleteModalOpen(true);
                         }}
+                        onRestore={isSoftDeleted ? () => {
+                          setRestoreTargetHoliday(row);
+                          setIsRestoreModalOpen(true);
+                        } : undefined}
                       />
                     </td>
                   </tr>
@@ -333,25 +446,53 @@ export default function LiburTokoPage() {
           </div>
         </div>
       </div>
+        </>
+      )}
 
-      <CreateHolidayModal
-        isOpen={isCreateModalOpen}
-        onClose={() => setIsCreateModalOpen(false)}
-        onSubmit={handleCreateSubmit}
-      />
-
-      <EditHolidayModal
-        isOpen={isEditModalOpen}
-        holiday={selectedHolidayToEdit}
-        onClose={() => setIsEditModalOpen(false)}
-        onSubmit={handleEditSubmit}
-      />
-
-      <DeleteHolidayModal
+      <SoftDeleteModal
         isOpen={isDeleteModalOpen}
         holiday={deleteTargetHoliday}
         onClose={() => setIsDeleteModalOpen(false)}
-        onConfirm={handleConfirmDelete}
+        onConfirm={() => {
+          if (deleteTargetHoliday) {
+            HolidayService.update(deleteTargetHoliday.id, { status: "Dibatalkan" });
+            toast.success(`Libur toko untuk ${deleteTargetHoliday.storeName} berhasil dibatalkan.`);
+            setIsDeleteModalOpen(false);
+            setDeleteTargetHoliday(null);
+            refreshData();
+          }
+        }}
+      />
+
+      <DetailHolidayModal
+        isOpen={isViewModalOpen}
+        holiday={selectedHolidayToView}
+        onClose={() => setIsViewModalOpen(false)}
+        onEdit={() => {
+          setSelectedHolidayToEdit(selectedHolidayToView);
+          setIsCreatingView(true);
+        }}
+      />
+
+      <RestoreHolidayModal
+        isOpen={isRestoreModalOpen}
+        holiday={restoreTargetHoliday}
+        onClose={() => setIsRestoreModalOpen(false)}
+        onConfirm={() => {
+          if (restoreTargetHoliday) {
+            const endDate = new Date(restoreTargetHoliday.endDate);
+            endDate.setHours(23, 59, 59, 999);
+            
+            // Jika tanggal libur sudah lewat, status otomatis Selesai, bukan Terjadwal
+            const newStatus = new Date().getTime() > endDate.getTime() ? "Selesai" : "Terjadwal";
+            
+            HolidayService.update(restoreTargetHoliday.id, { status: newStatus });
+            toast.success(`Libur toko untuk ${restoreTargetHoliday.storeName} berhasil dipulihkan.`);
+            setIsRestoreModalOpen(false);
+            setRestoreTargetHoliday(null);
+            refreshData();
+          }
+        }}
       />
     </DashboardLayout>
   );
