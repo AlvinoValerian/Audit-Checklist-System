@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { ChevronDown, Filter, X, RotateCcw } from "lucide-react";
+import Header from "@/components/layout/Header";
 
 interface MonitoringHeaderProps {
   selectedMonth: string;
