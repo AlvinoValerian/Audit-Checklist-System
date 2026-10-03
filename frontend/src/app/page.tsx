@@ -162,24 +162,24 @@ export default function LandingPage() {
       className="min-h-screen bg-white text-slate-900 font-sans selection:bg-[#26455E] selection:text-white scroll-mt-24"
     >
       {/* =========================================================================
-          1. STICKY NAVBAR
+          1. STICKY LIQUID GLASS NAVBAR (FULL-WIDTH SEAMLESS)
          ========================================================================= */}
-      <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-slate-100 shadow-xs">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+      <header className="sticky top-0 z-50 w-full bg-white/25 backdrop-blur-md border-b border-slate-200/40 shadow-[0_4px_24px_rgba(0,0,0,0.03)] transition-all">
+        <div className="max-w-7xl mx-auto h-20 px-4 sm:px-6 lg:px-8 flex items-center justify-between">
           {/* Brand Logo */}
           <a
             href="#home"
             onClick={(e) => scrollToSection(e, "#home")}
-            className="flex items-center gap-3 cursor-pointer"
+            className="flex items-center gap-3 cursor-pointer group"
           >
-            <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-[#26455E] text-white shadow-sm">
+            <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-[#26455E] text-white shadow-sm group-hover:scale-105 transition-transform duration-200">
               <Monitor className="w-5 h-5 stroke-[2.2]" />
             </div>
             <div className="flex flex-col">
               <span className="text-xl font-bold tracking-tight text-[#26455E] leading-none">
                 StoreAudit
               </span>
-              <span className="text-[10px] text-slate-400 font-medium tracking-wide">
+              <span className="text-[10px] text-slate-400 font-medium tracking-wide mt-0.5">
                 ENTERPRISE SYSTEM
               </span>
             </div>
@@ -190,37 +190,42 @@ export default function LandingPage() {
             <a
               href="#home"
               onClick={(e) => scrollToSection(e, "#home")}
-              className="hover:text-[#26455E] transition-colors"
+              className="relative py-1 hover:text-[#26455E] transition-colors group"
             >
-              Home
+              <span>Home</span>
+              <span className="absolute bottom-0 left-0 w-full h-0.5 bg-[#26455E] scale-x-0 origin-left transition-transform duration-300 ease-out group-hover:scale-x-100 rounded-full" />
             </a>
             <a
               href="#fitur"
               onClick={(e) => scrollToSection(e, "#fitur")}
-              className="hover:text-[#26455E] transition-colors"
+              className="relative py-1 hover:text-[#26455E] transition-colors group"
             >
-              Fitur
+              <span>Fitur</span>
+              <span className="absolute bottom-0 left-0 w-full h-0.5 bg-[#26455E] scale-x-0 origin-left transition-transform duration-300 ease-out group-hover:scale-x-100 rounded-full" />
             </a>
             <a
               href="#alur"
               onClick={(e) => scrollToSection(e, "#alur")}
-              className="hover:text-[#26455E] transition-colors"
+              className="relative py-1 hover:text-[#26455E] transition-colors group"
             >
-              Alur Kerja
+              <span>Alur Kerja</span>
+              <span className="absolute bottom-0 left-0 w-full h-0.5 bg-[#26455E] scale-x-0 origin-left transition-transform duration-300 ease-out group-hover:scale-x-100 rounded-full" />
             </a>
             <a
               href="#keunggulan"
               onClick={(e) => scrollToSection(e, "#keunggulan")}
-              className="hover:text-[#26455E] transition-colors"
+              className="relative py-1 hover:text-[#26455E] transition-colors group"
             >
-              Keunggulan
+              <span>Keunggulan</span>
+              <span className="absolute bottom-0 left-0 w-full h-0.5 bg-[#26455E] scale-x-0 origin-left transition-transform duration-300 ease-out group-hover:scale-x-100 rounded-full" />
             </a>
             <a
               href="#faq"
               onClick={(e) => scrollToSection(e, "#faq")}
-              className="hover:text-[#26455E] transition-colors"
+              className="relative py-1 hover:text-[#26455E] transition-colors group"
             >
-              FAQ
+              <span>FAQ</span>
+              <span className="absolute bottom-0 left-0 w-full h-0.5 bg-[#26455E] scale-x-0 origin-left transition-transform duration-300 ease-out group-hover:scale-x-100 rounded-full" />
             </a>
           </nav>
 
@@ -228,7 +233,7 @@ export default function LandingPage() {
           <div className="flex items-center gap-3">
             <Link
               href="/login"
-              className="px-4 py-2 text-sm font-semibold text-[#26455E] hover:text-[#1a3143] border border-slate-200 hover:border-[#26455E] rounded-lg transition-all"
+              className="px-4 py-2 text-sm font-semibold text-[#26455E] hover:text-[#1a3143] border border-slate-200/60 hover:border-[#26455E] bg-white/20 hover:bg-white/50 backdrop-blur-sm rounded-lg transition-all"
             >
               Masuk
             </Link>
