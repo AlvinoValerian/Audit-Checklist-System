@@ -7,16 +7,14 @@ import {
   Store,
   Check,
   XCircle,
-  Ban,
   Search,
   Filter,
   Plus,
   ChevronLeft,
-  ChevronRight,
   TrendingUp,
 } from "lucide-react";
 import { TokoService } from "@/services/toko.service";
-import { StoreItem, StoreStatus, StoreStats } from "@/types/toko";
+import { StoreItem, StoreStats } from "@/types/toko";
 import { toast } from "sonner";
 import ActionButtons from "@/components/ui/ActionButtons";
 import CreateStoreModal from "./components/CreateStoreModal";
@@ -54,7 +52,6 @@ export default function TokoPage() {
   // Search & Filter State
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState<"Semua" | "Aktif" | "Nonaktif">("Semua");
-  const [filterStatus, setFilterStatus] = useState<"Semua" | StoreStatus>("Semua");
   const [isFilterOpen, setIsFilterOpen] = useState(false);
 
   // Pagination State
@@ -181,7 +178,7 @@ export default function TokoPage() {
           </div>
         </div>
 
-        {/* Card 3: TOKO NONAKTIF / MAINTENANCE */}
+        {/* Card 3: TOKO NONAKTIF */}
         <div className="bg-[#fefdfa] rounded-xl border border-slate-200 p-4 sm:p-5 shadow-2xs flex flex-col justify-between">
           <div className="flex justify-between items-start">
             <h3 className="text-[11px] font-bold text-slate-500 tracking-wider uppercase">
@@ -189,10 +186,6 @@ export default function TokoPage() {
             </h3>
             <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-red-50 text-red-500 flex items-center justify-center shrink-0">
               <XCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              TOKO NONAKTIF / MAINTENANCE
-            </h3>
-            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-red-50 text-red-500 flex items-center justify-center shrink-0">
-              <Ban className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </div>
           </div>
           <div className="mt-3 sm:mt-4">
@@ -247,7 +240,6 @@ export default function TokoPage() {
                   />
                   <div className="absolute right-0 mt-2 w-40 bg-white rounded-xl shadow-lg border border-slate-100 py-1.5 z-20 overflow-hidden">
                     {(["Semua", "Aktif", "Nonaktif"] as const).map((status) => (
-                    {(["Semua", "Aktif", "Nonaktif", "Maintenance"] as const).map((status) => (
                       <button
                         key={status}
                         type="button"
@@ -470,10 +462,6 @@ export default function TokoPage() {
                 className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer text-xs font-medium"
               >
                 Selanjutnya
-                className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
-                title="Halaman Selanjutnya"
-              >
-                <ChevronRight className="w-3.5 h-3.5" />
               </button>
             </div>
           )}
