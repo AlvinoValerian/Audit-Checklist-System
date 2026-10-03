@@ -48,6 +48,11 @@ export default function SoftDeleteModal({
                 <h2 className="text-base font-bold text-slate-900">
                   Konfirmasi Nonaktifkan Toko
                 </h2>
+
+                <span className="px-2 py-0.5 rounded bg-rose-50 text-rose-600 border border-rose-100 text-[9px] font-extrabold uppercase tracking-wider">
+                  SOFT DELETE
+                </span>
+                
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
                 Penonaktifan unit toko dari aktivitas operasional audit.
@@ -81,6 +86,16 @@ export default function SoftDeleteModal({
                 {store.address}
               </span>
             </div>
+
+            {/* Row 3: Status Toko */}
+            <div className="flex justify-between items-center text-xs">
+              <span className="text-slate-500">Status Toko</span>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-600 border border-rose-200">
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
+                Akan Dinonaktifkan
+              </span>
+            </div>
+
           </div>
 
           {/* Warning Banner */}

@@ -1,5 +1,6 @@
 import { StoreItem, StoreStats, StoreStatus } from "@/types/toko";
 
+const TOKO_STORAGE_KEY = "audit_pro_toko_data_v3";
 const TOKO_STORAGE_KEY = "audit_pro_toko_data_v2";
 
 export const defaultStores: StoreItem[] = [
@@ -92,6 +93,7 @@ export const defaultStores: StoreItem[] = [
     operationalHours: "Setiap hari • 09:00 - 21:00 WIB",
     description: "Lokasi persimpangan CBD kota Semarang, terintegrasi jalur transportasi publik.",
     findingsCount: 0,
+    status: "Nonaktif",
     status: "Aktif",
     managerName: "Eko Prasetyo",
     phone: "0812-3456-7894",
@@ -149,6 +151,7 @@ export const defaultStores: StoreItem[] = [
     operationalHours: "Setiap hari • 09:00 - 21:00 WITA",
     description: "Kawasan pusat niaga utama Balikpapan dekat dengan pelabuhan dan perkantoran.",
     findingsCount: 2,
+    status: "Nonaktif",
     status: "Aktif",
     managerName: "Hendra Setiawan",
     phone: "0812-3456-7897",
