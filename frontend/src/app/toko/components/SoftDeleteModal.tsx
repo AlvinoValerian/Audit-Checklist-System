@@ -48,9 +48,11 @@ export default function SoftDeleteModal({
                 <h2 className="text-base font-bold text-slate-900">
                   Konfirmasi Nonaktifkan Toko
                 </h2>
+
                 <span className="px-2 py-0.5 rounded bg-rose-50 text-rose-600 border border-rose-100 text-[9px] font-extrabold uppercase tracking-wider">
                   SOFT DELETE
                 </span>
+                
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
                 Penonaktifan unit toko dari aktivitas operasional audit.
@@ -93,6 +95,7 @@ export default function SoftDeleteModal({
                 Akan Dinonaktifkan
               </span>
             </div>
+
           </div>
 
           {/* Warning Banner */}
