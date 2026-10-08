@@ -54,7 +54,7 @@ export const defaultStaffs: StaffUser[] = [
     storeName: "Cabang PIK",
     storeLocation: "Jakarta Utara",
     position: "Auditor Lapangan",
-    status: "Dinonaktifkan",
+    status: "Nonaktif",
     phone: "0812-3456-7894",
     joinDate: "20 Mei 2023",
   },
@@ -131,7 +131,7 @@ export const defaultStaffs: StaffUser[] = [
     storeName: "Cabang Central Park",
     storeLocation: "Jakarta Barat",
     position: "Auditor Lapangan",
-    status: "Dinonaktifkan",
+    status: "Nonaktif",
     phone: "0812-3456-7801",
     joinDate: "05 Des 2023",
   },
@@ -145,7 +145,10 @@ export const StaffService = {
       if (data) {
         const parsed = JSON.parse(data);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+          return parsed.map((s: StaffUser) => ({
+            ...s,
+            status: (s.status === "Dinonaktifkan" as any) ? "Nonaktif" : s.status,
+          }));
         }
       }
       localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(defaultStaffs));
@@ -189,7 +192,7 @@ export const StaffService = {
     const staff = this.getById(id);
     if (!staff) return null;
     const newStatus: StaffStatus =
-      staff.status === "Aktif" ? "Dinonaktifkan" : "Aktif";
+      staff.status === "Aktif" ? "Nonaktif" : "Aktif";
     return this.update(id, { status: newStatus });
   },
 
@@ -207,7 +210,7 @@ export const StaffService = {
     const list = staffs || this.getAll();
     const total = list.length;
     const active = list.filter((s) => s.status === "Aktif").length;
-    const inactive = list.filter((s) => s.status === "Dinonaktifkan").length;
+    const inactive = list.filter((s) => s.status === "Nonaktif").length;
     const activePercentage = total > 0 ? Math.round((active / total) * 100) : 0;
 
     return {

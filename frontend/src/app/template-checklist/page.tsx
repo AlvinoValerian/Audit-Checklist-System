@@ -69,7 +69,7 @@ export default function TemplateChecklistPage() {
   // Handlers
   const handleConfirmDeactivate = () => {
     if (templateToDeactivate) {
-      TemplateService.update(templateToDeactivate.id, { status: "Dinonaktifkan" });
+      TemplateService.update(templateToDeactivate.id, { status: "Nonaktif" });
       toast.success(`Template "${templateToDeactivate.title}" berhasil dinonaktifkan.`);
       setIsDeactivateModalOpen(false);
       setTemplateToDeactivate(null);
@@ -200,11 +200,11 @@ export default function TemplateChecklistPage() {
           </div>
         </div>
 
-        {/* Card 3: NONAKTIF */}
+        {/* Card 3: TEMPLATE NONAKTIF */}
         <div className="bg-[#fefdfa] rounded-xl border border-slate-200 p-4 sm:p-5 shadow-2xs flex flex-col justify-between">
           <div className="flex justify-between items-start">
             <h3 className="text-[11px] font-bold text-slate-500 tracking-wider uppercase">
-              NONAKTIF
+              TEMPLATE NONAKTIF
             </h3>
             <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-red-50 text-red-500 flex items-center justify-center shrink-0">
               <Ban className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
@@ -264,7 +264,7 @@ export default function TemplateChecklistPage() {
                     onClick={() => setIsFilterOpen(false)}
                   />
                   <div className="absolute right-0 mt-2 w-40 bg-white rounded-xl shadow-lg border border-slate-100 py-1.5 z-20 overflow-hidden">
-                    {(["Semua", "Aktif", "Dinonaktifkan"] as const).map((status) => (
+                    {(["Semua", "Aktif", "Nonaktif"] as const).map((status) => (
                       <button
                         key={status}
                         type="button"
@@ -323,7 +323,7 @@ export default function TemplateChecklistPage() {
                 </tr>
               ) : (
                 paginatedTemplates.map((template) => {
-                  const isDeactivated = template.status === "Dinonaktifkan";
+                  const isDeactivated = template.status === "Nonaktif";
 
                   return (
                     <tr
@@ -362,9 +362,8 @@ export default function TemplateChecklistPage() {
                             Aktif
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-600">
-                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
-                            Dinonaktifkan
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-rose-50 text-rose-600 border border-rose-200">
+                            Nonaktif
                           </span>
                         )}
                       </td>

@@ -1,4 +1,4 @@
-export type TemplateStatus = "Aktif" | "Dinonaktifkan";
+export type TemplateStatus = "Aktif" | "Nonaktif";
 
 export interface ChecklistTask {
   id: string;
