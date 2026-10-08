@@ -75,7 +75,7 @@ export default function StaffPage() {
 
   const handleConfirmDelete = () => {
     if (staffToDelete) {
-      StaffService.update(staffToDelete.id, { status: "Dinonaktifkan" });
+      StaffService.update(staffToDelete.id, { status: "Nonaktif" });
       toast.success(`Staf ${staffToDelete.fullName} dinonaktifkan.`);
       setIsDeleteModalOpen(false);
       setStaffToDelete(null);
@@ -170,11 +170,11 @@ export default function StaffPage() {
           </div>
         </div>
 
-        {/* Card 3: DINONAKTIFKAN / NONAKTIF */}
+        {/* Card 3: STAFF NONAKTIF */}
         <div className="bg-[#fefdfa] rounded-xl border border-slate-200 p-4 sm:p-5 shadow-2xs flex flex-col justify-between">
           <div className="flex justify-between items-start">
             <h3 className="text-[11px] font-bold text-slate-500 tracking-wider uppercase">
-              DINONAKTIFKAN / NONAKTIF
+              STAFF NONAKTIF
             </h3>
             <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-red-50 text-red-500 flex items-center justify-center shrink-0">
               <XCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
@@ -231,7 +231,7 @@ export default function StaffPage() {
                     onClick={() => setIsFilterOpen(false)}
                   />
                   <div className="absolute right-0 mt-2 w-40 bg-white rounded-xl shadow-lg border border-slate-100 py-1.5 z-20 overflow-hidden">
-                    {(["Semua", "Aktif", "Dinonaktifkan"] as const).map((status) => (
+                    {(["Semua", "Aktif", "Nonaktif"] as const).map((status) => (
                       <button
                         key={status}
                         type="button"
@@ -291,7 +291,7 @@ export default function StaffPage() {
                 </tr>
               ) : (
                 paginatedStaffs.map((staff) => {
-                  const isSoftDeleted = staff.status === "Dinonaktifkan";
+                  const isSoftDeleted = staff.status === "Nonaktif";
                   return (
                     <tr
                       key={staff.id}
@@ -334,7 +334,7 @@ export default function StaffPage() {
                           </span>
                         ) : (
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-600 border border-rose-200">
-                            Dinonaktifkan
+                            Nonaktif
                           </span>
                         )}
                       </td>

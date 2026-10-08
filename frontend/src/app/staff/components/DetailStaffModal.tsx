@@ -153,7 +153,7 @@ export default function DetailStaffModal({
                 ) : (
                   <>
                     <XCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                    <span>Dinonaktifkan (Tidak ditugaskan jadwal audit)</span>
+                    <span>Nonaktif (Tidak ditugaskan jadwal audit)</span>
                   </>
                 )}
               </div>

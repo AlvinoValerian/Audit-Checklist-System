@@ -1,4 +1,4 @@
-export type StaffStatus = "Aktif" | "Dinonaktifkan";
+export type StaffStatus = "Aktif" | "Nonaktif";
 
 export interface StaffUser {
   id: string;
