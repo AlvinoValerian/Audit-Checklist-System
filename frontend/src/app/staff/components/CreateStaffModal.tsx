@@ -90,7 +90,7 @@ export default function CreateStaffModal({
       ? matchedStore.location
       : staffToEdit?.storeLocation || "Jakarta";
 
-    const status: StaffStatus = isActive ? "Aktif" : "Dinonaktifkan";
+    const status: StaffStatus = isActive ? "Aktif" : "Nonaktif";
 
     onSubmit({
       fullName: fullName.trim(),

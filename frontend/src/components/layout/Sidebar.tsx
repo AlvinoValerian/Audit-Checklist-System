@@ -164,7 +164,13 @@ export default function Sidebar() {
                       />
                       <span className="truncate">{item.name}</span>
                       {item.badge && (
-                        <span className="ml-auto text-[9px] font-bold text-slate-400 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded tracking-wider">
+                        <span
+                          className={`ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded tracking-wider ${
+                            isActive
+                              ? "bg-[#102d3c] text-white"
+                              : "text-slate-400 bg-slate-100 border border-slate-200"
+                          }`}
+                        >
                           {item.badge}
                         </span>
                       )}
@@ -262,7 +268,13 @@ export default function Sidebar() {
                     />
                     <span className="truncate">{item.name}</span>
                     {item.badge && (
-                      <span className="ml-auto text-[9px] font-bold text-slate-400 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded tracking-wider">
+                      <span
+                        className={`ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded tracking-wider ${
+                          isActive
+                            ? "bg-[#102d3c] text-white"
+                            : "text-slate-400 bg-slate-100 border border-slate-200"
+                        }`}
+                      >
                         {item.badge}
                       </span>
                     )}

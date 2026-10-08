@@ -82,7 +82,7 @@ export const defaultTemplates: TemplateItem[] = [
     archivedDate: "15 Sep 2024",
     createdBy: "Hendra Wijaya",
     creatorRole: "Admin Utama",
-    status: "Dinonaktifkan",
+    status: "Nonaktif",
     itemsCount: 14,
     items: [
       { id: "chk-15", question: "Apakah susunan karton barang gudang tidak melebihi batas tumpukan maksimal?", category: "Gudang", required: true },
@@ -195,7 +195,7 @@ export const defaultTemplates: TemplateItem[] = [
     archivedDate: "01 Agu 2024",
     createdBy: "Ahmad Fauzi",
     creatorRole: "Super Admin",
-    status: "Dinonaktifkan",
+    status: "Nonaktif",
     itemsCount: 6,
     items: [
       { id: "chk-29", question: "Apakah stiker QRIS terverifikasi resmi tanpa tanda-tanda penempelan stiker palsu?", category: "Keamanan Pembayaran", required: true },
@@ -212,7 +212,10 @@ export const TemplateService = {
       if (data) {
         const parsed = JSON.parse(data);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+          return parsed.map((t: TemplateItem) => ({
+            ...t,
+            status: (t.status as string) === "Dinonaktifkan" ? "Nonaktif" : t.status,
+          }));
         }
       }
       localStorage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(defaultTemplates));
@@ -261,7 +264,7 @@ export const TemplateService = {
       lastRevision: data.lastRevision || new Date().toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" }),
     };
 
-    if (data.status === "Dinonaktifkan" && !updatedTemplate.archivedDate) {
+    if (data.status === "Nonaktif" && !updatedTemplate.archivedDate) {
       updatedTemplate.archivedDate = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
     } else if (data.status === "Aktif") {
       updatedTemplate.archivedDate = undefined;
@@ -288,7 +291,7 @@ export const TemplateService = {
     const list = templates || this.getAll();
     const total = list.length;
     const active = list.filter((t) => t.status === "Aktif").length;
-    const inactive = list.filter((t) => t.status === "Dinonaktifkan").length;
+    const inactive = list.filter((t) => t.status === "Nonaktif").length;
     const activePercentage = total > 0 ? Math.round((active / total) * 100) : 0;
 
     return {
