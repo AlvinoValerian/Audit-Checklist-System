@@ -11,6 +11,7 @@ import {
   Check,
   FileText,
   HelpCircle,
+  Square,
 } from "lucide-react";
 import { AIService, QUICK_PROMPT_SUGGESTIONS } from "@/services/ai.service";
 import { ChatMessage } from "@/types/ai";
@@ -25,10 +26,6 @@ export default function TanyaAIPage() {
 
   type RenderStage = "input-only" | "chat-entering" | "ready";
 
-  // Staged rendering state like ChatGPT:
-  // 1. Field ketikan mounts & renders immediately (input-only, chat kosongan)
-  // 2. Chat messages column streams in with smooth transition (chat-entering)
-  // 3. Smoothly scrolls down to latest message and activates input (ready)
   const [renderStage, setRenderStage] = useState<RenderStage>("input-only");
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -36,102 +33,53 @@ export default function TanyaAIPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isMountedRef = useRef(true);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Scroll sampai paling bawah ke kolom ketikan dan seluruh percakapan
+  // Scroll HANYA untuk container internal pesan obrolan (tidak menggulung halaman luar)
   const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
-    // 1. Scroll pesan dalam container internal
-    if (scrollContainerRef.current) {
+    if (scrollContainerRef.current && messages.length > 0) {
       scrollContainerRef.current.scrollTo({
         top: scrollContainerRef.current.scrollHeight,
         behavior,
       });
     }
-
-    // 2. Scroll anchor pesan terakhir
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({
-        behavior,
-        block: "end",
-      });
-    }
-
-    // 3. Scroll halaman sampai ke kolom ketikan di bawah
-    if (inputContainerRef.current) {
-      inputContainerRef.current.scrollIntoView({
-        behavior,
-        block: "end",
-        inline: "nearest",
-      });
-    }
-
-    // 4. Pastikan container <main> (DashboardLayout) juga ter-scroll ke bawah
-    try {
-      const mainEl = document.querySelector("main");
-      if (mainEl) {
-        mainEl.scrollTo({
-          top: mainEl.scrollHeight,
-          behavior,
-        });
-      }
-    } catch {
-      // Fallback safe
-    }
   };
 
   useEffect(() => {
     isMountedRef.current = true;
-
-    // Tahap 1 (Saat awal-awal): Default kosongan (tidak ada datanya), hanya field ketikan yang siap
-    // Tahap 2: Kolom chat muncul bertahap beserta datanya dengan transisi halus
-    const stageTimer = setTimeout(() => {
-      if (isMountedRef.current) {
-        setMessages(AIService.getInitialMessages());
-        setRenderStage("chat-entering");
-
-        // Tahap 3: Scroll sampai bawah ke kolom ketikan secara bertahap dan halus
-        const scrollTimer1 = setTimeout(() => {
-          if (isMountedRef.current) {
-            scrollToBottom("smooth");
-          }
-        }, 150);
-
-        const scrollTimer2 = setTimeout(() => {
-          if (isMountedRef.current) {
-            scrollToBottom("smooth");
-          }
-        }, 350);
-
-        // Tahap 4: Status ready & aman fokus ke textarea
-        const readyTimer = setTimeout(() => {
-          if (isMountedRef.current) {
-            scrollToBottom("smooth");
-            setRenderStage("ready");
-            textareaRef.current?.focus({ preventScroll: true });
-          }
-        }, 600);
-
-        return () => {
-          clearTimeout(scrollTimer1);
-          clearTimeout(scrollTimer2);
-          clearTimeout(readyTimer);
-        };
-      }
-    }, 350);
-
+    setRenderStage("ready");
     return () => {
       isMountedRef.current = false;
-      clearTimeout(stageTimer);
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
     };
   }, []);
 
-  // Auto scroll when messages change or while generating
+  // Auto scroll hanya berjalan saat ada percakapan aktif
   useEffect(() => {
-    if (renderStage === "input-only") return;
-    const timer = setTimeout(() => {
-      scrollToBottom("smooth");
-    }, 60);
-    return () => clearTimeout(timer);
-  }, [messages.length, isGenerating, renderStage]);
+    if (messages.length > 0) {
+      const timer = setTimeout(() => {
+        scrollToBottom("smooth");
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [messages.length, isGenerating]);
+
+  // Handle Stop AI generation
+  const handleStop = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsGenerating(false);
+    toast.info("Respon AI berhasil dihentikan.");
+    setTimeout(() => {
+      if (isMountedRef.current) {
+        textareaRef.current?.focus({ preventScroll: true });
+      }
+    }, 100);
+  };
 
   // Handle Send message
   const handleSend = async (customPrompt?: string) => {
@@ -155,21 +103,29 @@ export default function TanyaAIPage() {
     setInputPrompt("");
     setIsGenerating(true);
 
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
-      await new Promise((res) => setTimeout(res, 900));
-      if (!isMountedRef.current) return;
-      const aiResponse = await AIService.generateResponse(promptToSend);
-      if (!isMountedRef.current) return;
+      const aiResponse = await AIService.generateResponse(promptToSend, controller.signal);
+      if (!isMountedRef.current || controller.signal.aborted) return;
       setMessages((prev) => [...prev, aiResponse]);
-    } catch {
+    } catch (err: any) {
+      if (err?.name === "AbortError" || controller.signal.aborted) {
+        // Pengguna sengaja menekan tombol berhenti
+        return;
+      }
       if (!isMountedRef.current) return;
       toast.error("Gagal memproses pesan AI. Silakan coba lagi.");
     } finally {
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
       if (isMountedRef.current) {
         setIsGenerating(false);
         setTimeout(() => {
           if (isMountedRef.current) {
-            textareaRef.current?.focus();
+            textareaRef.current?.focus({ preventScroll: true });
           }
         }, 100);
       }
@@ -186,23 +142,15 @@ export default function TanyaAIPage() {
     }, 2000);
   };
 
-  // Reset conversation to initial state with staged transition
+  // Reset conversation to initial state
   const handleResetSession = () => {
-    setRenderStage("input-only");
     setMessages([]);
     setInputPrompt("");
     toast.info("Sesi tanya jawab AI telah diatur ulang.");
-    setTimeout(() => {
-      if (isMountedRef.current) {
-        setRenderStage("chat-entering");
-        setTimeout(() => {
-          if (isMountedRef.current) {
-            setRenderStage("ready");
-            textareaRef.current?.focus();
-          }
-        }, 350);
-      }
-    }, 200);
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTo({ top: 0, behavior: "smooth" });
+    }
+    textareaRef.current?.focus({ preventScroll: true });
   };
 
   // Copy entire conversation history
@@ -222,20 +170,10 @@ export default function TanyaAIPage() {
   };
 
   return (
-    <DashboardLayout>
-      <div className="space-y-3 max-w-3xl mx-auto pb-6">
-        {/* Page Header */}
-        <div>
-          <h2 className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight">
-            Tanya AI (Audit Pro Assistant)
-          </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Asisten kecerdasan buatan untuk analisis temuan audit toko
-          </p>
-        </div>
-
+    <DashboardLayout contentClassName="flex-1 overflow-hidden px-3.5 pt-2 pb-3 sm:px-6 sm:pt-2.5 sm:pb-3.5 w-full mx-auto max-w-7xl flex flex-col min-h-0">
+      <div className="max-w-3xl mx-auto w-full flex-1 min-h-0 flex flex-col">
         {/* Main Card Canvas */}
-        <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden flex flex-col h-[560px]">
+        <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden flex flex-col flex-1 min-h-0">
           {/* Card Header Bar */}
           <div className="px-4 py-2.5 border-b border-slate-100 bg-white flex flex-wrap items-center justify-between gap-2 shrink-0">
             <div className="flex items-center gap-2 text-xs font-semibold text-slate-700">
@@ -251,7 +189,7 @@ export default function TanyaAIPage() {
               <button
                 type="button"
                 onClick={handleCopyEntireHistory}
-                disabled={messages.length === 0}
+                disabled={messages.length === 0 || isGenerating}
                 className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 text-[11px] font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                 title="Salin seluruh riwayat obrolan"
               >
@@ -262,10 +200,11 @@ export default function TanyaAIPage() {
               <button
                 type="button"
                 onClick={handleResetSession}
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 text-[11px] font-medium transition-colors cursor-pointer"
-                title="Reset sesi percakapan"
+                disabled={isGenerating}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 text-[11px] font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                title={isGenerating ? "Menunggu respon AI selesai..." : "Reset sesi percakapan"}
               >
-                <RotateCcw className="w-3 h-3 text-slate-400" />
+                <RotateCcw className={`w-3 h-3 text-slate-400 ${isGenerating ? "animate-spin" : ""}`} />
                 <span>Reset Sesi</span>
               </button>
             </div>
@@ -294,11 +233,10 @@ export default function TanyaAIPage() {
               className="p-3.5 sm:p-4 flex-1 space-y-4 overflow-y-auto flex flex-col"
             >
               <div
-                className={`space-y-4 flex-1 flex flex-col transition-all duration-500 ease-out ${
-                  renderStage !== "input-only"
-                    ? "opacity-100 translate-y-0"
-                    : "opacity-0 translate-y-3 pointer-events-none"
-                }`}
+                className={`space-y-4 flex-1 flex flex-col transition-all duration-500 ease-out ${renderStage !== "input-only"
+                  ? "opacity-100 translate-y-0"
+                  : "opacity-0 translate-y-3 pointer-events-none"
+                  }`}
               >
                 {/* Security Banner */}
                 <div className="flex items-center justify-center pt-0.5 pb-1 shrink-0">
@@ -348,9 +286,8 @@ export default function TanyaAIPage() {
                   messages.map((msg) => (
                     <div
                       key={msg.id}
-                      className={`flex flex-col transition-all duration-500 ease-out ${
-                        msg.sender === "user" ? "items-end" : "items-start"
-                      }`}
+                      className={`flex flex-col transition-all duration-500 ease-out ${msg.sender === "user" ? "items-end" : "items-start"
+                        }`}
                     >
                       {msg.sender === "user" ? (
                         /* User Message Bubble */
@@ -510,25 +447,41 @@ export default function TanyaAIPage() {
                   }
                 }}
                 disabled={isGenerating}
-                placeholder="Tanyakan apa saja seputar audit atau kepatuhan..."
+                placeholder={isGenerating ? "Menunggu respon AI selesai..." : "Tanyakan apa saja seputar audit atau kepatuhan..."}
                 rows={1}
                 className="w-full bg-transparent resize-none text-xs text-slate-800 focus:outline-none placeholder:text-slate-400 disabled:opacity-50"
               />
 
               <div className="flex items-center justify-between gap-2 pt-1.5 mt-1 border-t border-slate-100">
                 <span className="text-[10.5px] text-slate-400 font-medium hidden sm:inline">
-                  Tekan <kbd className="px-1 py-0.2 bg-slate-100 rounded text-[9.5px] border border-slate-200 font-mono">Enter ↵</kbd> untuk kirim
+                  {!isGenerating && (
+                    <>
+                      Tekan <kbd className="px-1 py-0.2 bg-slate-100 rounded text-[9.5px] border border-slate-200 font-mono">Enter ↵</kbd> untuk kirim
+                    </>
+                  )}
                 </span>
 
-                <button
-                  type="button"
-                  onClick={() => handleSend()}
-                  disabled={!inputPrompt.trim() || isGenerating}
-                  className="ml-auto flex items-center gap-1.5 px-3 py-1.5 bg-[#193f53] hover:bg-[#143343] text-white rounded-md text-xs font-semibold shadow-2xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <span>Kirim Pesan</span>
-                  <Send className="w-3 h-3" />
-                </button>
+                {isGenerating ? (
+                  <button
+                    type="button"
+                    onClick={handleStop}
+                    className="ml-auto flex items-center justify-center w-7 h-7 sm:w-8 sm:h-8 bg-[#193f53] hover:bg-[#143343] active:bg-[#0f2632] text-white rounded-md shadow-2xs transition-colors cursor-pointer"
+                    title="Hentikan respon AI"
+                    aria-label="Berhenti"
+                  >
+                    <Square className="w-3.5 h-3.5 fill-current" />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleSend()}
+                    disabled={!inputPrompt.trim()}
+                    className="ml-auto flex items-center gap-1.5 px-3 py-1.5 bg-[#193f53] hover:bg-[#143343] text-white rounded-md text-xs font-semibold shadow-2xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <span>Kirim Pesan</span>
+                    <Send className="w-3 h-3" />
+                  </button>
+                )}
               </div>
             </div>
 
