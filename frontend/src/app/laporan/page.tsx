@@ -275,12 +275,24 @@ export default function LaporanPage() {
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-xs text-slate-500 font-medium">Filter Aktif:</span>
                   {selectedStatus !== "Semua Status" && (
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-50 border border-rose-200 text-rose-600">
-                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                    <span
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold ${
+                        selectedStatus === "Sesuai"
+                          ? "bg-emerald-50 border border-emerald-200 text-emerald-700"
+                          : "bg-rose-50 border border-rose-200 text-rose-600"
+                      }`}
+                    >
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full ${
+                          selectedStatus === "Sesuai" ? "bg-emerald-500" : "bg-rose-500"
+                        }`}
+                      />
                       Status: {selectedStatus === "Masalah" ? "Ada Masalah" : "Sesuai"}
                       <button
                         onClick={() => setSelectedStatus("Semua Status")}
-                        className="hover:text-rose-800 ml-0.5 cursor-pointer"
+                        className={`ml-0.5 cursor-pointer ${
+                          selectedStatus === "Sesuai" ? "hover:text-emerald-900" : "hover:text-rose-800"
+                        }`}
                       >
                         <X className="w-3 h-3" />
                       </button>
