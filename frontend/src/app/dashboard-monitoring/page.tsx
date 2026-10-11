@@ -2,7 +2,10 @@
 
 import React, { useState } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
-import MonitoringHeader from "./components/MonitoringHeader";
+import MonitoringHeader, {
+  getCurrentMonthDateRange,
+  getDynamicMonthOptions,
+} from "./components/MonitoringHeader";
 import MetricCards, { MetricStats } from "./components/MetricCards";
 import AuditStatusDonutChart from "./components/AuditStatusDonutChart";
 import AuditTrendLineChart from "./components/AuditTrendLineChart";
@@ -10,9 +13,14 @@ import StorePerformanceRanking from "./components/StorePerformanceRanking";
 import FindingsAnalysis from "./components/FindingsAnalysis";
 
 export default function DashboardMonitoringPage() {
-  const [selectedMonth, setSelectedMonth] = useState("Bulan Ini (Okt 2023)");
+  const dynamicMonthOptions = getDynamicMonthOptions();
+  const initialDateRange = getCurrentMonthDateRange();
+
+  const [selectedMonth, setSelectedMonth] = useState(dynamicMonthOptions[0]);
   const [selectedStore, setSelectedStore] = useState("Semua Toko (10)");
   const [selectedStatus, setSelectedStatus] = useState("Status Audit");
+  const [startDate, setStartDate] = useState(initialDateRange.startDate);
+  const [endDate, setEndDate] = useState(initialDateRange.endDate);
 
   // Dynamic metrics state matching the screenshot
   const [metrics] = useState<MetricStats>({
@@ -34,6 +42,10 @@ export default function DashboardMonitoringPage() {
         onStoreChange={setSelectedStore}
         selectedStatus={selectedStatus}
         onStatusChange={setSelectedStatus}
+        startDate={startDate}
+        onStartDateChange={setStartDate}
+        endDate={endDate}
+        onEndDateChange={setEndDate}
       />
 
       {/* 2. Top Summary Metric Cards Row (6 Cards) */}

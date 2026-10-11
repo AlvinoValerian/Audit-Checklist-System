@@ -214,7 +214,7 @@ export const TemplateService = {
         if (Array.isArray(parsed) && parsed.length > 0) {
           return parsed.map((t: TemplateItem) => ({
             ...t,
-            status: (t.status === "Dinonaktifkan" as any) ? "Nonaktif" : t.status,
+            status: (t.status as string) === "Dinonaktifkan" ? "Nonaktif" : t.status,
           }));
         }
       }
