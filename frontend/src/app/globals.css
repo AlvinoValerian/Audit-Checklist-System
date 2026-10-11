@@ -29,3 +29,22 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+@keyframes schedule-detail-enter {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.schedule-detail-enter {
+  animation: schedule-detail-enter 250ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .schedule-detail-enter {
+    animation: none;
+  }
+}
