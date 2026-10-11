@@ -108,19 +108,26 @@ export default function TopBar({
 
           <div className="w-px h-5 bg-slate-200 mx-1"></div>
 
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-full bg-[#e0e7ff] text-[#1d4ed8] flex items-center justify-center font-bold text-xs shrink-0 border border-[#c7d2fe]">
+          {/* Profile Trigger Button */}
+          <button
+            type="button"
+            onClick={() => setIsProfileModalOpen(true)}
+            className="flex items-center gap-2.5 p-1 -m-1 rounded-xl hover:bg-slate-100/80 transition-colors cursor-pointer group text-left focus:outline-none focus:ring-2 focus:ring-[#193f53]/20"
+            title="Lihat Profil Pengguna"
+            aria-label="Lihat Profil Pengguna"
+          >
+            <div className="w-8 h-8 rounded-full bg-[#e0e7ff] text-[#1d4ed8] group-hover:bg-[#dbeafe] flex items-center justify-center font-bold text-xs shrink-0 border border-[#c7d2fe] transition-colors shadow-2xs">
               AD
             </div>
             <div className="text-left">
-              <p className="text-xs font-bold text-slate-900 leading-tight">
+              <p className="text-xs font-bold text-slate-900 group-hover:text-[#193f53] leading-tight transition-colors">
                 {adminName}
               </p>
-              <p className="text-[10px] text-slate-400 font-normal mt-0.5">
+              <p className="text-[10px] text-slate-400 group-hover:text-slate-500 font-normal mt-0.5 transition-colors">
                 {adminRole}
               </p>
             </div>
-          </div>
+          </button>
         </div>
       </div>
 

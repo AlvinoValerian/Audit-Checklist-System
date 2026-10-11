@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { X, User, Mail, Shield, Building2, CheckCircle2, Clock, Calendar } from "lucide-react";
+import { X, User, Mail, Shield, Building2, CheckCircle2 } from "lucide-react";
 
 interface ProfileModalProps {
   isOpen: boolean;
