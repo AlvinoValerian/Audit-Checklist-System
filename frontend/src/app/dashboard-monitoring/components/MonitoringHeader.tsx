@@ -1,8 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
-import { ChevronDown, Filter, X, RotateCcw } from "lucide-react";
-import Header from "@/components/layout/Header";
+import React, { useState, useEffect, useMemo } from "react";
+import { ChevronDown } from "lucide-react";
 
 interface MonitoringHeaderProps {
   selectedMonth: string;
@@ -11,6 +10,54 @@ interface MonitoringHeaderProps {
   onStoreChange: (store: string) => void;
   selectedStatus: string;
   onStatusChange: (status: string) => void;
+  startDate?: string;
+  onStartDateChange?: (date: string) => void;
+  endDate?: string;
+  onEndDateChange?: (date: string) => void;
+}
+
+const MONTH_NAMES_SHORT = [
+  "Jan", "Feb", "Mar", "Apr", "Mei", "Jun",
+  "Jul", "Agu", "Sep", "Okt", "Nov", "Des"
+];
+
+const MONTH_NAMES_FULL = [
+  "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+  "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+];
+
+// Helper to calculate first and last day of current month dynamically
+export function getCurrentMonthDateRange() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const startDate = `${year}-${String(month + 1).padStart(2, "0")}-01`;
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  const endDate = `${year}-${String(month + 1).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+  return { startDate, endDate };
+}
+
+// Generate dynamic month options relative to the current real-time date
+export function getDynamicMonthOptions() {
+  const now = new Date();
+  const options: string[] = [];
+
+  for (let i = 0; i < 6; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const mShort = MONTH_NAMES_SHORT[d.getMonth()];
+    const year = d.getFullYear();
+
+    if (i === 0) {
+      options.push(`Bulan Ini (${mShort} ${year})`);
+    } else if (i === 1) {
+      options.push(`Bulan Lalu (${mShort} ${year})`);
+    } else {
+      const mFull = MONTH_NAMES_FULL[d.getMonth()];
+      options.push(`${mFull} ${year}`);
+    }
+  }
+
+  return options;
 }
 
 export default function MonitoringHeader({
@@ -20,18 +67,29 @@ export default function MonitoringHeader({
   onStoreChange,
   selectedStatus,
   onStatusChange,
+  startDate,
+  onStartDateChange,
+  endDate,
+  onEndDateChange,
 }: MonitoringHeaderProps) {
-  const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
-  const [auditorFilter, setAuditorFilter] = useState("Semua Auditor");
-  const [categoryFilter, setCategoryFilter] = useState("Semua Kategori");
+  const initialRange = useMemo(() => getCurrentMonthDateRange(), []);
 
-  const monthOptions = [
-    "Bulan Ini (Okt 2023)",
-    "Bulan Lalu (Sep 2023)",
-    "Agustus 2023",
-    "Juli 2023",
-    "Semester 2 2023",
-  ];
+  const [internalStartDate, setInternalStartDate] = useState(
+    startDate || initialRange.startDate
+  );
+  const [internalEndDate, setInternalEndDate] = useState(
+    endDate || initialRange.endDate
+  );
+
+  const monthOptions = useMemo(() => getDynamicMonthOptions(), []);
+
+  useEffect(() => {
+    if (startDate) setInternalStartDate(startDate);
+  }, [startDate]);
+
+  useEffect(() => {
+    if (endDate) setInternalEndDate(endDate);
+  }, [endDate]);
 
   const storeOptions = [
     "Semua Toko (10)",
@@ -55,13 +113,35 @@ export default function MonitoringHeader({
     "Terlambat",
   ];
 
-  const handleResetFilters = () => {
-    onMonthChange("Bulan Ini (Okt 2023)");
-    onStoreChange("Semua Toko (10)");
-    onStatusChange("Status Audit");
-    setAuditorFilter("Semua Auditor");
-    setCategoryFilter("Semua Kategori");
-    setIsFilterModalOpen(false);
+  const handleStartChange = (val: string) => {
+    setInternalStartDate(val);
+    onStartDateChange?.(val);
+  };
+
+  const handleEndChange = (val: string) => {
+    setInternalEndDate(val);
+    onEndDateChange?.(val);
+  };
+
+  const handleMonthSelect = (mText: string) => {
+    onMonthChange(mText);
+
+    // Automatically synchronize date inputs with the selected month
+    const now = new Date();
+    const idx = monthOptions.indexOf(mText);
+    if (idx !== -1) {
+      const targetDate = new Date(now.getFullYear(), now.getMonth() - idx, 1);
+      const year = targetDate.getFullYear();
+      const month = targetDate.getMonth();
+      const sDate = `${year}-${String(month + 1).padStart(2, "0")}-01`;
+      const lastDay = new Date(year, month + 1, 0).getDate();
+      const eDate = `${year}-${String(month + 1).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+      
+      setInternalStartDate(sDate);
+      setInternalEndDate(eDate);
+      onStartDateChange?.(sDate);
+      onEndDateChange?.(eDate);
+    }
   };
 
   return (
@@ -78,11 +158,11 @@ export default function MonitoringHeader({
 
       {/* Filter Controls Toolbar */}
       <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
-        {/* Dropdown 1: Bulan */}
+        {/* Dropdown 1: Bulan (Dinamis Sesuai Waktu Sekarang) */}
         <div className="relative">
           <select
             value={selectedMonth}
-            onChange={(e) => onMonthChange(e.target.value)}
+            onChange={(e) => handleMonthSelect(e.target.value)}
             className="appearance-none bg-white border border-slate-200 text-slate-700 text-xs sm:text-sm font-medium rounded-lg px-3.5 py-2 pr-8 shadow-2xs hover:border-slate-300 focus:border-[#193f53] outline-none cursor-pointer transition-colors"
           >
             {monthOptions.map((m) => (
@@ -126,108 +206,22 @@ export default function MonitoringHeader({
           <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
         </div>
 
-        {/* Button 4: Filter Lainnya */}
-        <button
-          onClick={() => setIsFilterModalOpen(true)}
-          className="flex items-center gap-1.5 px-3.5 py-2 bg-[#193f53] hover:bg-[#143343] text-white text-xs sm:text-sm font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
-        >
-          <Filter className="w-3.5 h-3.5" />
-          <span>Filter</span>
-        </button>
-      </div>
-
-      {/* Filter Lainnya Modal / Drawer */}
-      {isFilterModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
-          <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md p-5 space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-2">
-                <Filter className="w-4 h-4 text-[#193f53]" />
-                <h3 className="font-bold text-slate-900 text-sm sm:text-base">
-                  Filter Tambahan Monitoring
-                </h3>
-              </div>
-              <button
-                onClick={() => setIsFilterModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-md cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="space-y-3.5 text-xs sm:text-sm">
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Kategori Toko
-                </label>
-                <select
-                  value={categoryFilter}
-                  onChange={(e) => setCategoryFilter(e.target.value)}
-                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-800 outline-none focus:border-[#193f53]"
-                >
-                  <option value="Semua Kategori">Semua Kategori</option>
-                  <option value="Supermarket">Supermarket</option>
-                  <option value="Minimarket">Minimarket</option>
-                  <option value="Express Outlet">Express Outlet</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Auditor Penanggung Jawab
-                </label>
-                <select
-                  value={auditorFilter}
-                  onChange={(e) => setAuditorFilter(e.target.value)}
-                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-800 outline-none focus:border-[#193f53]"
-                >
-                  <option value="Semua Auditor">Semua Auditor</option>
-                  <option value="Rian Hidayat">Rian Hidayat</option>
-                  <option value="Siti Rahmawati">Siti Rahmawati</option>
-                  <option value="Budi Santoso">Budi Santoso</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Rentang Tanggal Khusus
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <input
-                    type="date"
-                    className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 outline-none"
-                    defaultValue="2023-10-01"
-                  />
-                  <input
-                    type="date"
-                    className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 outline-none"
-                    defaultValue="2023-10-31"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between pt-3 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={handleResetFilters}
-                className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 cursor-pointer"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Reset Filter</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setIsFilterModalOpen(false)}
-                className="px-4 py-2 bg-[#193f53] hover:bg-[#143343] text-white text-xs sm:text-sm font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
-              >
-                Terapkan Filter
-              </button>
-            </div>
-          </div>
+        {/* Rentang Tanggal Khusus (Direct Inline, No Modal Popup) */}
+        <div className="flex items-center gap-2">
+          <input
+            type="date"
+            value={internalStartDate}
+            onChange={(e) => handleStartChange(e.target.value)}
+            className="bg-white border border-slate-200 text-slate-700 text-xs sm:text-sm font-medium rounded-lg px-3 py-1.5 shadow-2xs hover:border-slate-300 focus:border-[#193f53] outline-none cursor-pointer transition-colors"
+          />
+          <input
+            type="date"
+            value={internalEndDate}
+            onChange={(e) => handleEndChange(e.target.value)}
+            className="bg-white border border-slate-200 text-slate-700 text-xs sm:text-sm font-medium rounded-lg px-3 py-1.5 shadow-2xs hover:border-slate-300 focus:border-[#193f53] outline-none cursor-pointer transition-colors"
+          />
         </div>
-      )}
+      </div>
     </div>
   );
 }

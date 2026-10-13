@@ -1,6 +1,23 @@
 import { AuditSchedule, ScheduleStats } from "@/types/schedule";
 
-const SCHEDULE_STORAGE_KEY = "audit_pro_jadwal_audit_v1";
+const SCHEDULE_STORAGE_KEY = "audit_pro_jadwal_audit_v2";
+
+// Helper to calculate dynamic dates relative to current month & year
+const getDynamicDate = (day: number) => {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(day).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+};
+
+const getDynamicCreated = (day: number) => {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(Math.max(1, day - 3)).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+};
 
 export const defaultSchedules: AuditSchedule[] = [
   {
@@ -12,11 +29,11 @@ export const defaultSchedules: AuditSchedule[] = [
     timeRange: "09:00 - 12:00",
     startTime: "09:00",
     endTime: "12:00",
-    date: "2023-09-04",
+    date: getDynamicDate(4),
     recurrence: "Setiap Hari",
     status: "Terjadwal",
     notes: "Pemeriksaan operasional rutin pembukaan gerai.",
-    createdAt: "2023-09-01",
+    createdAt: getDynamicCreated(4),
   },
   {
     id: "sch-2",
@@ -27,12 +44,12 @@ export const defaultSchedules: AuditSchedule[] = [
     timeRange: "13:00 - 15:30",
     startTime: "13:00",
     endTime: "15:30",
-    date: "2023-09-04",
+    date: getDynamicDate(4),
     recurrence: "Hari Tertentu",
     selectedDays: ["Senin", "Rabu", "Jumat"],
     status: "Terjadwal",
     notes: "Pemeriksaan planogram mingguan dan promo katalog aktif.",
-    createdAt: "2023-09-01",
+    createdAt: getDynamicCreated(4),
   },
   {
     id: "sch-3",
@@ -43,11 +60,11 @@ export const defaultSchedules: AuditSchedule[] = [
     timeRange: "08:00 - 10:00",
     startTime: "08:00",
     endTime: "10:00",
-    date: "2023-09-04",
+    date: getDynamicDate(4),
     recurrence: "Setiap Hari",
     status: "Selesai",
     notes: "Inspeksi kebersihan area makan dan toilet staf.",
-    createdAt: "2023-09-01",
+    createdAt: getDynamicCreated(4),
   },
   {
     id: "sch-4",
@@ -58,12 +75,12 @@ export const defaultSchedules: AuditSchedule[] = [
     timeRange: "10:00 - 12:30",
     startTime: "10:00",
     endTime: "12:30",
-    date: "2023-09-05",
+    date: getDynamicDate(5),
     recurrence: "Hari Tertentu",
     selectedDays: ["Selasa", "Kamis"],
     status: "Terjadwal",
     notes: "Stock opname parsial kategori susu dan daging beku.",
-    createdAt: "2023-09-02",
+    createdAt: getDynamicCreated(5),
   },
   {
     id: "sch-5",
@@ -74,12 +91,12 @@ export const defaultSchedules: AuditSchedule[] = [
     timeRange: "14:00 - 17:00",
     startTime: "14:00",
     endTime: "17:00",
-    date: "2023-09-05",
+    date: getDynamicDate(5),
     recurrence: "Hari Tertentu",
     selectedDays: ["Selasa"],
     status: "Dibatalkan",
     notes: "Jadwal ditunda karena sedang berlangsung perbaikan lantai toko.",
-    createdAt: "2023-09-02",
+    createdAt: getDynamicCreated(5),
   },
   {
     id: "sch-6",
@@ -90,11 +107,11 @@ export const defaultSchedules: AuditSchedule[] = [
     timeRange: "09:00 - 11:30",
     startTime: "09:00",
     endTime: "11:30",
-    date: "2023-09-06",
+    date: getDynamicDate(6),
     recurrence: "Setiap Hari",
     status: "Selesai",
     notes: "Pemeriksaan kas modal dan EDC printer struk.",
-    createdAt: "2023-09-02",
+    createdAt: getDynamicCreated(6),
   },
   {
     id: "sch-7",
@@ -105,12 +122,12 @@ export const defaultSchedules: AuditSchedule[] = [
     timeRange: "13:00 - 15:00",
     startTime: "13:00",
     endTime: "15:00",
-    date: "2023-09-06",
+    date: getDynamicDate(6),
     recurrence: "Hari Tertentu",
     selectedDays: ["Rabu", "Sabtu"],
     status: "Terjadwal",
     notes: "Pengukuran suhu chiller dan freezer showcase.",
-    createdAt: "2023-09-03",
+    createdAt: getDynamicCreated(6),
   },
   {
     id: "sch-8",
@@ -121,11 +138,11 @@ export const defaultSchedules: AuditSchedule[] = [
     timeRange: "08:30 - 11:00",
     startTime: "08:30",
     endTime: "11:00",
-    date: "2023-09-07",
+    date: getDynamicDate(7),
     recurrence: "Setiap Hari",
     status: "Selesai",
     notes: "Evaluasi kesiapan staf dan seragam kerja.",
-    createdAt: "2023-09-03",
+    createdAt: getDynamicCreated(7),
   },
   {
     id: "sch-9",
@@ -136,12 +153,12 @@ export const defaultSchedules: AuditSchedule[] = [
     timeRange: "14:00 - 16:30",
     startTime: "14:00",
     endTime: "16:30",
-    date: "2023-09-07",
+    date: getDynamicDate(7),
     recurrence: "Hari Tertentu",
     selectedDays: ["Kamis"],
     status: "Terjadwal",
     notes: "Pemeriksaan kesesuaian label harga rak gondola.",
-    createdAt: "2023-09-03",
+    createdAt: getDynamicCreated(7),
   },
   {
     id: "sch-10",
@@ -152,12 +169,12 @@ export const defaultSchedules: AuditSchedule[] = [
     timeRange: "10:00 - 12:00",
     startTime: "10:00",
     endTime: "12:00",
-    date: "2023-09-08",
+    date: getDynamicDate(8),
     recurrence: "Hari Tertentu",
     selectedDays: ["Jumat"],
     status: "Selesai",
     notes: "Pemeriksaan validasi kode barcode statis meja kasir.",
-    createdAt: "2023-09-04",
+    createdAt: getDynamicCreated(8),
   },
   {
     id: "sch-11",
@@ -168,12 +185,12 @@ export const defaultSchedules: AuditSchedule[] = [
     timeRange: "11:00 - 13:30",
     startTime: "11:00",
     endTime: "13:30",
-    date: "2023-09-08",
+    date: getDynamicDate(8),
     recurrence: "Hari Tertentu",
     selectedDays: ["Jumat", "Sabtu"],
     status: "Terjadwal",
     notes: "Inspeksi tekanan tabung pemadam api dan tangga darurat.",
-    createdAt: "2023-09-04",
+    createdAt: getDynamicCreated(8),
   },
   {
     id: "sch-12",
@@ -184,12 +201,12 @@ export const defaultSchedules: AuditSchedule[] = [
     timeRange: "15:00 - 17:00",
     startTime: "15:00",
     endTime: "17:00",
-    date: "2023-09-09",
+    date: getDynamicDate(9),
     recurrence: "Hari Tertentu",
     selectedDays: ["Sabtu"],
     status: "Dibatalkan",
     notes: "Jadwal dialihkan karena toko sedang renovasi elektrikal.",
-    createdAt: "2023-09-04",
+    createdAt: getDynamicCreated(9),
   },
 ];
 
@@ -201,7 +218,24 @@ export const ScheduleService = {
       if (data) {
         const parsed = JSON.parse(data);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+          // If stored records have past years (< current year) or different month, sync them to current month
+          const now = new Date();
+          const currentYearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+          
+          const updated = parsed.map((item) => {
+            if (item.date && !item.date.startsWith(currentYearMonth)) {
+              const dayPart = item.date.split("-")[2] || "01";
+              return {
+                ...item,
+                date: `${currentYearMonth}-${dayPart}`,
+                createdAt: item.createdAt?.startsWith(currentYearMonth)
+                  ? item.createdAt
+                  : `${currentYearMonth}-01`,
+              };
+            }
+            return item;
+          });
+          return updated;
         }
       }
       localStorage.setItem(SCHEDULE_STORAGE_KEY, JSON.stringify(defaultSchedules));

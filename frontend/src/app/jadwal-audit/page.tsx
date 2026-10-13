@@ -24,10 +24,10 @@ import { AuditSchedule, ScheduleStats, ScheduleStatus } from "@/types/schedule";
 import { toast } from "sonner";
 import ActionButtons from "@/components/ui/ActionButtons";
 import AuditCalendarWidget from "./components/AuditCalendarWidget";
-import CreateScheduleModal from "./components/CreateScheduleModal";
-import EditScheduleModal from "./components/EditScheduleModal";
-import DetailScheduleModal from "./components/DetailScheduleModal";
+import CreateSchedulePanel from "./components/CreateSchedulePanel";
+import DetailSchedule from "./components/DetailSchedule";
 import DeleteScheduleModal from "./components/DeleteScheduleModal";
+import ChecklistRequiredModal from "./components/ChecklistRequiredModal";
 import { format, isSameDay } from "date-fns";
 
 export default function JadwalAuditPage() {
@@ -38,18 +38,20 @@ export default function JadwalAuditPage() {
 
   // Calendar Date Filter (null shows all 12 schedules, clicking date filters)
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [isCalendarExpanded, setIsCalendarExpanded] = useState(false);
 
-  // Modal States
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  // Modal & Panel States
+  const [isSchedulePanelOpen, setIsSchedulePanelOpen] = useState(false);
   const [scheduleToEdit, setScheduleToEdit] = useState<AuditSchedule | null>(null);
 
-  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [selectedScheduleToView, setSelectedScheduleToView] = useState<AuditSchedule | null>(null);
 
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [scheduleToDelete, setScheduleToDelete] = useState<AuditSchedule | null>(null);
+
+  // Pop up Relasi: Template Checklist Wajib Selesai Sebelum Nonaktifkan Jadwal
+  const [isChecklistRequiredOpen, setIsChecklistRequiredOpen] = useState(false);
+  const [scheduleForChecklist, setScheduleForChecklist] = useState<AuditSchedule | null>(null);
 
   // Search & Filter State
   const [searchTerm, setSearchTerm] = useState("");
@@ -71,21 +73,34 @@ export default function JadwalAuditPage() {
   }, [refreshData]);
 
   // Handlers
-  const handleCreateSchedule = (newScheduleData: Omit<AuditSchedule, "id">) => {
-    ScheduleService.create(newScheduleData);
-    toast.success(`Jadwal audit untuk "${newScheduleData.storeName}" berhasil dibuat!`);
-    setIsCreateModalOpen(false);
+  const handleOpenCreate = () => {
+    setScheduleToEdit(null);
+    setIsSchedulePanelOpen(true);
+  };
+
+  const handleOpenEdit = (schedule: AuditSchedule) => {
+    setScheduleToEdit(schedule);
+    setIsSchedulePanelOpen(true);
+  };
+
+  const handleSaveSchedule = (scheduleData: Omit<AuditSchedule, "id">) => {
+    if (scheduleToEdit) {
+      ScheduleService.update(scheduleToEdit.id, scheduleData);
+      toast.success(`Jadwal untuk "${scheduleData.storeName}" berhasil diperbarui!`);
+    } else {
+      ScheduleService.create(scheduleData);
+      toast.success(`Jadwal audit untuk "${scheduleData.storeName}" berhasil dibuat!`);
+    }
+    setIsSchedulePanelOpen(false);
+    setScheduleToEdit(null);
     refreshData();
   };
 
-  const handleUpdateSchedule = (updatedData: Partial<AuditSchedule>) => {
-    if (scheduleToEdit) {
-      ScheduleService.update(scheduleToEdit.id, updatedData);
-      toast.success("Jadwal audit berhasil diperbarui!");
-      setIsEditModalOpen(false);
-      setScheduleToEdit(null);
-      refreshData();
-    }
+  const handleUpdateSchedule = (scheduleId: string, updatedData: Partial<AuditSchedule>) => {
+    ScheduleService.update(scheduleId, updatedData);
+    toast.success("Jadwal audit berhasil diperbarui!");
+    setSelectedScheduleToView(null);
+    refreshData();
   };
 
   const handleConfirmDelete = () => {
@@ -94,6 +109,18 @@ export default function JadwalAuditPage() {
       toast.success(`Jadwal untuk "${scheduleToDelete.storeName}" telah dibatalkan.`);
       setIsDeleteModalOpen(false);
       setScheduleToDelete(null);
+      refreshData();
+    }
+  };
+
+  const handleCompleteAndDeactivate = () => {
+    if (scheduleForChecklist) {
+      ScheduleService.update(scheduleForChecklist.id, { status: "Dibatalkan" });
+      toast.success(
+        `Template checklist telah diselesaikan & jadwal "${scheduleForChecklist.storeName}" berhasil dinonaktifkan!`
+      );
+      setIsChecklistRequiredOpen(false);
+      setScheduleForChecklist(null);
       refreshData();
     }
   };
@@ -137,45 +164,45 @@ export default function JadwalAuditPage() {
         subtitle="Kelola dan pantau jadwal audit untuk semua cabang."
       />
 
-      {/* Top Section: 3 Compact Metric Cards (Left, ~58%) + Mini Calendar Widget (Right, ~42%) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 sm:gap-4 mb-5 sm:mb-6 items-start">
+      {/* Stats and Calendar Section */}
+      <div className="flex flex-col lg:flex-row gap-5 mb-8 items-start">
         {/* 3 Metric Cards Container */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 sm:gap-4 lg:col-span-7 items-start">
+        <div className="flex-1 w-full grid grid-cols-1 sm:grid-cols-3 gap-5">
           {/* Card 1: TOTAL JADWAL */}
-          <div className="bg-[#fefdfa] rounded-xl border border-slate-200 p-3.5 sm:p-4 shadow-2xs flex flex-col">
+          <div className="bg-[#fefdfa] rounded-xl border border-slate-200 p-5 shadow-xs flex flex-col">
             <div className="flex justify-between items-start">
-              <h3 className="text-[10px] sm:text-[11px] font-bold text-slate-500 tracking-wider uppercase">
+              <h3 className="text-[11px] font-bold text-slate-500 tracking-wider uppercase">
                 TOTAL JADWAL
               </h3>
-              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center shrink-0">
-                <CalendarIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              <div className="w-8 h-8 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center shrink-0">
+                <CalendarIcon className="w-4 h-4" />
               </div>
             </div>
-            <div className="mt-1.5 sm:mt-2">
-              <div className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
+            <div className="mt-4">
+              <div className="text-2xl font-extrabold text-slate-900 tracking-tight">
                 {stats.total}
               </div>
-              <p className="text-[11px] text-slate-400 mt-0.5">
+              <p className="text-xs text-slate-400 mt-1">
                 Semua jadwal bulan ini
               </p>
             </div>
           </div>
 
           {/* Card 2: JADWAL AKTIF */}
-          <div className="bg-[#fefdfa] rounded-xl border border-slate-200 p-3.5 sm:p-4 shadow-2xs flex flex-col">
+          <div className="bg-[#fefdfa] rounded-xl border border-slate-200 p-5 shadow-xs flex flex-col">
             <div className="flex justify-between items-start">
-              <h3 className="text-[10px] sm:text-[11px] font-bold text-slate-500 tracking-wider uppercase">
+              <h3 className="text-[11px] font-bold text-slate-500 tracking-wider uppercase">
                 JADWAL AKTIF
               </h3>
-              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
-                <Check className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.5]" />
+              <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+                <Check className="w-4 h-4 stroke-[2.5]" />
               </div>
             </div>
-            <div className="mt-1.5 sm:mt-2">
-              <div className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
+            <div className="mt-4">
+              <div className="text-2xl font-extrabold text-slate-900 tracking-tight">
                 {stats.active}
               </div>
-              <div className="mt-0.5 inline-flex items-center gap-1 text-emerald-600 text-[11px] font-semibold">
+              <div className="flex items-center gap-1 mt-1 text-emerald-600 text-xs font-medium">
                 <TrendingUp className="w-3 h-3" />
                 <span>{stats.activePercentage}% dari total</span>
               </div>
@@ -183,20 +210,20 @@ export default function JadwalAuditPage() {
           </div>
 
           {/* Card 3: JADWAL NONAKTIF */}
-          <div className="bg-[#fefdfa] rounded-xl border border-slate-200 p-3.5 sm:p-4 shadow-2xs flex flex-col">
+          <div className="bg-[#fefdfa] rounded-xl border border-slate-200 p-5 shadow-xs flex flex-col">
             <div className="flex justify-between items-start">
-              <h3 className="text-[10px] sm:text-[11px] font-bold text-slate-500 tracking-wider uppercase">
+              <h3 className="text-[11px] font-bold text-slate-500 tracking-wider uppercase">
                 JADWAL NONAKTIF
               </h3>
-              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-red-50 text-red-500 flex items-center justify-center shrink-0">
-                <Ban className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              <div className="w-8 h-8 rounded-lg bg-red-50 text-red-500 flex items-center justify-center shrink-0">
+                <Ban className="w-4 h-4" />
               </div>
             </div>
-            <div className="mt-1.5 sm:mt-2">
-              <div className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
+            <div className="mt-4">
+              <div className="text-2xl font-extrabold text-slate-900 tracking-tight">
                 {stats.inactive}
               </div>
-              <p className="text-[11px] text-slate-400 mt-0.5">
+              <p className="text-xs text-slate-400 mt-1">
                 Dibatalkan / Ditunda
               </p>
             </div>
@@ -204,16 +231,16 @@ export default function JadwalAuditPage() {
         </div>
 
         {/* Card 4: CALENDAR WIDGET CONTAINER */}
-        <div className="lg:col-span-5">
-          <AuditCalendarWidget
-            schedules={schedules}
-            selectedDate={selectedDate}
-            onSelectDate={(date) => {
-              setSelectedDate(date);
-              setCurrentPage(1);
-            }}
-          />
-        </div>
+        <AuditCalendarWidget
+          schedules={schedules}
+          selectedDate={selectedDate}
+          isExpanded={isCalendarExpanded}
+          onExpandedChange={setIsCalendarExpanded}
+          onSelectDate={(date) => {
+            setSelectedDate(date);
+            setCurrentPage(1);
+          }}
+        />
       </div>
 
       {/* Main Table Container Card */}
@@ -309,7 +336,7 @@ export default function JadwalAuditPage() {
             {/* Tambah Jadwal Button */}
             <button
               type="button"
-              onClick={() => setIsCreateModalOpen(true)}
+              onClick={handleOpenCreate}
               className="flex items-center gap-1.5 px-3.5 py-2 bg-[#193f53] hover:bg-[#123040] text-white rounded-lg text-xs font-semibold transition-all shadow-2xs cursor-pointer shrink-0"
             >
               <Plus className="w-3.5 h-3.5" />
@@ -426,18 +453,22 @@ export default function JadwalAuditPage() {
                         <ActionButtons
                           onView={() => {
                             setSelectedScheduleToView(schedule);
-                            setIsDetailModalOpen(true);
                           }}
                           onEdit={() => {
-                            setScheduleToEdit(schedule);
-                            setIsEditModalOpen(true);
+                            handleOpenEdit(schedule);
                           }}
                           onDelete={
                             isCancelled
                               ? undefined
                               : () => {
-                                  setScheduleToDelete(schedule);
-                                  setIsDeleteModalOpen(true);
+                                  // Relasi: Ketika ingin menonaktifkan jadwal, template checklist harus diselesaikan dulu
+                                  if (schedule.status === "Terjadwal") {
+                                    setScheduleForChecklist(schedule);
+                                    setIsChecklistRequiredOpen(true);
+                                  } else {
+                                    setScheduleToDelete(schedule);
+                                    setIsDeleteModalOpen(true);
+                                  }
                                 }
                           }
                           onRestore={
@@ -511,37 +542,15 @@ export default function JadwalAuditPage() {
         </div>
       </div>
 
-      {/* Modals */}
-      <CreateScheduleModal
-        isOpen={isCreateModalOpen}
-        onClose={() => setIsCreateModalOpen(false)}
-        onSubmit={handleCreateSchedule}
-      />
-
-      <EditScheduleModal
-        isOpen={isEditModalOpen}
+      {/* Side Panels & Modals */}
+      <CreateSchedulePanel
+        isOpen={isSchedulePanelOpen}
         schedule={scheduleToEdit}
         onClose={() => {
-          setIsEditModalOpen(false);
+          setIsSchedulePanelOpen(false);
           setScheduleToEdit(null);
         }}
-        onSubmit={handleUpdateSchedule}
-      />
-
-      <DetailScheduleModal
-        isOpen={isDetailModalOpen}
-        schedule={selectedScheduleToView}
-        onClose={() => {
-          setIsDetailModalOpen(false);
-          setSelectedScheduleToView(null);
-        }}
-        onEdit={() => {
-          if (selectedScheduleToView) {
-            setScheduleToEdit(selectedScheduleToView);
-            setIsDetailModalOpen(false);
-            setIsEditModalOpen(true);
-          }
-        }}
+        onSubmit={handleSaveSchedule}
       />
 
       <DeleteScheduleModal
@@ -553,6 +562,33 @@ export default function JadwalAuditPage() {
         }}
         onConfirm={handleConfirmDelete}
       />
+
+      {/* Pop up Relasi: Template Checklist Wajib Selesai Sebelum Nonaktifkan Jadwal */}
+      <ChecklistRequiredModal
+        isOpen={isChecklistRequiredOpen}
+        schedule={scheduleForChecklist}
+        onClose={() => {
+          setIsChecklistRequiredOpen(false);
+          setScheduleForChecklist(null);
+        }}
+        onCompleteAndDeactivate={handleCompleteAndDeactivate}
+      />
+
+      {selectedScheduleToView && (
+        <DetailSchedule
+          key={selectedScheduleToView.id}
+          schedule={selectedScheduleToView}
+          onBack={() => {
+            setSelectedScheduleToView(null);
+          }}
+          onEdit={() => {
+            const current = selectedScheduleToView;
+            setSelectedScheduleToView(null);
+            handleOpenEdit(current);
+          }}
+          onSubmit={(updatedData) => handleUpdateSchedule(selectedScheduleToView.id, updatedData)}
+        />
+      )}
     </DashboardLayout>
   );
 }
