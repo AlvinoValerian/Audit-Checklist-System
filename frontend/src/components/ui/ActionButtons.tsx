@@ -13,6 +13,9 @@ interface ActionButtonsProps {
   editTitle?: string;
   deleteTitle?: string;
   restoreTitle?: string;
+  align?: "center" | "end" | "start";
+  className?: string;
+  alignRestoreWithDelete?: boolean;
 }
 
 export default function ActionButtons({
@@ -24,9 +27,19 @@ export default function ActionButtons({
   editTitle = "Edit",
   deleteTitle = "Hapus",
   restoreTitle = "Aktifkan Kembali",
+  align = "end",
+  className = "",
+  alignRestoreWithDelete = true,
 }: ActionButtonsProps) {
+  const justifyClass =
+    align === "center"
+      ? "justify-center"
+      : align === "start"
+      ? "justify-start"
+      : "justify-end";
+
   return (
-    <div className="flex items-center justify-end gap-2.5">
+    <div className={`flex items-center ${justifyClass} gap-2.5 ${className}`}>
       {onView && (
         <button
           onClick={onView}
@@ -37,6 +50,11 @@ export default function ActionButtons({
         </button>
       )}
       
+      {/* Invisible placeholder if only onRestore is present, so it aligns with onDelete */}
+      {alignRestoreWithDelete && onRestore && !onDelete && !onEdit && (
+        <div className="w-6 h-6 pointer-events-none select-none invisible" aria-hidden="true" />
+      )}
+
       {onEdit && (
         <button
           onClick={onEdit}

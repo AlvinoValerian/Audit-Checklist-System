@@ -12,7 +12,6 @@ import { AdminService } from "@/services/admin.service";
 import { WorkspaceService } from "@/services/workspace.service";
 import { AdminUser, AdminStatsData, AdminRole } from "@/types/admin";
 import { Workspace } from "@/types/workspace";
-import { Plus } from "lucide-react";
 import { toast } from "sonner";
 
 export default function KelolaAdminPage() {
@@ -140,21 +139,13 @@ export default function KelolaAdminPage() {
       <Header
         title="Kelola Admin"
         subtitle="Kelola akun Admin dan penugasan workspace operasional"
-        action={
-          <button
-            onClick={handleOpenCreateModal}
-            className="flex items-center gap-2 px-4 py-2.5 bg-[#193f53] hover:bg-[#143343] text-white text-xs sm:text-sm font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Tambah Admin</span>
-          </button>
-        }
       />
 
       <AdminStats stats={stats} />
 
       <AdminTable
         admins={admins}
+        onAdd={handleOpenCreateModal}
         onEdit={handleOpenEditModal}
         onDelete={handleOpenDeleteModal}
       />

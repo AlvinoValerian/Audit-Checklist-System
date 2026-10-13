@@ -53,16 +53,23 @@ export default function TopBar({
     return null;
   }
 
+  const isSuperAdminPage =
+    pathname.startsWith("/workspace") || pathname.startsWith("/kelola-admin");
+
   return (
     <>
       <div className="w-full bg-white border-b border-slate-200 px-4 sm:px-6 lg:px-8 py-3 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-30 hidden md:flex">
-        {/* Workspace Pill */}
-        <div className="inline-flex items-center px-3 py-1.5 rounded-full bg-[#f0f5ff] border border-[#d6e4ff] text-[#1e4ed8] text-[11px] font-bold tracking-wider uppercase">
-          {workspaceName}
-        </div>
+        {/* Workspace Pill (Sembunyikan pada halaman superadmin seperti workspace dan kelola admin) */}
+        {!isSuperAdminPage ? (
+          <div className="inline-flex items-center px-2.5 py-1 rounded-full bg-[#f0f5ff] border border-[#d6e4ff] text-[#1e4ed8] text-[10px] font-bold tracking-wider uppercase">
+            {workspaceName}
+          </div>
+        ) : (
+          <div />
+        )}
 
         {/* Right Admin Profile & Settings */}
-        <div className="flex items-center gap-3.5">
+        <div className="flex items-center gap-3.5 ml-auto">
           {/* Settings Button & Dropdown */}
           <div className="relative" ref={dropdownRef}>
             <button

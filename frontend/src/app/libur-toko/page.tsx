@@ -361,7 +361,7 @@ export default function LiburTokoPage() {
                 <th className="px-5 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">ALASAN</th>
                 <th className="px-5 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">DIBUAT OLEH</th>
                 <th className="px-5 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">STATUS</th>
-                <th className="px-5 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right">ACTION</th>
+                <th className="px-5 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-center">ACTION</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">

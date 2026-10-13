@@ -303,11 +303,11 @@ export default function TemplateChecklistPage() {
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="border-b border-slate-100 bg-slate-50/60 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+              <tr className="border-b border-slate-200 bg-slate-50/70 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
                 <th className="py-3 px-4 sm:px-6">NAMA TEMPLATE</th>
                 <th className="py-3 px-4 sm:px-6">DIBUAT OLEH</th>
                 <th className="py-3 px-4 text-center">STATUS</th>
-                <th className="py-3 px-4 sm:px-6 text-right">ACTION</th>
+                <th className="py-3 px-4 sm:px-6 text-center">ACTION</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
@@ -370,14 +370,19 @@ export default function TemplateChecklistPage() {
 
                       {/* ACTION */}
                       <td
-                        className="py-3.5 px-4 sm:px-6 text-right whitespace-nowrap"
+                        className="py-3.5 px-4 sm:px-6 text-center whitespace-nowrap"
                         onClick={(e) => e.stopPropagation()}
                       >
                         <ActionButtons
-                          onEdit={() => {
-                            setTemplateToEdit(template);
-                            setIsEditing(true);
-                          }}
+                          align="center"
+                          onEdit={
+                            isDeactivated
+                              ? undefined
+                              : () => {
+                                  setTemplateToEdit(template);
+                                  setIsEditing(true);
+                                }
+                          }
                           onDelete={
                             isDeactivated
                               ? undefined
