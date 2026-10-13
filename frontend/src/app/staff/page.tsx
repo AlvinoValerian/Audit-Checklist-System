@@ -279,7 +279,7 @@ export default function StaffPage() {
                 <th className="px-5 py-3">PENEMPATAN TOKO</th>
                 <th className="px-5 py-3">POSISI</th>
                 <th className="px-5 py-3 text-center">STATUS</th>
-                <th className="px-5 py-3 text-right">ACTION</th>
+                <th className="px-5 py-3 text-center">ACTION</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">

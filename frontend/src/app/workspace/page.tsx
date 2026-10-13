@@ -12,7 +12,6 @@ import Modal from "@/components/ui/Modal";
 import { WorkspaceService } from "@/services/workspace.service";
 import { Workspace, WorkspaceStatsData } from "@/types/workspace";
 import {
-  Plus,
   Pencil,
   Building2,
   Store,
@@ -125,21 +124,13 @@ export default function WorkspacePage() {
       <Header
         title="Workspace"
         subtitle="Kelola data unit kerja dan statistik audit toko"
-        action={
-          <button
-            onClick={handleOpenCreateModal}
-            className="flex items-center gap-2 px-4 py-2.5 bg-[#193f53] hover:bg-[#143343] text-white text-xs sm:text-sm font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Tambah Workspace</span>
-          </button>
-        }
       />
 
       <WorkspaceStats stats={stats} />
 
       <WorkspaceTable
         workspaces={workspaces}
+        onAdd={handleOpenCreateModal}
         onDetail={(ws) => setSelectedDetailWorkspace(ws)}
         onEdit={handleOpenEditModal}
         onDelete={handleOpenDeleteModal}

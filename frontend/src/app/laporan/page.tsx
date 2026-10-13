@@ -387,7 +387,7 @@ export default function LaporanPage() {
                       <th className="px-5 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
                         STATUS
                       </th>
-                      <th className="px-5 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right">
+                      <th className="px-5 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-center">
                         ACTION
                       </th>
                     </tr>
