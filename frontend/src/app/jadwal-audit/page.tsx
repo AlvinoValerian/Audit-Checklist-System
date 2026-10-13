@@ -167,7 +167,7 @@ export default function JadwalAuditPage() {
       {/* Stats and Calendar Section */}
       <div className="flex flex-col lg:flex-row gap-5 mb-8 items-start">
         {/* 3 Metric Cards Container */}
-        <div className="flex-1 w-full grid grid-cols-1 sm:grid-cols-3 gap-5">
+        <div className="flex-1 w-full grid grid-cols-1 sm:grid-cols-3 gap-5 transition-all duration-500 ease-in-out">
           {/* Card 1: TOTAL JADWAL */}
           <div className="bg-[#fefdfa] rounded-xl border border-slate-200 p-5 shadow-xs flex flex-col">
             <div className="flex justify-between items-start">
@@ -349,13 +349,13 @@ export default function JadwalAuditPage() {
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="border-b border-slate-100 bg-slate-50/60 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+              <tr className="border-b border-slate-200 bg-slate-50/70 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
                 <th className="py-3 px-4 sm:px-6">NAMA TOKO</th>
                 <th className="py-3 px-4">NAMA JADWAL</th>
                 <th className="py-3 px-4">WAKTU</th>
                 <th className="py-3 px-4">PENGULANGAN</th>
                 <th className="py-3 px-4 text-center">STATUS</th>
-                <th className="py-3 px-4 sm:px-6 text-right">ACTION</th>
+                <th className="py-3 px-4 sm:px-6 text-center">ACTION</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
