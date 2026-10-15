@@ -177,7 +177,7 @@ export default function LandingPage() {
             </div>
             <div className="flex flex-col">
               <span className="text-xl font-bold tracking-tight text-[#26455E] leading-none">
-                StoreAudit
+                Audit Pro
               </span>
               <span className="text-[10px] text-slate-400 font-medium tracking-wide mt-0.5">
                 ENTERPRISE SYSTEM
