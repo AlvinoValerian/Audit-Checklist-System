@@ -1,21 +1,27 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import Header from "@/components/layout/Header";
-import { Calendar as CalendarIcon, CheckCircle2, XCircle, Search, Filter, Plus, Eye, Pencil, Trash2, ChevronLeft, ChevronRight, Store, X } from "lucide-react";
+import { Calendar as CalendarIcon, CheckCircle2, XCircle, Search, Filter, Plus, Store, X, ChevronLeft, ChevronRight } from "lucide-react";
 import { HolidayService } from "@/services/holiday.service";
 import { Holiday, HolidayStatus } from "@/types/holiday";
 import { toast } from "sonner";
+import { format } from "date-fns";
 import CreateHolidayView from "./components/CreateHolidayView";
 import DetailHolidayModal from "./components/DetailHolidayModal";
 import SoftDeleteModal from "./components/SoftDeleteModal";
 import RestoreHolidayModal from "./components/RestoreHolidayModal";
 import ActionButtons from "@/components/ui/ActionButtons";
+import HolidayCalendarWidget from "./components/HolidayCalendarWidget";
  
 export default function LiburTokoPage() {
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [stats, setStats] = useState({ total: 0, active: 0, cancelled: 0 });
+
+  // Calendar Date Filter
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [isCalendarExpanded, setIsCalendarExpanded] = useState(false);
 
   const [isCreatingView, setIsCreatingView] = useState(false);
   const [selectedHolidayToEdit, setSelectedHolidayToEdit] = useState<Holiday | null>(null);
@@ -36,6 +42,10 @@ export default function LiburTokoPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState<"Semua" | "Terjadwal" | "Selesai" | "Dibatalkan">("Semua");
   const [isFilterOpen, setIsFilterOpen] = useState(false);
+
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 5;
 
   const refreshData = () => {
     const list = HolidayService.getAll();
@@ -82,56 +92,37 @@ export default function LiburTokoPage() {
     return `${startStr} - ${endStr} (${days} Hari)`;
   };
 
-  const [isCalendarExpanded, setIsCalendarExpanded] = useState(false);
-  const [currentMonth, setCurrentMonth] = useState<Date | null>(null);
-  const [isMounted, setIsMounted] = useState(false);
+  // Filter Logic: Search, Status, and Calendar Date
+  const filteredHolidays = useMemo(() => {
+    return holidays.filter((row) => {
+      const matchesSearch =
+        row.storeName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        row.storeLocation.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        row.reason.toLowerCase().includes(searchTerm.toLowerCase());
 
-  useEffect(() => {
-    setCurrentMonth(new Date());
-    setIsMounted(true);
-  }, []);
+      const matchesStatus =
+        filterStatus === "Semua" ? true : row.status === filterStatus;
 
-  const handlePrevMonth = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (currentMonth) {
-      setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1));
-    }
-  };
+      // Date match if selectedDate is set
+      const checkDateStr = selectedDate ? format(selectedDate, "yyyy-MM-dd") : null;
+      const hEnd = row.endDate || row.startDate;
+      const matchesDate = checkDateStr
+        ? checkDateStr >= row.startDate && checkDateStr <= hEnd
+        : true;
 
-  const handleNextMonth = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (currentMonth) {
-      setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
-    }
-  };
-
-  const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
-  
-  const cYear = currentMonth ? currentMonth.getFullYear() : 2024;
-  const cMonth = currentMonth ? currentMonth.getMonth() : 7;
-  
-  const firstDay = new Date(cYear, cMonth, 1).getDay();
-  const daysInMonth = new Date(cYear, cMonth + 1, 0).getDate();
-  const daysInPrevMonth = new Date(cYear, cMonth, 0).getDate();
-  
-  const prevMonthDays = Array.from({ length: firstDay }).map((_, i) => daysInPrevMonth - firstDay + 1 + i);
-  const currentMonthDays = Array.from({ length: daysInMonth }).map((_, i) => i + 1);
-
-  // Helper to check if a date has holidays
-  const getHolidayStatus = (day: number) => {
-    const checkDateStr = `${cYear}-${String(cMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    const dayHolidays = holidays.filter(h => {
-      const hEnd = h.endDate || h.startDate;
-      return checkDateStr >= h.startDate && checkDateStr <= hEnd;
+      return matchesSearch && matchesStatus && matchesDate;
     });
-    
-    if (dayHolidays.length === 0) return null;
-    
-    // Priority: Terjadwal (purple) > Dibatalkan (rose) > Selesai (emerald)
-    if (dayHolidays.some(h => h.status === "Terjadwal")) return "bg-purple-500";
-    if (dayHolidays.some(h => h.status === "Dibatalkan")) return "bg-rose-500";
-    return "bg-emerald-500";
-  };
+  }, [holidays, searchTerm, filterStatus, selectedDate]);
+
+  // Pagination Logic
+  const totalPages = Math.ceil(filteredHolidays.length / itemsPerPage) || 1;
+  const paginatedHolidays = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage;
+    return filteredHolidays.slice(start, start + itemsPerPage);
+  }, [filteredHolidays, currentPage]);
+
+  const startIndex = filteredHolidays.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0;
+  const endIndex = Math.min(currentPage * itemsPerPage, filteredHolidays.length);
 
   return (
     <DashboardLayout>
@@ -211,87 +202,17 @@ export default function LiburTokoPage() {
           </div>
         </div>
 
-        {/* Calendar Widget (Right Side) */}
-        <div 
-          suppressHydrationWarning
-          className={`shrink-0 bg-[#fefdfa] rounded-xl border border-slate-200 shadow-xs flex flex-col relative overflow-hidden transition-all duration-500 ease-in-out ${
-            isCalendarExpanded ? 'max-w-[400px] max-h-[500px] opacity-100' : 'max-w-[48px] max-h-[48px] opacity-100 cursor-pointer hover:bg-slate-50 hover:border-blue-200'
-          }`}
-          onClick={() => !isCalendarExpanded && setIsCalendarExpanded(true)}
-          title={!isCalendarExpanded ? "Tampilkan Kalender" : undefined}
-          style={{ 
-            width: isCalendarExpanded ? (typeof window !== 'undefined' && window.innerWidth >= 1280 ? '380px' : window.innerWidth >= 1024 ? '340px' : '100%') : '48px',
-            height: isCalendarExpanded ? 'auto' : '48px'
+        {/* Calendar Widget Container (Right Side) */}
+        <HolidayCalendarWidget
+          holidays={holidays}
+          selectedDate={selectedDate}
+          isExpanded={isCalendarExpanded}
+          onExpandedChange={setIsCalendarExpanded}
+          onSelectDate={(date) => {
+            setSelectedDate(date);
+            setCurrentPage(1);
           }}
-        >
-          {/* Icon State (Visible only when collapsed) */}
-          <div className={`absolute inset-0 flex items-center justify-center text-blue-600 transition-opacity duration-300 ${isCalendarExpanded ? 'opacity-0 pointer-events-none' : 'opacity-100 delay-200'}`}>
-            <CalendarIcon className="w-5 h-5" />
-            <div className="absolute top-3 right-3 w-2 h-2 rounded-full bg-emerald-500 border border-white"></div>
-          </div>
-
-          {/* Full Calendar State (Visible only when expanded) */}
-          <div className={`flex flex-col h-full w-[340px] xl:w-[380px] p-5 transition-opacity duration-300 ${isCalendarExpanded ? 'opacity-100 delay-200' : 'opacity-0 pointer-events-none'}`}>
-            <div className="flex items-center justify-between mb-5">
-              <div className="flex items-center gap-2">
-                <CalendarIcon className="w-4 h-4 text-blue-600" />
-                <h3 className="text-[13px] font-bold text-slate-900 whitespace-nowrap">{monthNames[cMonth]} {cYear}</h3>
-              </div>
-              <div className="flex gap-1.5 items-center">
-                <button 
-                  onClick={handlePrevMonth}
-                  className="p-1 rounded bg-white hover:bg-slate-50 border border-slate-200 text-slate-500 transition-colors cursor-pointer"
-                >
-                  <ChevronLeft className="w-3.5 h-3.5" />
-                </button>
-                <button 
-                  onClick={handleNextMonth}
-                  className="p-1 rounded bg-white hover:bg-slate-50 border border-slate-200 text-slate-500 transition-colors cursor-pointer mr-1"
-                >
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setIsCalendarExpanded(false);
-                  }}
-                  className="p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer border border-transparent"
-                  title="Sembunyikan Kalender"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            {/* Calendar Grid */}
-            <div className="grid grid-cols-7 gap-y-3 text-center mb-6">
-              {['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'].map((day) => (
-                <div key={day} className="text-[11px] font-medium text-slate-700">{day}</div>
-              ))}
-
-              {/* Previous month days */}
-              {prevMonthDays.map((day, i) => (
-                <div key={`prev-${i}`} className="text-[11px] font-medium text-slate-300">{day}</div>
-              ))}
-
-              {/* Current month days */}
-              {currentMonthDays.map((day) => {
-                const dotColor = getHolidayStatus(day);
-                return (
-                  <div key={`curr-${day}`} className="text-[11px] font-medium text-slate-800 relative flex flex-col items-center justify-center">
-                    {day}
-                    {dotColor && <div className={`absolute -bottom-2 w-1 h-1 rounded-full ${dotColor}`}></div>}
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="flex items-center justify-around text-[10px] font-medium text-slate-600 border-t border-slate-100 pt-4 mt-auto px-4">
-              <div className="flex items-center gap-1.5 whitespace-nowrap"><div className="w-1.5 h-1.5 rounded-full bg-purple-500 shrink-0"></div> {stats.active} Terjadwal</div>
-              <div className="flex items-center gap-1.5 whitespace-nowrap"><div className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0"></div> {stats.cancelled} Dibatalkan</div>
-            </div>
-          </div>
-        </div>
+        />
       </div>
 
       {/* Table Section */}
@@ -303,41 +224,78 @@ export default function LiburTokoPage() {
             <input
               type="text"
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Cari toko"
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1);
+              }}
+              placeholder="Cari toko atau alasan libur..."
               className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#193f53]/20 focus:border-[#193f53] transition-all placeholder:text-slate-400"
             />
           </div>
           <div className="flex items-center gap-2.5">
+            {/* Filter Dropdown */}
             <div className="relative">
               <button 
                 onClick={() => setIsFilterOpen(!isFilterOpen)}
-                className={`flex items-center gap-2 px-3.5 py-2 bg-white border ${filterStatus !== "Semua" ? "border-blue-500 text-blue-600" : "border-slate-200 text-slate-700"} rounded-lg text-xs font-semibold hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer`}
+                className={`flex items-center gap-1.5 px-3.5 py-2 bg-white border ${
+                  filterStatus !== "Semua" || selectedDate
+                    ? "border-sky-500 text-sky-600"
+                    : "border-slate-200 text-slate-700"
+                } rounded-lg text-xs font-semibold hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer`}
               >
                 <Filter className="w-3.5 h-3.5" />
-                {filterStatus === "Semua" ? "Filter" : filterStatus}
+                <span>
+                  {filterStatus === "Semua"
+                    ? selectedDate
+                      ? format(selectedDate, "d MMM")
+                      : "Filter"
+                    : filterStatus}
+                </span>
               </button>
               
               {isFilterOpen && (
                 <>
                   <div className="fixed inset-0 z-10" onClick={() => setIsFilterOpen(false)}></div>
-                  <div className="absolute right-0 mt-2 w-40 bg-white rounded-xl shadow-lg border border-slate-100 py-1.5 z-20 overflow-hidden">
-                    {["Semua", "Terjadwal", "Selesai", "Dibatalkan"].map((status) => (
+                  <div className="absolute right-0 mt-2 w-44 bg-white rounded-xl shadow-lg border border-slate-100 py-1.5 z-20 overflow-hidden">
+                    <div className="px-3.5 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">
+                      Status Libur
+                    </div>
+                    {(["Semua", "Terjadwal", "Selesai", "Dibatalkan"] as const).map((status) => (
                       <button
                         key={status}
                         onClick={() => {
-                          setFilterStatus(status as any);
+                          setFilterStatus(status);
                           setIsFilterOpen(false);
+                          setCurrentPage(1);
                         }}
-                        className={`w-full text-left px-4 py-2 text-xs font-medium transition-colors ${filterStatus === status ? "bg-blue-50 text-blue-600" : "text-slate-600 hover:bg-slate-50"}`}
+                        className={`w-full text-left px-3.5 py-2 text-xs font-medium transition-colors ${
+                          filterStatus === status ? "bg-sky-50 text-sky-600 font-semibold" : "text-slate-600 hover:bg-slate-50"
+                        }`}
                       >
                         {status}
                       </button>
                     ))}
+
+                    {selectedDate && (
+                      <div className="pt-1 mt-1 border-t border-slate-100">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedDate(null);
+                            setIsFilterOpen(false);
+                            setCurrentPage(1);
+                          }}
+                          className="w-full text-left px-3.5 py-2 text-xs font-medium text-rose-600 hover:bg-rose-50 cursor-pointer"
+                        >
+                          Hapus Filter Tanggal
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </>
               )}
             </div>
+
             <button
               onClick={() => {
                 setSelectedHolidayToEdit(null);
@@ -350,6 +308,29 @@ export default function LiburTokoPage() {
             </button>
           </div>
         </div>
+
+        {/* Active Date Filter Pill */}
+        {selectedDate && (
+          <div className="px-4 py-2.5 bg-sky-50/70 border-b border-sky-100 flex items-center justify-between">
+            <div className="flex items-center gap-2 text-xs text-sky-800">
+              <CalendarIcon className="w-3.5 h-3.5 text-sky-600" />
+              <span>
+                Menampilkan jadwal libur pada:{" "}
+                <span className="font-bold text-sky-900">{format(selectedDate, "d MMMM yyyy")}</span>
+              </span>
+            </div>
+            <button
+              onClick={() => {
+                setSelectedDate(null);
+                setCurrentPage(1);
+              }}
+              className="flex items-center gap-1 text-[11px] font-semibold text-sky-700 hover:text-rose-600 transition-colors cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+              Reset Filter Tanggal
+            </button>
+          </div>
+        )}
 
         {/* Table Content */}
         <div className="overflow-x-auto">
@@ -365,67 +346,89 @@ export default function LiburTokoPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {holidays
-                .filter(row => row.storeName.toLowerCase().includes(searchTerm.toLowerCase()))
-                .filter(row => filterStatus === "Semua" || row.status === filterStatus)
-                .map((row) => {
-                const colors = getStatusColor(row.status);
-                const isSoftDeleted = row.status === "Dibatalkan";
-                return (
-                  <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
-                    <td className={`px-5 py-3.5 ${isSoftDeleted ? 'opacity-40 grayscale' : ''}`}>
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 shrink-0">
-                          <Store className="w-3.5 h-3.5" />
+              {paginatedHolidays.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-12 text-center text-slate-400">
+                    <CalendarIcon className="w-8 h-8 mx-auto mb-2 text-slate-300 stroke-[1.5]" />
+                    <p className="font-semibold text-slate-600 text-sm">Tidak ada jadwal libur ditemukan</p>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {selectedDate
+                        ? `Tidak ada jadwal libur toko pada tanggal ${format(selectedDate, "d MMMM yyyy")}.`
+                        : "Coba sesuaikan kata kunci pencarian atau filter status."}
+                    </p>
+                    {selectedDate && (
+                      <button
+                        onClick={() => {
+                          setSelectedDate(null);
+                          setCurrentPage(1);
+                        }}
+                        className="mt-3 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                      >
+                        Tampilkan Semua Jadwal
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ) : (
+                paginatedHolidays.map((row) => {
+                  const colors = getStatusColor(row.status);
+                  const isSoftDeleted = row.status === "Dibatalkan";
+                  return (
+                    <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className={`px-5 py-3.5 ${isSoftDeleted ? 'opacity-40 grayscale' : ''}`}>
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 shrink-0">
+                            <Store className="w-3.5 h-3.5" />
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold text-slate-900 leading-tight">{row.storeName}</p>
+                            <p className="text-[11px] text-slate-500 mt-0.5">{row.storeLocation}</p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-xs font-bold text-slate-900 leading-tight">{row.storeName}</p>
-                          <p className="text-[11px] text-slate-500 mt-0.5">{row.storeLocation}</p>
+                      </td>
+                      <td className={`px-5 py-3.5 ${isSoftDeleted ? 'opacity-40 grayscale' : ''}`}>
+                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-white border border-slate-200 text-[11px] text-slate-700 font-bold shadow-2xs">
+                          <CalendarIcon className="w-3.5 h-3.5 text-slate-400" />
+                          {formatDuration(row.startDate, row.endDate, row.durationDays)}
                         </div>
-                      </div>
-                    </td>
-                    <td className={`px-5 py-3.5 ${isSoftDeleted ? 'opacity-40 grayscale' : ''}`}>
-                      <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-white border border-slate-200 text-[11px] text-slate-700 font-bold shadow-2xs">
-                        <CalendarIcon className="w-3.5 h-3.5 text-slate-400" />
-                        {formatDuration(row.startDate, row.endDate, row.durationDays)}
-                      </div>
-                    </td>
-                    <td className={`px-5 py-3.5 ${isSoftDeleted ? 'opacity-40 grayscale' : ''}`}>
-                      <p className="text-xs text-slate-700 max-w-[160px] leading-relaxed font-medium">{row.reason}</p>
-                    </td>
-                    <td className={`px-5 py-3.5 ${isSoftDeleted ? 'opacity-40 grayscale' : ''}`}>
-                      <p className="text-[11px] font-bold text-slate-900">{row.createdBy}</p>
-                      <p className="text-[10px] text-slate-500 mt-0.5">{row.creatorRole}</p>
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border ${colors.bg}`}>
-                        <div className={`w-1.5 h-1.5 rounded-full ${colors.dot}`}></div>
-                        {row.status}
-                      </span>
-                    </td>
-                    <td className="px-5 py-3.5 text-right">
-                      <ActionButtons
-                        onView={isSoftDeleted ? undefined : () => {
-                          setSelectedHolidayToView(row);
-                          setIsViewModalOpen(true);
-                        }}
-                        onEdit={isSoftDeleted ? undefined : () => {
-                          setSelectedHolidayToEdit(row);
-                          setIsCreatingView(true);
-                        }}
-                        onDelete={isSoftDeleted ? undefined : () => {
-                          setDeleteTargetHoliday(row);
-                          setIsDeleteModalOpen(true);
-                        }}
-                        onRestore={isSoftDeleted ? () => {
-                          setRestoreTargetHoliday(row);
-                          setIsRestoreModalOpen(true);
-                        } : undefined}
-                      />
-                    </td>
-                  </tr>
-                );
-              })}
+                      </td>
+                      <td className={`px-5 py-3.5 ${isSoftDeleted ? 'opacity-40 grayscale' : ''}`}>
+                        <p className="text-xs text-slate-700 max-w-[160px] leading-relaxed font-medium">{row.reason}</p>
+                      </td>
+                      <td className={`px-5 py-3.5 ${isSoftDeleted ? 'opacity-40 grayscale' : ''}`}>
+                        <p className="text-[11px] font-bold text-slate-900">{row.createdBy}</p>
+                        <p className="text-[10px] text-slate-500 mt-0.5">{row.creatorRole}</p>
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border ${colors.bg}`}>
+                          <div className={`w-1.5 h-1.5 rounded-full ${colors.dot}`}></div>
+                          {row.status}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3.5 text-right">
+                        <ActionButtons
+                          onView={isSoftDeleted ? undefined : () => {
+                            setSelectedHolidayToView(row);
+                            setIsViewModalOpen(true);
+                          }}
+                          onEdit={isSoftDeleted ? undefined : () => {
+                            setSelectedHolidayToEdit(row);
+                            setIsCreatingView(true);
+                          }}
+                          onDelete={isSoftDeleted ? undefined : () => {
+                            setDeleteTargetHoliday(row);
+                            setIsDeleteModalOpen(true);
+                          }}
+                          onRestore={isSoftDeleted ? () => {
+                            setRestoreTargetHoliday(row);
+                            setIsRestoreModalOpen(true);
+                          } : undefined}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
@@ -433,14 +436,28 @@ export default function LiburTokoPage() {
         {/* Pagination */}
         <div className="p-4 border-t border-slate-100 flex flex-wrap gap-4 items-center justify-between">
           <p className="text-[11px] text-slate-500">
-            Menampilkan <span className="font-bold text-slate-900">1-{Math.min(5, holidays.length)}</span> dari <span className="font-bold text-slate-900">{holidays.length}</span> jadwal libur
+            Menampilkan <span className="font-bold text-slate-900">{startIndex}-{endIndex}</span> dari <span className="font-bold text-slate-900">{filteredHolidays.length}</span> jadwal libur
           </p>
-          <div className="flex gap-1 text-[11px]">
-            <button className="w-7 h-7 flex items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors cursor-pointer">
+          <div className="flex gap-1 text-[11px] items-center">
+            <button 
+              disabled={currentPage <= 1}
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              className={`w-7 h-7 flex items-center justify-center rounded-md border border-slate-200 transition-colors ${
+                currentPage <= 1 ? "text-slate-300 cursor-not-allowed" : "text-slate-500 hover:bg-slate-50 cursor-pointer"
+              }`}
+            >
               <ChevronLeft className="w-4 h-4" />
             </button>
-            <button className="w-7 h-7 rounded-md bg-[#193f53] text-white flex items-center justify-center font-bold shadow-2xs">1</button>
-            <button className="px-3 h-7 flex items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors font-bold ml-1 cursor-pointer">
+            <div className="px-2.5 py-1 rounded-md bg-[#193f53] text-white flex items-center justify-center font-bold text-xs shadow-2xs">
+              {currentPage} / {totalPages}
+            </div>
+            <button 
+              disabled={currentPage >= totalPages}
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              className={`px-3 h-7 flex items-center justify-center rounded-md border border-slate-200 transition-colors font-bold ml-1 ${
+                currentPage >= totalPages ? "text-slate-300 cursor-not-allowed" : "text-slate-600 hover:bg-slate-50 cursor-pointer"
+              }`}
+            >
               Selanjutnya <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
             </button>
           </div>
