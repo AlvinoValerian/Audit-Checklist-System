@@ -145,82 +145,87 @@ export default function MonitoringHeader({
   };
 
   return (
-    <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-6">
-      {/* Title & Subtitle */}
-      <div>
-        <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
+    <div className="mb-6 space-y-1">
+      {/* Baris 1: No 1 (Judul) di kiri & No 5-9 (Filter) di kanan */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        {/* No 1: Judul */}
+        <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight shrink-0">
           Dashboard Monitoring
         </h1>
-        <p className="text-xs sm:text-sm text-slate-500 mt-1">
-          Pantau kondisi dan performa seluruh toko dalam Workspace A
-        </p>
-      </div>
 
-      {/* Filter Controls Toolbar */}
-      <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
-        {/* Dropdown 1: Bulan (Dinamis Sesuai Waktu Sekarang) */}
-        <div className="relative">
-          <select
-            value={selectedMonth}
-            onChange={(e) => handleMonthSelect(e.target.value)}
-            className="appearance-none bg-white border border-slate-200 text-slate-700 text-xs sm:text-sm font-medium rounded-lg px-3.5 py-2 pr-8 shadow-2xs hover:border-slate-300 focus:border-[#193f53] outline-none cursor-pointer transition-colors"
-          >
-            {monthOptions.map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
-          <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-        </div>
+        {/* No 5-9: Filter Controls Toolbar (Semua dalam 1 baris) */}
+        <div className="flex items-center gap-1.5 shrink-0 flex-nowrap overflow-x-auto max-w-full py-0.5">
+          {/* No 5: Dropdown Bulan */}
+          <div className="relative shrink-0">
+            <select
+              value={selectedMonth}
+              onChange={(e) => handleMonthSelect(e.target.value)}
+              className="appearance-none bg-white border border-slate-200 text-slate-700 text-xs font-medium rounded-lg px-2 py-1.5 pr-6 shadow-2xs hover:border-slate-300 focus:border-[#193f53] outline-none cursor-pointer transition-colors"
+            >
+              {monthOptions.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+            <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+          </div>
 
-        {/* Dropdown 2: Toko */}
-        <div className="relative">
-          <select
-            value={selectedStore}
-            onChange={(e) => onStoreChange(e.target.value)}
-            className="appearance-none bg-white border border-slate-200 text-slate-700 text-xs sm:text-sm font-medium rounded-lg px-3.5 py-2 pr-8 shadow-2xs hover:border-slate-300 focus:border-[#193f53] outline-none cursor-pointer transition-colors"
-          >
-            {storeOptions.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-          <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-        </div>
+          {/* No 6: Dropdown Toko */}
+          <div className="relative shrink-0">
+            <select
+              value={selectedStore}
+              onChange={(e) => onStoreChange(e.target.value)}
+              className="appearance-none bg-white border border-slate-200 text-slate-700 text-xs font-medium rounded-lg px-2 py-1.5 pr-6 shadow-2xs hover:border-slate-300 focus:border-[#193f53] outline-none cursor-pointer transition-colors"
+            >
+              {storeOptions.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+            <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+          </div>
 
-        {/* Dropdown 3: Status Audit */}
-        <div className="relative">
-          <select
-            value={selectedStatus}
-            onChange={(e) => onStatusChange(e.target.value)}
-            className="appearance-none bg-white border border-slate-200 text-slate-700 text-xs sm:text-sm font-medium rounded-lg px-3.5 py-2 pr-8 shadow-2xs hover:border-slate-300 focus:border-[#193f53] outline-none cursor-pointer transition-colors"
-          >
-            {statusOptions.map((st) => (
-              <option key={st} value={st}>
-                {st}
-              </option>
-            ))}
-          </select>
-          <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-        </div>
+          {/* No 7: Dropdown Status Audit */}
+          <div className="relative shrink-0">
+            <select
+              value={selectedStatus}
+              onChange={(e) => onStatusChange(e.target.value)}
+              className="appearance-none bg-white border border-slate-200 text-slate-700 text-xs font-medium rounded-lg px-2 py-1.5 pr-6 shadow-2xs hover:border-slate-300 focus:border-[#193f53] outline-none cursor-pointer transition-colors"
+            >
+              {statusOptions.map((st) => (
+                <option key={st} value={st}>
+                  {st}
+                </option>
+              ))}
+            </select>
+            <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+          </div>
 
-        {/* Rentang Tanggal Khusus (Direct Inline, No Modal Popup) */}
-        <div className="flex items-center gap-2">
+          {/* No 8: Tanggal Mulai */}
           <input
             type="date"
             value={internalStartDate}
             onChange={(e) => handleStartChange(e.target.value)}
-            className="bg-white border border-slate-200 text-slate-700 text-xs sm:text-sm font-medium rounded-lg px-3 py-1.5 shadow-2xs hover:border-slate-300 focus:border-[#193f53] outline-none cursor-pointer transition-colors"
+            className="bg-white border border-slate-200 text-slate-700 text-xs font-medium rounded-lg px-2 py-1.5 shadow-2xs hover:border-slate-300 focus:border-[#193f53] outline-none cursor-pointer transition-colors w-[114px] shrink-0"
           />
+
+          {/* No 9: Tanggal Selesai */}
           <input
             type="date"
             value={internalEndDate}
             onChange={(e) => handleEndChange(e.target.value)}
-            className="bg-white border border-slate-200 text-slate-700 text-xs sm:text-sm font-medium rounded-lg px-3 py-1.5 shadow-2xs hover:border-slate-300 focus:border-[#193f53] outline-none cursor-pointer transition-colors"
+            className="bg-white border border-slate-200 text-slate-700 text-xs font-medium rounded-lg px-2 py-1.5 shadow-2xs hover:border-slate-300 focus:border-[#193f53] outline-none cursor-pointer transition-colors w-[114px] shrink-0"
           />
         </div>
+      </div>
+
+      {/* Baris 2: No 4 (Deskripsi) di bawah judul */}
+      <div>
+        <p className="text-xs sm:text-sm text-slate-500">
+          Pantau kondisi dan performa seluruh toko dalam Workspace A
+        </p>
       </div>
     </div>
   );

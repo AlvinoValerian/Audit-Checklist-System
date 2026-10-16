@@ -1,14 +1,23 @@
 import { Holiday, HolidayStatus } from "@/types/holiday";
 
-const HOLIDAY_STORAGE_KEY = "audit_pro_holidays";
+const HOLIDAY_STORAGE_KEY = "audit_pro_holidays_v2";
+
+// Helper to calculate dynamic dates relative to current month & year
+const getDynamicDate = (day: number) => {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(day).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+};
 
 const defaultHolidays: Holiday[] = [
   {
     id: "1",
     storeName: "Cabang Sudirman",
     storeLocation: "Jakarta Pusat",
-    startDate: "2024-08-17",
-    endDate: "2024-08-18",
+    startDate: getDynamicDate(17),
+    endDate: getDynamicDate(18),
     durationDays: 2,
     reason: "Renovasi Tahunan Toko",
     createdBy: "Admin Utama",
@@ -19,8 +28,8 @@ const defaultHolidays: Holiday[] = [
     id: "2",
     storeName: "Cabang Thamrin",
     storeLocation: "Jakarta Pusat",
-    startDate: "2024-08-25",
-    endDate: "2024-08-25",
+    startDate: getDynamicDate(25),
+    endDate: getDynamicDate(25),
     durationDays: 1,
     reason: "Maintenance Kelistrikan & AC",
     createdBy: "Budi Santoso",
@@ -31,8 +40,8 @@ const defaultHolidays: Holiday[] = [
     id: "3",
     storeName: "Cabang Kemang",
     storeLocation: "Jakarta Selatan",
-    startDate: "2024-08-10",
-    endDate: "2024-08-12",
+    startDate: getDynamicDate(10),
+    endDate: getDynamicDate(12),
     durationDays: 3,
     reason: "Pengecatan Ulang & Sanitasi",
     createdBy: "Admin Utama",
@@ -43,10 +52,10 @@ const defaultHolidays: Holiday[] = [
     id: "4",
     storeName: "Cabang Senayan",
     storeLocation: "Jakarta Pusat",
-    startDate: "2024-08-17",
-    endDate: "2024-08-17",
+    startDate: getDynamicDate(17),
+    endDate: getDynamicDate(17),
     durationDays: 1,
-    reason: "Hari Kemerdekaan RI",
+    reason: "Hari Libur Khusus Toko",
     createdBy: "Siti Rahma",
     creatorRole: "Admin",
     status: "Terjadwal",
@@ -55,8 +64,8 @@ const defaultHolidays: Holiday[] = [
     id: "5",
     storeName: "Cabang PIK",
     storeLocation: "Jakarta Utara",
-    startDate: "2024-08-01",
-    endDate: "2024-08-02",
+    startDate: getDynamicDate(1),
+    endDate: getDynamicDate(2),
     durationDays: 2,
     reason: "Disinfeksi Berkala Fasilitas",
     createdBy: "Admin Utama",
@@ -70,6 +79,20 @@ export const HolidayService = {
     if (typeof window === "undefined") return defaultHolidays;
     const stored = localStorage.getItem(HOLIDAY_STORAGE_KEY);
     if (!stored) {
+      // Check legacy storage key
+      const legacy = localStorage.getItem("audit_pro_holidays");
+      if (legacy) {
+        try {
+          const parsedLegacy: Holiday[] = JSON.parse(legacy);
+          const hasOld2024 = parsedLegacy.some((h) => h.startDate.startsWith("2024-08"));
+          if (!hasOld2024) {
+            localStorage.setItem(HOLIDAY_STORAGE_KEY, JSON.stringify(parsedLegacy));
+            return parsedLegacy;
+          }
+        } catch {
+          // ignore
+        }
+      }
       localStorage.setItem(HOLIDAY_STORAGE_KEY, JSON.stringify(defaultHolidays));
       return defaultHolidays;
     }

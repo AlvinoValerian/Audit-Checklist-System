@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { Settings, User } from "lucide-react";
 import { usePathname } from "next/navigation";
 import ProfileModal from "./ProfileModal";
+import { AuthService } from "@/lib/auth";
 
 interface TopBarProps {
   workspaceName?: string;
@@ -11,15 +12,48 @@ interface TopBarProps {
   adminRole?: string;
 }
 
+function getInitials(name: string): string {
+  if (!name) return "AD";
+  if (name === "Admin Utama") return "AD";
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+  return name.slice(0, 2).toUpperCase();
+}
+
 export default function TopBar({
   workspaceName = "WORKSPACE A",
-  adminName = "Admin Utama",
+  adminName: defaultAdminName = "Admin Utama",
   adminRole = "Head Auditor",
 }: TopBarProps) {
   const pathname = usePathname();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [currentAdminName, setCurrentAdminName] = useState(defaultAdminName);
+  const [avatar, setAvatar] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Sync logged in admin name and avatar
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const currentUser = AuthService.getCurrentUser();
+      const storedName = localStorage.getItem("audit_pro_admin_name");
+      const storedAvatar = localStorage.getItem("audit_pro_avatar");
+
+      if (storedName) {
+        setCurrentAdminName(storedName);
+      } else if (currentUser?.fullName) {
+        setCurrentAdminName(currentUser.fullName);
+      } else {
+        setCurrentAdminName(defaultAdminName);
+      }
+
+      if (storedAvatar) {
+        setAvatar(storedAvatar);
+      }
+    }
+  }, [defaultAdminName]);
 
   // Close dropdown on outside click or Escape key
   useEffect(() => {
@@ -123,12 +157,20 @@ export default function TopBar({
             title="Lihat Profil Pengguna"
             aria-label="Lihat Profil Pengguna"
           >
-            <div className="w-8 h-8 rounded-full bg-[#e0e7ff] text-[#1d4ed8] group-hover:bg-[#dbeafe] flex items-center justify-center font-bold text-xs shrink-0 border border-[#c7d2fe] transition-colors shadow-2xs">
-              AD
+            <div className="w-8 h-8 rounded-full bg-[#e0e7ff] text-[#1d4ed8] group-hover:bg-[#dbeafe] flex items-center justify-center font-bold text-xs shrink-0 border border-[#c7d2fe] transition-colors shadow-2xs overflow-hidden">
+              {avatar ? (
+                <img
+                  src={avatar}
+                  alt={currentAdminName}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <span>{getInitials(currentAdminName)}</span>
+              )}
             </div>
             <div className="text-left">
               <p className="text-xs font-bold text-slate-900 group-hover:text-[#193f53] leading-tight transition-colors">
-                {adminName}
+                {currentAdminName}
               </p>
               <p className="text-[10px] text-slate-400 group-hover:text-slate-500 font-normal mt-0.5 transition-colors">
                 {adminRole}
@@ -142,9 +184,14 @@ export default function TopBar({
       <ProfileModal
         isOpen={isProfileModalOpen}
         onClose={() => setIsProfileModalOpen(false)}
-        adminName={adminName}
+        adminName={currentAdminName}
         adminRole={adminRole}
         workspaceName={workspaceName}
+        avatarUrl={avatar}
+        onUpdateProfile={({ name, avatar: newAvatar }) => {
+          if (name) setCurrentAdminName(name);
+          if (newAvatar !== undefined) setAvatar(newAvatar);
+        }}
       />
     </>
   );
