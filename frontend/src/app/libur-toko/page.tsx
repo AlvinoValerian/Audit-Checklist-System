@@ -405,8 +405,10 @@ export default function LiburTokoPage() {
                           {row.status}
                         </span>
                       </td>
-                      <td className="px-5 py-3.5 text-right">
+                      <td className="px-5 py-3.5 text-center">
                         <ActionButtons
+                          align="center"
+                          alignRestoreWithDelete={false}
                           onView={isSoftDeleted ? undefined : () => {
                             setSelectedHolidayToView(row);
                             setIsViewModalOpen(true);
@@ -423,6 +425,8 @@ export default function LiburTokoPage() {
                             setRestoreTargetHoliday(row);
                             setIsRestoreModalOpen(true);
                           } : undefined}
+                          restoreTitle="Aktifkan Kembali Libur Toko"
+                          deleteTitle="Batalkan Libur Toko"
                         />
                       </td>
                     </tr>
