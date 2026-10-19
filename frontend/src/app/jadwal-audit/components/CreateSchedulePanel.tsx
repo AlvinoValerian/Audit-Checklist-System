@@ -4,15 +4,19 @@ import React, { useState, useEffect, useMemo } from "react";
 import {
   X,
   CalendarPlus,
+  Pencil,
   Search,
   Check,
   Clock,
   ChevronDown,
+  Save,
 } from "lucide-react";
 import { AuditSchedule, RecurrenceType, ScheduleStatus } from "@/types/schedule";
 
 interface CreateSchedulePanelProps {
   isOpen: boolean;
+  initialData?: AuditSchedule | null;
+  schedule?: AuditSchedule | null;
   onClose: () => void;
   onSubmit: (data: Omit<AuditSchedule, "id">) => void;
 }
@@ -47,9 +51,14 @@ const INPUT_CLS =
 
 export default function CreateSchedulePanel({
   isOpen,
+  initialData,
+  schedule,
   onClose,
   onSubmit,
 }: CreateSchedulePanelProps) {
+  const targetData = schedule || initialData;
+  const isEdit = Boolean(targetData);
+
   /* ─── Form state ─────────────────────────────────────── */
   const [scheduleName, setScheduleName] = useState("");
   const [selectedStores, setSelectedStores] = useState<string[]>([]);
@@ -64,9 +73,31 @@ export default function CreateSchedulePanel({
   const [notes, setNotes] = useState("");
   const [isActive, setIsActive] = useState(true);
 
-  /* ─── Reset state when closed ────────────────────────── */
+  /* ─── Sync with initialData / schedule prop ─────────── */
   useEffect(() => {
-    if (!isOpen) {
+    if (!isOpen) return;
+
+    if (targetData) {
+      setScheduleName(targetData.scheduleName || "");
+      setSelectedStores([targetData.storeName]);
+      setStoreSearch("");
+      setTemplate(
+        TEMPLATE_OPTIONS.includes(targetData.scheduleName)
+          ? targetData.scheduleName
+          : TEMPLATE_OPTIONS[0]
+      );
+      setStartTime(targetData.startTime || "09:00");
+      setEndTime(targetData.endTime || "12:00");
+      setRecurrence(targetData.recurrence || "Setiap Hari");
+      setSelectedDays(
+        targetData.selectedDays && targetData.selectedDays.length > 0
+          ? targetData.selectedDays
+          : ["Sen", "Sel", "Rab", "Kam", "Jum"]
+      );
+      setNotes(targetData.notes || "");
+      setIsActive(targetData.status !== "Dibatalkan");
+    } else {
+      /* Reset for Create */
       setScheduleName("");
       setSelectedStores([]);
       setStoreSearch("");
@@ -77,28 +108,44 @@ export default function CreateSchedulePanel({
       setSelectedDays(["Sen", "Sel", "Rab", "Kam", "Jum"]);
       setNotes("");
       setIsActive(true);
-      setIsStoreDropdownOpen(false);
     }
-  }, [isOpen]);
+    setIsStoreDropdownOpen(false);
+  }, [isOpen, targetData]);
+
+  /* ─── Dynamic store list (include schedule store if not in predefined list) ── */
+  const availableStores = useMemo(() => {
+    if (targetData && !STORE_OPTIONS.some((s) => s.name === targetData.storeName)) {
+      return [
+        { name: targetData.storeName, location: targetData.storeLocation || "Jakarta" },
+        ...STORE_OPTIONS,
+      ];
+    }
+    return STORE_OPTIONS;
+  }, [targetData]);
 
   const filteredStores = useMemo(
     () =>
-      STORE_OPTIONS.filter((s) =>
+      availableStores.filter((s) =>
         s.name.toLowerCase().includes(storeSearch.toLowerCase())
       ),
-    [storeSearch]
+    [availableStores, storeSearch]
   );
 
-  const allSelected = selectedStores.length === STORE_OPTIONS.length;
+  const allSelected = selectedStores.length === availableStores.length;
 
   const toggleStore = (name: string) => {
-    setSelectedStores((prev) =>
-      prev.includes(name) ? prev.filter((s) => s !== name) : [...prev, name]
-    );
+    if (isEdit) {
+      setSelectedStores([name]);
+      setIsStoreDropdownOpen(false);
+    } else {
+      setSelectedStores((prev) =>
+        prev.includes(name) ? prev.filter((s) => s !== name) : [...prev, name]
+      );
+    }
   };
 
   const toggleAllStores = () => {
-    setSelectedStores(allSelected ? [] : STORE_OPTIONS.map((s) => s.name));
+    setSelectedStores(allSelected ? [] : availableStores.map((s) => s.name));
   };
 
   const removeStore = (name: string) => {
@@ -118,9 +165,9 @@ export default function CreateSchedulePanel({
     if (selectedStores.length === 0) return;
 
     const chosenStore =
-      STORE_OPTIONS.find((s) => s.name === selectedStores[0]) || {
+      availableStores.find((s) => s.name === selectedStores[0]) || {
         name: selectedStores[0],
-        location: "Jakarta",
+        location: targetData?.storeLocation || "Jakarta",
       };
 
     const finalName = scheduleName.trim() || template;
@@ -130,7 +177,7 @@ export default function CreateSchedulePanel({
       storeName: chosenStore.name,
       storeLocation: chosenStore.location,
       scheduleName: finalName,
-      date: new Date().toISOString().split("T")[0],
+      date: targetData?.date || new Date().toISOString().split("T")[0],
       startTime,
       endTime,
       timeRange: `${startTime} - ${endTime}`,
@@ -138,8 +185,8 @@ export default function CreateSchedulePanel({
       selectedDays: recurrence === "Hari Tertentu" ? selectedDays : undefined,
       status: finalStatus,
       notes: notes.trim() || undefined,
-      createdAt: new Date().toISOString().split("T")[0],
-      auditorName: "Admin Utama",
+      createdAt: targetData?.createdAt || new Date().toISOString().split("T")[0],
+      auditorName: targetData?.auditorName,
     });
 
     onClose();
@@ -160,18 +207,32 @@ export default function CreateSchedulePanel({
         {/* Header */}
         <div className="px-5 py-4 border-b border-slate-100 flex items-start justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-sky-50 text-sky-600">
-              <CalendarPlus className="w-5 h-5" />
+            <div
+              className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                isEdit ? "bg-amber-50 text-amber-600" : "bg-sky-50 text-sky-600"
+              }`}
+            >
+              {isEdit ? (
+                <Pencil className="w-4 h-4" />
+              ) : (
+                <CalendarPlus className="w-5 h-5" />
+              )}
             </div>
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider mb-0.5 text-sky-600">
-                Form Baru
+              <p
+                className={`text-[10px] font-bold uppercase tracking-wider mb-0.5 ${
+                  isEdit ? "text-amber-600" : "text-sky-600"
+                }`}
+              >
+                {isEdit ? "Mode Edit" : "Form Baru"}
               </p>
               <h2 className="text-sm font-bold text-slate-900 leading-tight">
-                Tambah Jadwal Audit
+                {isEdit ? "Edit Jadwal Audit" : "Tambah Jadwal Audit"}
               </h2>
               <p className="text-[11px] text-slate-400 mt-0.5">
-                Atur penugasan audit baru untuk cabang toko.
+                {isEdit
+                  ? "Perbarui informasi jadwal dan penugasan audit cabang."
+                  : "Atur penugasan audit baru untuk cabang toko."}
               </p>
             </div>
           </div>
@@ -208,15 +269,17 @@ export default function CreateSchedulePanel({
               <label className="text-xs font-semibold text-slate-700">
                 Pilih Toko / Cabang <span className="text-rose-500">*</span>
               </label>
-              <div className="flex gap-1.5">
-                <button
-                  type="button"
-                  onClick={toggleAllStores}
-                  className="text-[10px] font-semibold text-sky-600 hover:text-sky-700 cursor-pointer"
-                >
-                  {allSelected ? "Hapus Semua" : "Pilih Semua"}
-                </button>
-              </div>
+              {!isEdit && (
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={toggleAllStores}
+                    className="text-[10px] font-semibold text-sky-600 hover:text-sky-700 cursor-pointer"
+                  >
+                    {allSelected ? "Hapus Semua" : "Pilih Semua"}
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Selected Tags */}
@@ -272,23 +335,25 @@ export default function CreateSchedulePanel({
                     onClick={() => setIsStoreDropdownOpen(false)}
                   />
                   <div className="absolute left-0 right-0 mt-1.5 bg-white border border-slate-200 rounded-xl shadow-xl z-20 overflow-hidden max-h-56 overflow-y-auto">
-                    {/* Pilih semua row */}
-                    <label className="flex items-center gap-3 px-3.5 py-2.5 hover:bg-slate-50 cursor-pointer border-b border-slate-100">
-                      <input
-                        type="checkbox"
-                        checked={allSelected}
-                        onChange={toggleAllStores}
-                        className="w-3.5 h-3.5 rounded accent-[#193f53] cursor-pointer"
-                      />
-                      <div className="flex-1">
-                        <p className="text-xs font-semibold text-slate-700">
-                          Pilih Semua Toko ({STORE_OPTIONS.length} Toko)
-                        </p>
-                      </div>
-                      {allSelected && (
-                        <Check className="w-3.5 h-3.5 text-sky-600 shrink-0" />
-                      )}
-                    </label>
+                    {/* Pilih semua row (only in create mode) */}
+                    {!isEdit && (
+                      <label className="flex items-center gap-3 px-3.5 py-2.5 hover:bg-slate-50 cursor-pointer border-b border-slate-100">
+                        <input
+                          type="checkbox"
+                          checked={allSelected}
+                          onChange={toggleAllStores}
+                          className="w-3.5 h-3.5 rounded accent-[#193f53] cursor-pointer"
+                        />
+                        <div className="flex-1">
+                          <p className="text-xs font-semibold text-slate-700">
+                            Pilih Semua Toko ({availableStores.length} Toko)
+                          </p>
+                        </div>
+                        {allSelected && (
+                          <Check className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                        )}
+                      </label>
+                    )}
 
                     {filteredStores.map((store) => {
                       const checked = selectedStores.includes(store.name);
@@ -302,7 +367,8 @@ export default function CreateSchedulePanel({
                           className="flex items-center gap-3 px-3.5 py-2.5 hover:bg-slate-50 cursor-pointer"
                         >
                           <input
-                            type="checkbox"
+                            type={isEdit ? "radio" : "checkbox"}
+                            name="storeSelection"
                             checked={checked}
                             onChange={() => {}}
                             className="w-3.5 h-3.5 rounded accent-[#193f53] cursor-pointer"
@@ -333,39 +399,45 @@ export default function CreateSchedulePanel({
             <select
               value={template}
               onChange={(e) => setTemplate(e.target.value)}
-              className={INPUT_CLS}
+              className={INPUT_CLS + " cursor-pointer"}
             >
-              {TEMPLATE_OPTIONS.map((t) => (
-                <option key={t} value={t}>
-                  {t}
+              {TEMPLATE_OPTIONS.map((tpl) => (
+                <option key={tpl} value={tpl}>
+                  {tpl}
                 </option>
               ))}
             </select>
           </div>
 
-          {/* Waktu Pelaksanaan */}
+          {/* Waktu Audit */}
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-              Waktu Pelaksanaan <span className="text-rose-500">*</span>
+              Waktu Audit <span className="text-rose-500">*</span>
             </label>
             <div className="grid grid-cols-2 gap-3">
-              <div className="relative">
-                <Clock className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  type="time"
-                  value={startTime}
-                  onChange={(e) => setStartTime(e.target.value)}
-                  className={`${INPUT_CLS} pl-9`}
-                />
+              <div>
+                <p className="text-[10px] text-slate-400 mb-1">Jam Mulai</p>
+                <div className="relative">
+                  <Clock className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="time"
+                    value={startTime}
+                    onChange={(e) => setStartTime(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#193f53]/15 focus:border-[#193f53]"
+                  />
+                </div>
               </div>
-              <div className="relative">
-                <Clock className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  type="time"
-                  value={endTime}
-                  onChange={(e) => setEndTime(e.target.value)}
-                  className={`${INPUT_CLS} pl-9`}
-                />
+              <div>
+                <p className="text-[10px] text-slate-400 mb-1">Jam Selesai</p>
+                <div className="relative">
+                  <Clock className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="time"
+                    value={endTime}
+                    onChange={(e) => setEndTime(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#193f53]/15 focus:border-[#193f53]"
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -373,46 +445,50 @@ export default function CreateSchedulePanel({
           {/* Pengulangan */}
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-              Pengulangan <span className="text-rose-500">*</span>
+              Pengulangan Jadwal (Recurrence)
             </label>
-            <div className="grid grid-cols-3 gap-2">
-              {(["Setiap Hari", "Hari Tertentu", "Hanya Sekali"] as RecurrenceType[]).map(
-                (item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    onClick={() => setRecurrence(item)}
-                    className={`py-2 px-2.5 rounded-lg text-xs font-medium border text-center transition-all cursor-pointer ${
-                      recurrence === item
-                        ? "bg-[#193f53] text-white border-[#193f53] shadow-2xs font-semibold"
-                        : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"
-                    }`}
-                  >
-                    {item}
-                  </button>
-                )
-              )}
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => setRecurrence("Setiap Hari")}
+                className={`flex-1 py-2 transition-colors cursor-pointer ${
+                  recurrence === "Setiap Hari"
+                    ? "bg-slate-100 text-slate-800"
+                    : "bg-white text-slate-400 hover:bg-slate-50"
+                }`}
+              >
+                Setiap Hari
+              </button>
+              <button
+                type="button"
+                onClick={() => setRecurrence("Hari Tertentu")}
+                className={`flex-1 py-2 transition-colors cursor-pointer border-l border-slate-200 ${
+                  recurrence === "Hari Tertentu"
+                    ? "bg-[#193f53] text-white"
+                    : "bg-white text-slate-400 hover:bg-slate-50"
+                }`}
+              >
+                Hari Tertentu
+              </button>
             </div>
-          </div>
 
-          {/* Hari Tertentu Selector */}
-          {recurrence === "Hari Tertentu" && (
-            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2 animate-in fade-in duration-150">
-              <label className="block text-[11px] font-semibold text-slate-600">
-                Pilih Hari Aktif
-              </label>
-              <div className="flex flex-wrap gap-1.5">
+            {/* Day Chips */}
+            <div className="mt-2.5">
+              <p className="text-[10px] text-slate-400 mb-1.5">
+                Pilih hari audit mingguan:
+              </p>
+              <div className="flex gap-1.5">
                 {ALL_DAYS.map((day) => {
-                  const isDaySelected = selectedDays.includes(day);
+                  const active = selectedDays.includes(day);
                   return (
                     <button
                       key={day}
                       type="button"
                       onClick={() => toggleDay(day)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                        isDaySelected
-                          ? "bg-[#193f53] text-white shadow-2xs"
-                          : "bg-white text-slate-600 border border-slate-200 hover:border-slate-300"
+                      className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold border transition-all cursor-pointer ${
+                        active
+                          ? "bg-[#193f53] text-white border-[#193f53]"
+                          : "bg-white text-slate-400 border-slate-200 hover:border-slate-300"
                       }`}
                     >
                       {day}
@@ -421,24 +497,25 @@ export default function CreateSchedulePanel({
                 })}
               </div>
             </div>
-          )}
+          </div>
 
-          {/* Instruksi Khusus */}
+          {/* Catatan */}
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-              Instruksi Khusus (Opsional)
+              Catatan / Instruksi Khusus{" "}
+              <span className="text-slate-400 font-normal">(Opsional)</span>
             </label>
             <textarea
               rows={3}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Tambahkan catatan khusus untuk tim auditor terkait toko ini..."
-              className={`${INPUT_CLS} resize-none`}
+              placeholder="Tambahkan instruksi khusus untuk auditor lapangan..."
+              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#193f53]/15 focus:border-[#193f53] transition-all resize-none"
             />
           </div>
 
-          {/* Status Jadwal Awal Card */}
-          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between">
+          {/* Status Jadwal Awal */}
+          <div className="flex items-center justify-between px-4 py-3.5 bg-slate-50 border border-slate-100 rounded-2xl">
             <div>
               <p className="text-xs font-bold text-slate-800">Status Jadwal Awal</p>
               <p className="text-[11px] text-slate-400 mt-0.5">
@@ -483,8 +560,17 @@ export default function CreateSchedulePanel({
             disabled={selectedStores.length === 0 || !scheduleName.trim()}
             className="flex items-center gap-2 px-5 py-2.5 bg-[#193f53] hover:bg-[#123040] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-xs font-semibold transition-all shadow-2xs cursor-pointer"
           >
-            <CalendarPlus className="w-3.5 h-3.5" />
-            <span>Simpan Jadwal</span>
+            {isEdit ? (
+              <>
+                <Save className="w-3.5 h-3.5" />
+                <span>Simpan Perubahan</span>
+              </>
+            ) : (
+              <>
+                <CalendarPlus className="w-3.5 h-3.5" />
+                <span>Simpan Jadwal</span>
+              </>
+            )}
           </button>
         </div>
       </div>
