@@ -55,21 +55,23 @@ export default function AuditCalendarWidget({
   const prevMonthDays = Array.from({ length: firstDay }).map((_, i) => daysInPrevMonth - firstDay + 1 + i);
   const currentMonthDays = Array.from({ length: daysInMonth }).map((_, i) => i + 1);
 
-  // Helper to check if a date has audit schedules
-  const getScheduleStatus = (day: number) => {
-    const checkDateStr = `${cYear}-${String(cMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  // Helper to check if a date has audit schedules (returns all distinct status dot colors)
+  const getScheduleDots = (day: number): string[] => {
+    const checkDateStr = `${cYear}-${String(cMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
     const daySchedules = schedules.filter((s) => s.date === checkDateStr);
 
-    if (daySchedules.length === 0) return null;
+    if (daySchedules.length === 0) return [];
 
-    // Priority: Terjadwal (purple) > Dibatalkan (rose) > Selesai (emerald)
-    if (daySchedules.some((s) => s.status === "Terjadwal")) return "bg-purple-500";
-    if (daySchedules.some((s) => s.status === "Dibatalkan")) return "bg-rose-500";
-    return "bg-emerald-500";
+    const dots: string[] = [];
+    if (daySchedules.some((s) => s.status === "Terjadwal")) dots.push("bg-purple-500");
+    if (daySchedules.some((s) => s.status === "Selesai")) dots.push("bg-emerald-500");
+    if (daySchedules.some((s) => s.status === "Dibatalkan")) dots.push("bg-rose-500");
+    return dots;
   };
 
   // Aggregate schedule counts
   const totalScheduled = schedules.filter((s) => s.status === "Terjadwal").length;
+  const totalCompleted = schedules.filter((s) => s.status === "Selesai").length;
   const totalCancelled = schedules.filter((s) => s.status === "Dibatalkan").length;
 
   return (
@@ -162,7 +164,7 @@ export default function AuditCalendarWidget({
 
           {/* Current month days */}
           {currentMonthDays.map((day) => {
-            const dotColor = getScheduleStatus(day);
+            const dots = getScheduleDots(day);
             const checkDateStr = `${cYear}-${String(cMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
             const isSelected = selectedDate ? format(selectedDate, "yyyy-MM-dd") === checkDateStr : false;
 
@@ -173,27 +175,33 @@ export default function AuditCalendarWidget({
                   e.stopPropagation();
                   onSelectDate(isSelected ? null : new Date(cYear, cMonth, day));
                 }}
-                className={`text-[11px] font-medium relative flex flex-col items-center justify-center cursor-pointer transition-colors ${
+                className={`h-7 w-7 mx-auto text-[11px] font-medium relative flex flex-col items-center justify-center cursor-pointer transition-colors rounded-lg ${
                   isSelected
-                    ? "text-[#193f53] font-bold"
-                    : "text-slate-800 hover:text-blue-600"
+                    ? "text-[#193f53] font-bold bg-sky-100/60"
+                    : "text-slate-800 hover:text-blue-600 hover:bg-slate-50"
                 }`}
               >
-                {day}
-                {isSelected && (
-                  <div className="absolute -bottom-1.5 w-3 h-0.5 bg-[#193f53] rounded-full"></div>
-                )}
-                {!isSelected && dotColor && (
-                  <div className={`absolute -bottom-2 w-1 h-1 rounded-full ${dotColor}`}></div>
-                )}
+                <span>{day}</span>
+                {isSelected ? (
+                  <div className="absolute -bottom-1 w-3 h-0.5 bg-[#193f53] rounded-full"></div>
+                ) : dots.length > 0 ? (
+                  <div className="absolute -bottom-1 flex items-center justify-center gap-0.5">
+                    {dots.map((colorClass, idx) => (
+                      <div key={idx} className={`w-1 h-1 rounded-full ${colorClass}`} />
+                    ))}
+                  </div>
+                ) : null}
               </div>
             );
           })}
         </div>
 
-        <div className="flex items-center justify-around text-[10px] font-medium text-slate-600 border-t border-slate-100 pt-4 mt-auto px-4">
+        <div className="flex items-center justify-between text-[10px] font-medium text-slate-600 border-t border-slate-100 pt-3.5 mt-auto px-1 sm:px-2">
           <div className="flex items-center gap-1.5 whitespace-nowrap">
             <div className="w-1.5 h-1.5 rounded-full bg-purple-500 shrink-0"></div> {totalScheduled} Terjadwal
+          </div>
+          <div className="flex items-center gap-1.5 whitespace-nowrap">
+            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></div> {totalCompleted} Selesai
           </div>
           <div className="flex items-center gap-1.5 whitespace-nowrap">
             <div className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0"></div> {totalCancelled} Dibatalkan

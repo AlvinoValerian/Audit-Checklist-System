@@ -12,6 +12,7 @@ import {
   Save,
 } from "lucide-react";
 import { AuditSchedule, RecurrenceType, ScheduleStatus } from "@/types/schedule";
+import { toast } from "sonner";
 
 interface CreateSchedulePanelProps {
   isOpen: boolean;
@@ -45,6 +46,27 @@ const TEMPLATE_OPTIONS = [
 ];
 
 const ALL_DAYS = ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"];
+
+const DAY_MAP_TO_SHORT: Record<string, string> = {
+  Senin: "Sen",
+  Selasa: "Sel",
+  Rabu: "Rab",
+  Kamis: "Kam",
+  Jumat: "Jum",
+  Sabtu: "Sab",
+  Minggu: "Min",
+  Sen: "Sen",
+  Sel: "Sel",
+  Rab: "Rab",
+  Kam: "Kam",
+  Jum: "Jum",
+  Sab: "Sab",
+  Min: "Min",
+};
+
+export const normalizeDayToShort = (day: string): string => {
+  return DAY_MAP_TO_SHORT[day] || day;
+};
 
 const INPUT_CLS =
   "w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#193f53]/15 focus:border-[#193f53] transition-all";
@@ -88,12 +110,17 @@ export default function CreateSchedulePanel({
       );
       setStartTime(targetData.startTime || "09:00");
       setEndTime(targetData.endTime || "12:00");
-      setRecurrence(targetData.recurrence || "Setiap Hari");
-      setSelectedDays(
-        targetData.selectedDays && targetData.selectedDays.length > 0
-          ? targetData.selectedDays
-          : ["Sen", "Sel", "Rab", "Kam", "Jum"]
-      );
+      const rec = targetData.recurrence || "Setiap Hari";
+      setRecurrence(rec);
+      if (rec === "Setiap Hari") {
+        setSelectedDays([...ALL_DAYS]);
+      } else {
+        const rawDays = targetData.selectedDays || [];
+        const normalized = rawDays
+          .map((d) => normalizeDayToShort(d))
+          .filter((d) => ALL_DAYS.includes(d));
+        setSelectedDays(normalized);
+      }
       setNotes(targetData.notes || "");
       setIsActive(targetData.status !== "Dibatalkan");
     } else {
@@ -105,7 +132,7 @@ export default function CreateSchedulePanel({
       setStartTime("09:00");
       setEndTime("12:00");
       setRecurrence("Setiap Hari");
-      setSelectedDays(["Sen", "Sel", "Rab", "Kam", "Jum"]);
+      setSelectedDays([...ALL_DAYS]);
       setNotes("");
       setIsActive(true);
     }
@@ -152,17 +179,54 @@ export default function CreateSchedulePanel({
     setSelectedStores((prev) => prev.filter((s) => s !== name));
   };
 
-  /* ─── Day toggle ─────────────────────────────────────── */
+  /* ─── Recurrence & Day toggle ───────────────────────── */
+  const handleRecurrenceChange = (type: RecurrenceType) => {
+    setRecurrence(type);
+    if (type === "Setiap Hari") {
+      setSelectedDays([...ALL_DAYS]);
+    } else if (type === "Hari Tertentu") {
+      // Kosongkan hari terlebih dahulu agar user memilih sendiri tanpa otomatis Senin-Jumat
+      if (!isEdit) {
+        setSelectedDays([]);
+      } else {
+        if (targetData?.selectedDays && targetData.selectedDays.length > 0 && targetData.recurrence === "Hari Tertentu") {
+          setSelectedDays(targetData.selectedDays);
+        } else {
+          setSelectedDays([]);
+        }
+      }
+    }
+  };
+
   const toggleDay = (day: string) => {
-    setSelectedDays((prev) =>
-      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]
-    );
+    if (recurrence === "Setiap Hari") {
+      // Jika user menekan salah satu hari saat di mode Setiap Hari,
+      // otomatis alihkan ke mode Hari Tertentu dengan hari tersebut di-uncheck
+      setRecurrence("Hari Tertentu");
+      setSelectedDays(ALL_DAYS.filter((d) => d !== day));
+      return;
+    }
+
+    if (selectedDays.includes(day)) {
+      if (selectedDays.length <= 1) {
+        toast.warning("Minimal harus memilih 1 hari audit untuk jadwal ini!");
+        return;
+      }
+      setSelectedDays((prev) => prev.filter((d) => d !== day));
+    } else {
+      setSelectedDays((prev) => [...prev, day]);
+    }
   };
 
   /* ─── Submit ─────────────────────────────────────────── */
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedStores.length === 0) return;
+
+    if (recurrence === "Hari Tertentu" && selectedDays.length === 0) {
+      toast.error("Wajib memilih minimal 1 hari audit untuk pengulangan Hari Tertentu!");
+      return;
+    }
 
     const chosenStore =
       availableStores.find((s) => s.name === selectedStores[0]) || {
@@ -182,7 +246,7 @@ export default function CreateSchedulePanel({
       endTime,
       timeRange: `${startTime} - ${endTime}`,
       recurrence,
-      selectedDays: recurrence === "Hari Tertentu" ? selectedDays : undefined,
+      selectedDays: recurrence === "Setiap Hari" ? [...ALL_DAYS] : selectedDays,
       status: finalStatus,
       notes: notes.trim() || undefined,
       createdAt: targetData?.createdAt || new Date().toISOString().split("T")[0],
@@ -445,27 +509,27 @@ export default function CreateSchedulePanel({
           {/* Pengulangan */}
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-              Pengulangan Jadwal (Recurrence)
+              Pengulangan Jadwal (Recurrence) <span className="text-rose-500">*</span>
             </label>
-            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-semibold">
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-semibold p-0.5 bg-slate-50 gap-1">
               <button
                 type="button"
-                onClick={() => setRecurrence("Setiap Hari")}
-                className={`flex-1 py-2 transition-colors cursor-pointer ${
+                onClick={() => handleRecurrenceChange("Setiap Hari")}
+                className={`flex-1 py-2 rounded-md transition-all cursor-pointer text-center ${
                   recurrence === "Setiap Hari"
-                    ? "bg-slate-100 text-slate-800"
-                    : "bg-white text-slate-400 hover:bg-slate-50"
+                    ? "bg-[#193f53] text-white shadow-2xs font-bold"
+                    : "text-slate-600 hover:text-slate-900 hover:bg-white"
                 }`}
               >
                 Setiap Hari
               </button>
               <button
                 type="button"
-                onClick={() => setRecurrence("Hari Tertentu")}
-                className={`flex-1 py-2 transition-colors cursor-pointer border-l border-slate-200 ${
+                onClick={() => handleRecurrenceChange("Hari Tertentu")}
+                className={`flex-1 py-2 rounded-md transition-all cursor-pointer text-center ${
                   recurrence === "Hari Tertentu"
-                    ? "bg-[#193f53] text-white"
-                    : "bg-white text-slate-400 hover:bg-slate-50"
+                    ? "bg-[#193f53] text-white shadow-2xs font-bold"
+                    : "text-slate-600 hover:text-slate-900 hover:bg-white"
                 }`}
               >
                 Hari Tertentu
@@ -474,9 +538,24 @@ export default function CreateSchedulePanel({
 
             {/* Day Chips */}
             <div className="mt-2.5">
-              <p className="text-[10px] text-slate-400 mb-1.5">
-                Pilih hari audit mingguan:
-              </p>
+              <div className="flex items-center justify-between mb-1.5">
+                <p className="text-[10px] text-slate-400">
+                  {recurrence === "Setiap Hari"
+                    ? "Semua hari otomatis aktif (Senin - Minggu):"
+                    : "Pilih hari audit mingguan (minimal 1 hari):"}
+                </p>
+                {recurrence === "Hari Tertentu" && (
+                  <span
+                    className={`text-[10px] font-semibold ${
+                      selectedDays.length === 0 ? "text-rose-500" : "text-sky-600"
+                    }`}
+                  >
+                    {selectedDays.length === 0
+                      ? "Wajib pilih minimal 1 hari"
+                      : `${selectedDays.length} hari dipilih`}
+                  </span>
+                )}
+              </div>
               <div className="flex gap-1.5">
                 {ALL_DAYS.map((day) => {
                   const active = selectedDays.includes(day);
@@ -487,15 +566,25 @@ export default function CreateSchedulePanel({
                       onClick={() => toggleDay(day)}
                       className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold border transition-all cursor-pointer ${
                         active
-                          ? "bg-[#193f53] text-white border-[#193f53]"
+                          ? "bg-[#193f53] text-white border-[#193f53] shadow-xs"
                           : "bg-white text-slate-400 border-slate-200 hover:border-slate-300"
                       }`}
+                      title={
+                        recurrence === "Setiap Hari"
+                          ? `Klik untuk beralih ke hari tertentu tanpa ${day}`
+                          : undefined
+                      }
                     >
                       {day}
                     </button>
                   );
                 })}
               </div>
+              {recurrence === "Hari Tertentu" && selectedDays.length === 0 && (
+                <p className="text-[10px] text-rose-500 font-medium mt-1">
+                  * Minimal 1 hari harus dipilih agar jadwal dapat disimpan.
+                </p>
+              )}
             </div>
           </div>
 
@@ -557,7 +646,11 @@ export default function CreateSchedulePanel({
               const form = e.currentTarget.closest(".fixed")?.querySelector("form");
               if (form) form.requestSubmit();
             }}
-            disabled={selectedStores.length === 0 || !scheduleName.trim()}
+            disabled={
+              selectedStores.length === 0 ||
+              !scheduleName.trim() ||
+              (recurrence === "Hari Tertentu" && selectedDays.length === 0)
+            }
             className="flex items-center gap-2 px-5 py-2.5 bg-[#193f53] hover:bg-[#123040] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-xs font-semibold transition-all shadow-2xs cursor-pointer"
           >
             {isEdit ? (

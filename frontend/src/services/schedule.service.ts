@@ -46,7 +46,7 @@ export const defaultSchedules: AuditSchedule[] = [
     endTime: "15:30",
     date: getDynamicDate(4),
     recurrence: "Hari Tertentu",
-    selectedDays: ["Senin", "Rabu", "Jumat"],
+    selectedDays: ["Sen", "Rab", "Jum"],
     status: "Terjadwal",
     notes: "Pemeriksaan planogram mingguan dan promo katalog aktif.",
     createdAt: getDynamicCreated(4),
@@ -77,7 +77,7 @@ export const defaultSchedules: AuditSchedule[] = [
     endTime: "12:30",
     date: getDynamicDate(5),
     recurrence: "Hari Tertentu",
-    selectedDays: ["Selasa", "Kamis"],
+    selectedDays: ["Sel", "Kam"],
     status: "Terjadwal",
     notes: "Stock opname parsial kategori susu dan daging beku.",
     createdAt: getDynamicCreated(5),
@@ -93,7 +93,7 @@ export const defaultSchedules: AuditSchedule[] = [
     endTime: "17:00",
     date: getDynamicDate(5),
     recurrence: "Hari Tertentu",
-    selectedDays: ["Selasa"],
+    selectedDays: ["Sel"],
     status: "Dibatalkan",
     notes: "Jadwal ditunda karena sedang berlangsung perbaikan lantai toko.",
     createdAt: getDynamicCreated(5),
@@ -124,7 +124,7 @@ export const defaultSchedules: AuditSchedule[] = [
     endTime: "15:00",
     date: getDynamicDate(6),
     recurrence: "Hari Tertentu",
-    selectedDays: ["Rabu", "Sabtu"],
+    selectedDays: ["Rab", "Sab"],
     status: "Terjadwal",
     notes: "Pengukuran suhu chiller dan freezer showcase.",
     createdAt: getDynamicCreated(6),
@@ -155,7 +155,7 @@ export const defaultSchedules: AuditSchedule[] = [
     endTime: "16:30",
     date: getDynamicDate(7),
     recurrence: "Hari Tertentu",
-    selectedDays: ["Kamis"],
+    selectedDays: ["Kam"],
     status: "Terjadwal",
     notes: "Pemeriksaan kesesuaian label harga rak gondola.",
     createdAt: getDynamicCreated(7),
@@ -171,7 +171,7 @@ export const defaultSchedules: AuditSchedule[] = [
     endTime: "12:00",
     date: getDynamicDate(8),
     recurrence: "Hari Tertentu",
-    selectedDays: ["Jumat"],
+    selectedDays: ["Jum"],
     status: "Selesai",
     notes: "Pemeriksaan validasi kode barcode statis meja kasir.",
     createdAt: getDynamicCreated(8),
@@ -187,7 +187,7 @@ export const defaultSchedules: AuditSchedule[] = [
     endTime: "13:30",
     date: getDynamicDate(8),
     recurrence: "Hari Tertentu",
-    selectedDays: ["Jumat", "Sabtu"],
+    selectedDays: ["Jum", "Sab"],
     status: "Terjadwal",
     notes: "Inspeksi tekanan tabung pemadam api dan tangga darurat.",
     createdAt: getDynamicCreated(8),
@@ -203,12 +203,29 @@ export const defaultSchedules: AuditSchedule[] = [
     endTime: "17:00",
     date: getDynamicDate(9),
     recurrence: "Hari Tertentu",
-    selectedDays: ["Sabtu"],
+    selectedDays: ["Sab"],
     status: "Dibatalkan",
     notes: "Jadwal dialihkan karena toko sedang renovasi elektrikal.",
     createdAt: getDynamicCreated(9),
   },
 ];
+
+const DAY_MAP_TO_SHORT: Record<string, string> = {
+  Senin: "Sen",
+  Selasa: "Sel",
+  Rabu: "Rab",
+  Kamis: "Kam",
+  Jumat: "Jum",
+  Sabtu: "Sab",
+  Minggu: "Min",
+  Sen: "Sen",
+  Sel: "Sel",
+  Rab: "Rab",
+  Kam: "Kam",
+  Jum: "Jum",
+  Sab: "Sab",
+  Min: "Min",
+};
 
 export const ScheduleService = {
   getAll(): AuditSchedule[] {
@@ -222,19 +239,32 @@ export const ScheduleService = {
           const now = new Date();
           const currentYearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
           
+          let changed = false;
           const updated = parsed.map((item) => {
+            let nextItem = { ...item };
             if (item.date && !item.date.startsWith(currentYearMonth)) {
               const dayPart = item.date.split("-")[2] || "01";
-              return {
-                ...item,
-                date: `${currentYearMonth}-${dayPart}`,
-                createdAt: item.createdAt?.startsWith(currentYearMonth)
-                  ? item.createdAt
-                  : `${currentYearMonth}-01`,
-              };
+              nextItem.date = `${currentYearMonth}-${dayPart}`;
+              nextItem.createdAt = item.createdAt?.startsWith(currentYearMonth)
+                ? item.createdAt
+                : `${currentYearMonth}-01`;
+              changed = true;
             }
-            return item;
+            if (Array.isArray(nextItem.selectedDays)) {
+              const normalized = nextItem.selectedDays.map(
+                (d: string) => DAY_MAP_TO_SHORT[d] || d
+              );
+              if (JSON.stringify(normalized) !== JSON.stringify(nextItem.selectedDays)) {
+                nextItem.selectedDays = normalized;
+                changed = true;
+              }
+            }
+            return nextItem;
           });
+
+          if (changed) {
+            localStorage.setItem(SCHEDULE_STORAGE_KEY, JSON.stringify(updated));
+          }
           return updated;
         }
       }

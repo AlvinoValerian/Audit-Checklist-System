@@ -22,6 +22,23 @@ interface DetailScheduleProps {
 
 const ALL_DAYS = ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"];
 
+const DAY_MAP_TO_SHORT: Record<string, string> = {
+  Senin: "Sen",
+  Selasa: "Sel",
+  Rabu: "Rab",
+  Kamis: "Kam",
+  Jumat: "Jum",
+  Sabtu: "Sab",
+  Minggu: "Min",
+  Sen: "Sen",
+  Sel: "Sel",
+  Rab: "Rab",
+  Kam: "Kam",
+  Jum: "Jum",
+  Sab: "Sab",
+  Min: "Min",
+};
+
 export default function DetailSchedule({
   schedule,
   onBack,
@@ -49,13 +66,17 @@ export default function DetailSchedule({
         ]),
   ].slice(0, 3);
 
-  // Active days: use schedule selectedDays or default active days [Sen, Rab, Jum] from reference
+  // Active days: use schedule selectedDays or all days for Setiap Hari
+  const normalizedSelectedDays = (schedule.selectedDays || []).map(
+    (d) => DAY_MAP_TO_SHORT[d] || d
+  );
+
   const activeDays =
-    schedule.selectedDays && schedule.selectedDays.length > 0
-      ? schedule.selectedDays
+    normalizedSelectedDays.length > 0
+      ? normalizedSelectedDays
       : schedule.recurrence === "Setiap Hari"
       ? ALL_DAYS
-      : ["Sen", "Rab", "Jum"];
+      : [];
 
   // Time formatting
   const startTime = schedule.startTime || "09:00";
