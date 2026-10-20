@@ -25,6 +25,7 @@ import { toast } from "sonner";
 import ActionButtons from "@/components/ui/ActionButtons";
 import AuditCalendarWidget from "./components/AuditCalendarWidget";
 import CreateSchedulePanel from "./components/CreateSchedulePanel";
+import DetailSchedule from "./components/DetailSchedule";
 import DeleteScheduleModal from "./components/DeleteScheduleModal";
 import ChecklistRequiredModal from "./components/ChecklistRequiredModal";
 import { format, isSameDay } from "date-fns";
@@ -41,6 +42,9 @@ export default function JadwalAuditPage() {
 
   // Modal & Panel States
   const [isSchedulePanelOpen, setIsSchedulePanelOpen] = useState(false);
+  const [scheduleToEdit, setScheduleToEdit] = useState<AuditSchedule | null>(null);
+
+  const [selectedScheduleToView, setSelectedScheduleToView] = useState<AuditSchedule | null>(null);
 
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [scheduleToDelete, setScheduleToDelete] = useState<AuditSchedule | null>(null);
@@ -70,13 +74,32 @@ export default function JadwalAuditPage() {
 
   // Handlers
   const handleOpenCreate = () => {
+    setScheduleToEdit(null);
     setIsSchedulePanelOpen(true);
   };
 
-  const handleCreateSchedule = (scheduleData: Omit<AuditSchedule, "id">) => {
-    ScheduleService.create(scheduleData);
-    toast.success(`Jadwal audit untuk "${scheduleData.storeName}" berhasil dibuat!`);
+  const handleOpenEdit = (schedule: AuditSchedule) => {
+    setScheduleToEdit(schedule);
+    setIsSchedulePanelOpen(true);
+  };
+
+  const handleSaveSchedule = (scheduleData: Omit<AuditSchedule, "id">) => {
+    if (scheduleToEdit) {
+      ScheduleService.update(scheduleToEdit.id, scheduleData);
+      toast.success(`Jadwal untuk "${scheduleData.storeName}" berhasil diperbarui!`);
+    } else {
+      ScheduleService.create(scheduleData);
+      toast.success(`Jadwal audit untuk "${scheduleData.storeName}" berhasil dibuat!`);
+    }
     setIsSchedulePanelOpen(false);
+    setScheduleToEdit(null);
+    refreshData();
+  };
+
+  const handleUpdateSchedule = (scheduleId: string, updatedData: Partial<AuditSchedule>) => {
+    ScheduleService.update(scheduleId, updatedData);
+    toast.success("Jadwal audit berhasil diperbarui!");
+    setSelectedScheduleToView(null);
     refreshData();
   };
 
@@ -430,6 +453,20 @@ export default function JadwalAuditPage() {
                         <ActionButtons
                           align="center"
                           alignRestoreWithDelete={false}
+                          onView={
+                            isCancelled
+                              ? undefined
+                              : () => {
+                                  setSelectedScheduleToView(schedule);
+                                }
+                          }
+                          onEdit={
+                            isCancelled
+                              ? undefined
+                              : () => {
+                                  handleOpenEdit(schedule);
+                                }
+                          }
                           onDelete={
                             isCancelled
                               ? undefined
@@ -453,6 +490,8 @@ export default function JadwalAuditPage() {
                                 }
                               : undefined
                           }
+                          viewTitle="Lihat Detail Jadwal"
+                          editTitle="Edit Jadwal"
                           deleteTitle="Batalkan Jadwal"
                           restoreTitle="Aktifkan Kembali Jadwal"
                         />
@@ -516,8 +555,12 @@ export default function JadwalAuditPage() {
       {/* Side Panels & Modals */}
       <CreateSchedulePanel
         isOpen={isSchedulePanelOpen}
-        onClose={() => setIsSchedulePanelOpen(false)}
-        onSubmit={handleCreateSchedule}
+        schedule={scheduleToEdit}
+        onClose={() => {
+          setIsSchedulePanelOpen(false);
+          setScheduleToEdit(null);
+        }}
+        onSubmit={handleSaveSchedule}
       />
 
       <DeleteScheduleModal
@@ -540,6 +583,22 @@ export default function JadwalAuditPage() {
         }}
         onCompleteAndDeactivate={handleCompleteAndDeactivate}
       />
+
+      {selectedScheduleToView && (
+        <DetailSchedule
+          key={selectedScheduleToView.id}
+          schedule={selectedScheduleToView}
+          onBack={() => {
+            setSelectedScheduleToView(null);
+          }}
+          onEdit={() => {
+            const current = selectedScheduleToView;
+            setSelectedScheduleToView(null);
+            handleOpenEdit(current);
+          }}
+          onSubmit={(updatedData) => handleUpdateSchedule(selectedScheduleToView.id, updatedData)}
+        />
+      )}
     </DashboardLayout>
   );
 }
