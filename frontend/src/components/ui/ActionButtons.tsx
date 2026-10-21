@@ -16,6 +16,7 @@ interface ActionButtonsProps {
   align?: "center" | "end" | "start";
   className?: string;
   alignRestoreWithDelete?: boolean;
+  hasViewSlot?: boolean;
 }
 
 export default function ActionButtons({
@@ -30,6 +31,7 @@ export default function ActionButtons({
   align = "end",
   className = "",
   alignRestoreWithDelete = true,
+  hasViewSlot = true,
 }: ActionButtonsProps) {
   const justifyClass =
     align === "center"
@@ -40,7 +42,8 @@ export default function ActionButtons({
 
   return (
     <div className={`flex items-center ${justifyClass} gap-2.5 ${className}`}>
-      {onView && (
+      {/* Slot 1: View Button or Placeholder when restoring */}
+      {onView ? (
         <button
           onClick={onView}
           title={viewTitle}
@@ -48,14 +51,14 @@ export default function ActionButtons({
         >
           <Eye className="w-4 h-4" />
         </button>
+      ) : (
+        alignRestoreWithDelete && onRestore && !onDelete && !onEdit && hasViewSlot && (
+          <div className="w-6 h-6 pointer-events-none select-none invisible" aria-hidden="true" />
+        )
       )}
       
-      {/* Invisible placeholder if only onRestore is present, so it aligns with onDelete */}
-      {alignRestoreWithDelete && onRestore && !onDelete && !onEdit && (
-        <div className="w-6 h-6 pointer-events-none select-none invisible" aria-hidden="true" />
-      )}
-
-      {onEdit && (
+      {/* Slot 2: Edit Button or Placeholder when restoring */}
+      {onEdit ? (
         <button
           onClick={onEdit}
           title={editTitle}
@@ -63,8 +66,13 @@ export default function ActionButtons({
         >
           <Pencil className="w-4 h-4" />
         </button>
+      ) : (
+        alignRestoreWithDelete && onRestore && !onDelete && (
+          <div className="w-6 h-6 pointer-events-none select-none invisible" aria-hidden="true" />
+        )
       )}
 
+      {/* Slot 3: Delete Button */}
       {onDelete && (
         <button
           onClick={onDelete}
@@ -75,6 +83,7 @@ export default function ActionButtons({
         </button>
       )}
 
+      {/* Slot 3 (Alternative): Restore Button (aligned with Delete) */}
       {onRestore && (
         <button
           onClick={onRestore}

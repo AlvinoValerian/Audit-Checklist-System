@@ -383,9 +383,15 @@ export default function GaleriPage() {
 
                       {/* Issue Tag on Image */}
                       {photo.hasIssue && (
-                        <div className="absolute top-1 left-1/2 -translate-x-1/2 z-10 px-1.5 py-0.2 rounded bg-rose-600 text-white font-extrabold text-[7.5px] sm:text-[8px] tracking-wider uppercase flex items-center gap-0.5 shadow-xs whitespace-nowrap">
-                          <AlertTriangle className="w-2 h-2" />
-                          ISSUE
+                        <div
+                          className={`absolute top-1 left-1/2 -translate-x-1/2 z-10 px-1.5 py-0.5 rounded text-white font-extrabold text-[7.5px] sm:text-[8px] tracking-wider uppercase flex items-center gap-0.5 shadow-xs whitespace-nowrap ${
+                            photo.issueSeverity === "Tinggi"
+                              ? "bg-rose-600 shadow-rose-900/30"
+                              : "bg-amber-600 shadow-amber-900/30"
+                          }`}
+                        >
+                          <AlertTriangle className="w-2 h-2 shrink-0" />
+                          <span>{photo.issueSeverity === "Tinggi" ? "ISSUE · HIGH" : "ISSUE · LOW"}</span>
                         </div>
                       )}
 

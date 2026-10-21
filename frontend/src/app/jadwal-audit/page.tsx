@@ -18,6 +18,7 @@ import {
   Repeat,
   CalendarDays,
   FileCheck2,
+  X,
 } from "lucide-react";
 import { ScheduleService, defaultSchedules } from "@/services/schedule.service";
 import { AuditSchedule, ScheduleStats, ScheduleStatus } from "@/types/schedule";
@@ -70,6 +71,13 @@ export default function JadwalAuditPage() {
 
   useEffect(() => {
     refreshData();
+
+    // Interval realtime: cek secara berkala agar jadwal otomatis menjadi "Selesai" jika jam selesai terlewati
+    const interval = setInterval(() => {
+      refreshData();
+    }, 10000);
+
+    return () => clearInterval(interval);
   }, [refreshData]);
 
   // Handlers
@@ -105,7 +113,11 @@ export default function JadwalAuditPage() {
 
   const handleConfirmDelete = () => {
     if (scheduleToDelete) {
-      ScheduleService.update(scheduleToDelete.id, { status: "Dibatalkan" });
+      const todayStr = format(new Date(), "yyyy-MM-dd");
+      ScheduleService.update(scheduleToDelete.id, {
+        status: "Dibatalkan",
+        deletedAt: todayStr,
+      });
       toast.success(`Jadwal untuk "${scheduleToDelete.storeName}" telah dibatalkan.`);
       setIsDeleteModalOpen(false);
       setScheduleToDelete(null);
@@ -115,7 +127,11 @@ export default function JadwalAuditPage() {
 
   const handleCompleteAndDeactivate = () => {
     if (scheduleForChecklist) {
-      ScheduleService.update(scheduleForChecklist.id, { status: "Dibatalkan" });
+      const todayStr = format(new Date(), "yyyy-MM-dd");
+      ScheduleService.update(scheduleForChecklist.id, {
+        status: "Dibatalkan",
+        deletedAt: todayStr,
+      });
       toast.success(
         `Template checklist telah diselesaikan & jadwal "${scheduleForChecklist.storeName}" berhasil dinonaktifkan!`
       );
@@ -138,10 +154,37 @@ export default function JadwalAuditPage() {
         filterStatus === "Semua" ? true : schedule.status === filterStatus;
 
       // Date match if selectedDate is set
-      const matchesDate = selectedDate
-        ? schedule.date === format(selectedDate, "yyyy-MM-dd") ||
-          schedule.recurrence === "Setiap Hari"
-        : true;
+      let matchesDate = true;
+      if (selectedDate) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const targetDate = new Date(selectedDate);
+        targetDate.setHours(0, 0, 0, 0);
+
+        const diffDays = Math.round((targetDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+        // BATASAN 1 MINGGU: Jika tanggal lebih dari 1 minggu ke depan (> 7 hari), tidak ada jadwal
+        if (diffDays > 7) {
+          return false;
+        }
+
+        const selectedDateStr = format(selectedDate, "yyyy-MM-dd");
+        const dayOfWeekShort = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"][selectedDate.getDay()];
+
+        if (diffDays < 0) {
+          // Masa lalu: hanya tampilkan jadwal yang memang tercatat pada tanggal tersebut
+          matchesDate = schedule.date === selectedDateStr;
+        } else {
+          // Hari ini (0) s/d 7 hari ke depan (dalam batas 1 minggu):
+          matchesDate =
+            schedule.date === selectedDateStr ||
+            schedule.recurrence === "Setiap Hari" ||
+            (schedule.recurrence === "Hari Tertentu" &&
+              Array.isArray(schedule.selectedDays) &&
+              schedule.selectedDays.includes(dayOfWeekShort));
+        }
+      }
 
       return matchesSearch && matchesStatus && matchesDate;
     });
@@ -235,7 +278,13 @@ export default function JadwalAuditPage() {
           schedules={schedules}
           selectedDate={selectedDate}
           isExpanded={isCalendarExpanded}
-          onExpandedChange={setIsCalendarExpanded}
+          onExpandedChange={(expanded) => {
+            setIsCalendarExpanded(expanded);
+            if (!expanded) {
+              setSelectedDate(null);
+              setCurrentPage(1);
+            }
+          }}
           onSelectDate={(date) => {
             setSelectedDate(date);
             setCurrentPage(1);
@@ -345,6 +394,29 @@ export default function JadwalAuditPage() {
           </div>
         </div>
 
+        {/* Active Date Filter Banner */}
+        {selectedDate && (
+          <div className="px-4 py-2.5 bg-sky-50/70 border-b border-sky-100 flex items-center justify-between">
+            <div className="flex items-center gap-2 text-xs text-sky-800">
+              <CalendarIcon className="w-3.5 h-3.5 text-sky-600" />
+              <span>
+                Menampilkan jadwal audit pada:{" "}
+                <span className="font-bold text-sky-900">{format(selectedDate, "d MMMM yyyy")}</span>
+              </span>
+            </div>
+            <button
+              onClick={() => {
+                setSelectedDate(null);
+                setCurrentPage(1);
+              }}
+              className="flex items-center gap-1 text-[11px] font-semibold text-sky-700 hover:text-rose-600 transition-colors cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+              Reset Filter Tanggal
+            </button>
+          </div>
+        )}
+
         {/* Table Content */}
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
@@ -452,7 +524,8 @@ export default function JadwalAuditPage() {
                       <td className="py-3.5 px-4 sm:px-6 text-center whitespace-nowrap">
                         <ActionButtons
                           align="center"
-                          alignRestoreWithDelete={false}
+                          alignRestoreWithDelete={true}
+                          hasViewSlot={true}
                           onView={
                             isCancelled
                               ? undefined
@@ -484,7 +557,10 @@ export default function JadwalAuditPage() {
                           onRestore={
                             isCancelled
                               ? () => {
-                                  ScheduleService.update(schedule.id, { status: "Terjadwal" });
+                                  ScheduleService.update(schedule.id, {
+                                    status: "Terjadwal",
+                                    deletedAt: undefined,
+                                  });
                                   toast.success(`Jadwal untuk "${schedule.storeName}" diaktifkan kembali.`);
                                   refreshData();
                                 }
@@ -511,44 +587,42 @@ export default function JadwalAuditPage() {
             <span className="font-semibold text-slate-700">{filteredSchedules.length}</span> jadwal
           </div>
 
-          {totalPages > 1 && (
-            <div className="flex items-center gap-1.5 self-center sm:self-auto">
-              <button
-                type="button"
-                onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
-                disabled={currentPage === 1}
-                className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
-                title="Halaman Sebelumnya"
-              >
-                <ChevronLeft className="w-3.5 h-3.5" />
-              </button>
+          <div className="flex items-center gap-1.5 self-center sm:self-auto">
+            <button
+              type="button"
+              onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
+              disabled={currentPage === 1}
+              className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              title="Halaman Sebelumnya"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+            </button>
 
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
-                <button
-                  key={pageNum}
-                  type="button"
-                  onClick={() => setCurrentPage(pageNum)}
-                  className={`w-7 h-7 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    currentPage === pageNum
-                      ? "bg-[#193f53] text-white shadow-2xs"
-                      : "text-slate-600 hover:bg-slate-100 border border-transparent"
-                  }`}
-                >
-                  {pageNum}
-                </button>
-              ))}
-
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
               <button
+                key={pageNum}
                 type="button"
-                onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
-                disabled={currentPage === totalPages}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer text-xs font-medium"
+                onClick={() => setCurrentPage(pageNum)}
+                className={`w-7 h-7 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  currentPage === pageNum
+                    ? "bg-[#193f53] text-white shadow-2xs"
+                    : "text-slate-600 hover:bg-slate-100 border border-transparent"
+                }`}
               >
-                <span>Selanjutnya</span>
-                <ChevronRight className="w-3.5 h-3.5" />
+                {pageNum}
               </button>
-            </div>
-          )}
+            ))}
+
+            <button
+              type="button"
+              onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
+              disabled={currentPage === totalPages}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer text-xs font-medium"
+            >
+              <span>Selanjutnya</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       </div>
 

@@ -135,10 +135,19 @@ export default function PhotoDetailModal({
               {/* Top Overlay Badges */}
               <div className="absolute top-2 inset-x-2 flex items-center justify-between z-10 pointer-events-none">
                 {isCurrentPhotoIssue ? (
-                  <span className="px-2 py-0.5 rounded-full bg-rose-600/95 text-white font-extrabold text-[8px] sm:text-[9px] tracking-wider uppercase flex items-center gap-1 shadow-sm">
-                    <AlertTriangle className="w-2.5 h-2.5" />
-                    KETIDAKSESUAIAN OPERASIONAL
-                  </span>
+                  <div className="flex items-center gap-1 flex-wrap">
+                    <span className="px-1.5 py-0.2 rounded-full bg-rose-600/95 text-white font-extrabold text-[7.5px] sm:text-[8px] tracking-wider uppercase flex items-center gap-0.5 shadow-sm">
+                      <AlertTriangle className="w-2 h-2" />
+                      KETIDAKSESUAIAN OPERASIONAL
+                    </span>
+                    <span
+                      className={`px-1.5 py-0.2 rounded-full text-white font-extrabold text-[7.5px] sm:text-[8px] tracking-wider uppercase shadow-sm ${
+                        photo.issueSeverity === "Tinggi" ? "bg-red-700" : "bg-amber-600"
+                      }`}
+                    >
+                      PRIORITY {photo.issueSeverity === "Tinggi" ? "HIGH" : "LOW"}
+                    </span>
+                  </div>
                 ) : (
                   <span className="px-2 py-0.5 rounded-full bg-emerald-600/95 text-white font-extrabold text-[8px] sm:text-[9px] tracking-wider uppercase flex items-center gap-1 shadow-sm">
                     <CheckCircle2 className="w-2.5 h-2.5" />
@@ -253,11 +262,15 @@ export default function PhotoDetailModal({
                     <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
                     Deskripsi Issue:
                   </h4>
-                  {photo.issueSeverity && (
-                    <span className="text-[8px] font-extrabold px-1.5 py-0.2 rounded bg-rose-100 text-rose-700">
-                      Prioritas {photo.issueSeverity}
-                    </span>
-                  )}
+                  <span
+                    className={`text-[8px] font-extrabold px-1.5 py-0.2 rounded uppercase tracking-wider border ${
+                      photo.issueSeverity === "Tinggi"
+                        ? "bg-rose-100 text-rose-700 border-rose-200"
+                        : "bg-amber-100 text-amber-700 border-amber-200"
+                    }`}
+                  >
+                    Priority {photo.issueSeverity === "Tinggi" ? "High" : "Low"}
+                  </span>
                 </div>
                 <p className="text-[10px] sm:text-[11px] text-slate-700 leading-relaxed font-normal">
                   {photo.issueDescription || photo.description || "-"}

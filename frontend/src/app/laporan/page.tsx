@@ -441,18 +441,28 @@ export default function LaporanPage() {
                             </p>
                           </td>
 
-                          {/* Status */}
+                          {/* Status & Priority */}
                           <td className="px-5 py-3.5 whitespace-nowrap">
                             {row.status === "Masalah" ? (
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-50 border border-rose-200 text-rose-600 whitespace-nowrap">
-                                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
-                                <span>Masalah ({row.issueCount})</span>
-                              </span>
+                              <div className="flex flex-col gap-0.5 items-start">
+                                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9.5px] font-bold bg-rose-50 border border-rose-200 text-rose-600 whitespace-nowrap">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
+                                  <span>Masalah ({row.issueCount})</span>
+                                </span>
+                                <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[8px] font-extrabold uppercase tracking-wider bg-rose-100 text-rose-700 border border-rose-200">
+                                  Priority High
+                                </span>
+                              </div>
                             ) : (
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 border border-emerald-200 text-emerald-700 whitespace-nowrap">
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-                                <span>Sesuai</span>
-                              </span>
+                              <div className="flex flex-col gap-0.5 items-start">
+                                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9.5px] font-bold bg-emerald-50 border border-emerald-200 text-emerald-700 whitespace-nowrap">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                                  <span>Sesuai</span>
+                                </span>
+                                <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[8px] font-semibold uppercase tracking-wider bg-slate-100 text-slate-600 border border-slate-200">
+                                  Priority Low
+                                </span>
+                              </div>
                             )}
                           </td>
 

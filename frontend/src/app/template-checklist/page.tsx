@@ -22,6 +22,7 @@ import { toast } from "sonner";
 import ActionButtons from "@/components/ui/ActionButtons";
 import CreateTemplate from "./components/CreateTemplate";
 import EditTemplate from "./components/EditTemplate";
+import DetailTemplate from "./components/DetailTemplate";
 import SoftDeleteModal from "./components/SoftDeleteModal";
 import RestoreTemplateModal from "./components/RestoreTemplateModal";
 
@@ -38,6 +39,7 @@ export default function TemplateChecklistPage() {
   const [isCreating, setIsCreating] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [templateToEdit, setTemplateToEdit] = useState<TemplateItem | null>(null);
+  const [selectedTemplateToView, setSelectedTemplateToView] = useState<TemplateItem | null>(null);
 
   // Soft Delete / Nonaktifkan Modal State
   const [isDeactivateModalOpen, setIsDeactivateModalOpen] = useState(false);
@@ -113,6 +115,12 @@ export default function TemplateChecklistPage() {
   const startIndex = filteredTemplates.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0;
   const endIndex = Math.min(currentPage * itemsPerPage, filteredTemplates.length);
 
+  const resetScroll = () => {
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+    const mainEl = document.querySelector("main");
+    if (mainEl) mainEl.scrollTo({ top: 0, left: 0, behavior: "instant" });
+  };
+
   if (isCreating) {
     return (
       <DashboardLayout>
@@ -120,10 +128,12 @@ export default function TemplateChecklistPage() {
           onBack={() => {
             setIsCreating(false);
             refreshData();
+            resetScroll();
           }}
           onSuccess={() => {
             setIsCreating(false);
             refreshData();
+            resetScroll();
           }}
         />
       </DashboardLayout>
@@ -139,11 +149,13 @@ export default function TemplateChecklistPage() {
             setIsEditing(false);
             setTemplateToEdit(null);
             refreshData();
+            resetScroll();
           }}
           onSuccess={() => {
             setIsEditing(false);
             setTemplateToEdit(null);
             refreshData();
+            resetScroll();
           }}
         />
       </DashboardLayout>
@@ -331,7 +343,10 @@ export default function TemplateChecklistPage() {
                       className="hover:bg-slate-50/70 transition-colors group"
                     >
                       {/* NAMA TEMPLATE */}
-                      <td className={`py-3.5 px-4 sm:px-6 ${isDeactivated ? "opacity-60" : ""}`}>
+                      <td
+                        className={`py-3.5 px-4 sm:px-6 ${isDeactivated ? "opacity-60" : "cursor-pointer"}`}
+                        onClick={isDeactivated ? undefined : () => setSelectedTemplateToView(template)}
+                      >
                         <div className="font-semibold text-slate-900 group-hover:text-[#193f53] transition-colors">
                           {template.title}
                         </div>
@@ -375,6 +390,14 @@ export default function TemplateChecklistPage() {
                       >
                         <ActionButtons
                           align="center"
+                          alignRestoreWithDelete={true}
+                          hasViewSlot={true}
+                          onView={
+                            isDeactivated
+                              ? undefined
+                              : () => setSelectedTemplateToView(template)
+                          }
+                          viewTitle="Lihat Detail Template"
                           onEdit={
                             isDeactivated
                               ? undefined
@@ -484,6 +507,20 @@ export default function TemplateChecklistPage() {
         }}
         onConfirm={handleConfirmRestore}
       />
+
+      {/* Detail Template Drawer */}
+      {selectedTemplateToView && (
+        <DetailTemplate
+          template={selectedTemplateToView}
+          onBack={() => setSelectedTemplateToView(null)}
+          onEdit={() => {
+            const tpl = selectedTemplateToView;
+            setSelectedTemplateToView(null);
+            setTemplateToEdit(tpl);
+            setIsEditing(true);
+          }}
+        />
+      )}
     </DashboardLayout>
   );
 }

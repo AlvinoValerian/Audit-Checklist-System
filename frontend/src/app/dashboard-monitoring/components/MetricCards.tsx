@@ -6,7 +6,7 @@ import {
   CheckCircle2,
   Clock,
   AlertTriangle,
-  AlertCircle,
+  // AlertCircle,
 } from "lucide-react";
 
 export interface MetricStats {
@@ -53,6 +53,7 @@ export default function MetricCards({
       value: stats.totalFindings,
       icon: <AlertTriangle className="w-4 h-4 text-rose-500 stroke-[2.2]" />,
     },
+    /*
     {
       title: "Temuan Selesai",
       value: stats.resolvedFindings,
@@ -63,10 +64,11 @@ export default function MetricCards({
       value: stats.openFindings,
       icon: <AlertCircle className="w-4 h-4 text-rose-500 stroke-[2.2]" />,
     },
+    */
   ];
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-3.5 mb-6">
+    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-3 sm:gap-3.5 mb-6">
       {cards.map((card, idx) => (
         <div
           key={idx}
