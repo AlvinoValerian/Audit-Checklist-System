@@ -1,20 +1,18 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
+  ArrowLeft,
   ClipboardList,
   GripVertical,
   ChevronDown,
   ChevronUp,
   Plus,
-  Pencil,
   Trash2,
   Camera,
   ChevronsUpDown,
   BookmarkCheck,
-  Check,
-  X,
 } from "lucide-react";
 import { TemplateService } from "@/services/template.service";
 import { TemplateItem, TemplateCategoryGroup, ChecklistTask } from "@/types/template";
@@ -33,15 +31,30 @@ export default function EditTemplate({
 }: EditTemplateProps) {
   const router = useRouter();
 
+  // Scroll to absolute top on mount
+  useEffect(() => {
+    const scrollToTop = () => {
+      window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+      const mainEl = document.querySelector("main");
+      if (mainEl) {
+        mainEl.scrollTo({ top: 0, left: 0, behavior: "instant" });
+      }
+    };
+
+    scrollToTop();
+    const timer = setTimeout(scrollToTop, 20);
+    return () => clearTimeout(timer);
+  }, []);
+
   // Template Title
   const [templateName, setTemplateName] = useState(template.title || "");
 
   // Initialize Categories & Tasks from template
   const initialCategories: TemplateCategoryGroup[] = useMemo(() => {
     if (template.categories && template.categories.length > 0) {
-      return template.categories.map((c, i) => ({
+      return template.categories.map((c) => ({
         ...c,
-        isExpanded: i < 2, // First 2 expanded like in mockup
+        isExpanded: true,
       }));
     }
 
@@ -60,7 +73,7 @@ export default function EditTemplate({
       return Object.entries(groups).map(([catName, tasks], i) => ({
         id: `cat-${i + 1}`,
         name: catName,
-        isExpanded: i < 2,
+        isExpanded: true,
         tasks,
       }));
     }
@@ -119,7 +132,7 @@ export default function EditTemplate({
       {
         id: "cat-3",
         name: "Ketersediaan Bahan Baku, Chiller & Es Batu",
-        isExpanded: false,
+        isExpanded: true,
         tasks: [
           {
             id: "task-3-1",
@@ -142,10 +155,6 @@ export default function EditTemplate({
   }, [template]);
 
   const [categories, setCategories] = useState<TemplateCategoryGroup[]>(initialCategories);
-
-  // Category Edit State
-  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
-  const [editingCategoryName, setEditingCategoryName] = useState("");
 
   // Total Counters
   const totalCategories = categories.length;
@@ -170,24 +179,10 @@ export default function EditTemplate({
   };
 
   // Category Actions
-  const handleStartEditCategory = (cat: TemplateCategoryGroup) => {
-    setEditingCategoryId(cat.id);
-    setEditingCategoryName(cat.name);
-  };
-
-  const handleSaveCategoryName = (catId: string) => {
-    if (!editingCategoryName.trim()) {
-      toast.error("Nama kategori tidak boleh kosong");
-      return;
-    }
+  const handleUpdateCategoryName = (catId: string, newName: string) => {
     setCategories((prev) =>
-      prev.map((c) =>
-        c.id === catId ? { ...c, name: editingCategoryName.trim() } : c
-      )
+      prev.map((c) => (c.id === catId ? { ...c, name: newName } : c))
     );
-    setEditingCategoryId(null);
-    setEditingCategoryName("");
-    toast.success("Nama kategori berhasil diperbarui");
   };
 
   const handleDeleteCategory = (catId: string) => {
@@ -203,20 +198,18 @@ export default function EditTemplate({
     const newCatId = `cat-${Date.now()}`;
     const newCategory: TemplateCategoryGroup = {
       id: newCatId,
-      name: `Kategori Baru ${categories.length + 1}`,
+      name: "",
       isExpanded: true,
       tasks: [
         {
           id: `task-${newCatId}-1`,
-          text: "Masukkan instruksi atau butir tugas audit di sini...",
+          text: "",
           requirePhoto: false,
         },
       ],
     };
     setCategories((prev) => [...prev, newCategory]);
-    setEditingCategoryId(newCatId);
-    setEditingCategoryName(newCategory.name);
-    toast.success("Kategori baru ditambahkan");
+    toast.success("Kategori baru ditambahkan. Silakan isi nama kategori dan butir tugas.");
   };
 
   // Task Actions
@@ -302,23 +295,55 @@ export default function EditTemplate({
     }
   };
 
-  // Save Changes Handler
+  // Save Changes Handler with Strict Validation
   const handleSaveTemplate = () => {
+    // 1. Validate template name
     if (!templateName.trim()) {
-      toast.error("Nama template wajib diisi");
+      toast.error("Nama template wajib diisi dan tidak boleh kosong");
       return;
     }
 
-    if (totalTasks === 0) {
-      toast.error("Tambahkan minimal 1 butir tugas periksa");
+    // 2. Validate categories count
+    if (categories.length === 0) {
+      toast.error("Tambahkan minimal 1 kategori checklist");
       return;
+    }
+
+    // 3. Validate all category names are not empty
+    for (let i = 0; i < categories.length; i++) {
+      const cat = categories[i];
+      if (!cat.name.trim()) {
+        toast.error(`Nama Kategori ke-${i + 1} masih kosong. Harap isi nama kategori terlebih dahulu.`);
+        return;
+      }
+    }
+
+    // 4. Validate every category has tasks and each task is not empty
+    for (let i = 0; i < categories.length; i++) {
+      const cat = categories[i];
+      if (cat.tasks.length === 0) {
+        toast.error(`Kategori "${cat.name}" harus memiliki minimal 1 butir tugas`);
+        return;
+      }
+
+      for (let j = 0; j < cat.tasks.length; j++) {
+        const task = cat.tasks[j];
+        if (!task.text.trim()) {
+          toast.error(`Butir tugas ${i + 1}.${j + 1} pada kategori "${cat.name}" masih kosong. Harap isi instruksi tugas.`);
+          // Ensure category is expanded so user sees the empty task
+          setCategories((prev) =>
+            prev.map((c) => (c.id === cat.id ? { ...c, isExpanded: true } : c))
+          );
+          return;
+        }
+      }
     }
 
     const flatItems = categories.flatMap((cat) =>
       cat.tasks.map((t) => ({
         id: t.id,
-        question: t.text || "Pemeriksaan operasional",
-        category: cat.name,
+        question: t.text.trim(),
+        category: cat.name.trim(),
         required: true,
         requirePhoto: t.requirePhoto,
       }))
@@ -332,11 +357,11 @@ export default function EditTemplate({
 
     TemplateService.update(template.id, {
       title: templateName.trim(),
-      category: categories[0]?.name || template.category || "Operasional Harian",
-      description: `Template audit dengan ${totalCategories} kategori dan ${totalTasks} tugas periksa.`,
+      category: categories[0]?.name.trim() || template.category || "Operasional Harian",
+      description: `Template audit dengan ${categories.length} kategori dan ${flatItems.length} tugas periksa.`,
       categories,
       items: flatItems,
-      itemsCount: totalTasks,
+      itemsCount: flatItems.length,
       lastRevision: todayStr,
     });
 
@@ -350,17 +375,28 @@ export default function EditTemplate({
 
   return (
     <div className="max-w-5xl mx-auto pb-24">
-      {/* Breadcrumb */}
-      <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 tracking-wider uppercase mb-1">
+      {/* Top Header Bar: Breadcrumb & Back Button */}
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 tracking-wider uppercase">
+          <button
+            type="button"
+            onClick={handleBack}
+            className="hover:text-[#193f53] transition-colors cursor-pointer"
+          >
+            TEMPLATE CHECKLIST
+          </button>
+          <span>›</span>
+          <span className="text-slate-600">EDIT TEMPLATE CHECKLIST</span>
+        </div>
+
         <button
           type="button"
           onClick={handleBack}
-          className="hover:text-[#193f53] transition-colors cursor-pointer"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
         >
-          TEMPLATE CHECKLIST
+          <ArrowLeft className="w-3.5 h-3.5" />
+          <span>Kembali</span>
         </button>
-        <span>›</span>
-        <span className="text-slate-600">EDIT TEMPLATE CHECKLIST</span>
       </div>
 
       {/* Page Title */}
@@ -435,8 +471,6 @@ export default function EditTemplate({
         {/* Categories Accordion List */}
         <div className="space-y-4">
           {categories.map((category, catIdx) => {
-            const isEditingThisCat = editingCategoryId === category.id;
-
             return (
               <div
                 key={category.id}
@@ -464,59 +498,28 @@ export default function EditTemplate({
                       )}
                     </button>
 
-                    {/* Category Number & Title */}
-                    {isEditingThisCat ? (
-                      <div className="flex items-center gap-1.5 flex-1 max-w-md">
-                        <span className="text-xs font-bold text-slate-700 shrink-0">
-                          {catIdx + 1}.
-                        </span>
-                        <input
-                          type="text"
-                          value={editingCategoryName}
-                          onChange={(e) => setEditingCategoryName(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              e.preventDefault();
-                              handleSaveCategoryName(category.id);
-                            }
-                          }}
-                          autoFocus
-                          className="flex-1 px-2.5 py-1 text-xs font-semibold bg-white border border-indigo-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-100"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleSaveCategoryName(category.id)}
-                          className="p-1 text-emerald-600 hover:bg-emerald-50 rounded"
-                          title="Simpan Nama"
-                        >
-                          <Check className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setEditingCategoryId(null)}
-                          className="p-1 text-slate-400 hover:bg-slate-100 rounded"
-                          title="Batal"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ) : (
-                      <div
-                        className="flex items-center gap-2 cursor-pointer flex-1 min-w-0"
-                        onClick={() => handleToggleCategory(category.id)}
-                      >
-                        <h3 className="text-xs sm:text-sm font-bold text-slate-900 truncate">
-                          {catIdx + 1}. {category.name}
-                        </h3>
-                        <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[11px] font-semibold shrink-0">
-                          {category.tasks.length} Tugas
-                        </span>
-                      </div>
-                    )}
+                    {/* Category Number & Direct Editable Title Input */}
+                    <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                      <span className="text-xs sm:text-sm font-bold text-slate-800 shrink-0">
+                        {catIdx + 1}.
+                      </span>
+                      <input
+                        type="text"
+                        value={category.name}
+                        onChange={(e) => handleUpdateCategoryName(category.id, e.target.value)}
+                        placeholder="Ketik nama kategori..."
+                        className="w-full max-w-md px-2.5 py-1 text-xs sm:text-sm font-bold text-slate-900 bg-transparent hover:bg-white focus:bg-white border border-transparent hover:border-slate-200 focus:border-indigo-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-100 transition-all placeholder:text-slate-400 placeholder:font-normal"
+                      />
+                    </div>
                   </div>
 
                   {/* Category Right Action Buttons */}
-                  <div className="flex items-center gap-1.5 shrink-0">
+                  <div className="flex items-center gap-2 shrink-0">
+                    {/* Total Tugas Badge */}
+                    <span className="px-2.5 py-1 rounded-md bg-slate-100 text-slate-600 text-xs font-semibold shrink-0">
+                      {category.tasks.length} Tugas
+                    </span>
+
                     {/* + Tambah Task Button */}
                     <button
                       type="button"
@@ -525,16 +528,6 @@ export default function EditTemplate({
                     >
                       <Plus className="w-3 h-3" />
                       <span>Tambah Task</span>
-                    </button>
-
-                    {/* Edit Category Name Button */}
-                    <button
-                      type="button"
-                      onClick={() => handleStartEditCategory(category)}
-                      className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded transition-colors cursor-pointer"
-                      title="Edit Nama Kategori"
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
                     </button>
 
                     {/* Delete Category Button */}
@@ -612,16 +605,26 @@ export default function EditTemplate({
                             />
                           </button>
 
-                          {/* Status Badge (Wajib Foto / Opsional) */}
+                          {/* Status Badge & Priority Label */}
                           {task.requirePhoto ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-600 border border-emerald-200">
-                              <Camera className="w-3 h-3" />
-                              <span>Wajib Foto</span>
-                            </span>
+                            <div className="flex items-center gap-1">
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                <Camera className="w-2.5 h-2.5 text-emerald-600" />
+                                <span>Wajib Foto</span>
+                              </span>
+                              <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[8.5px] font-bold uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-200">
+                                Priority High
+                              </span>
+                            </div>
                           ) : (
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-500 border border-slate-200">
-                              Opsional
-                            </span>
+                            <div className="flex items-center gap-1">
+                              <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-medium bg-slate-100 text-slate-500 border border-slate-200">
+                                Opsional
+                              </span>
+                              <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[8.5px] font-semibold uppercase tracking-wider bg-slate-100 text-slate-600 border border-slate-200">
+                                Priority Low
+                              </span>
+                            </div>
                           )}
 
                           {/* Delete Task Button */}

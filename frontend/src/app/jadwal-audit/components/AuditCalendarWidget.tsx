@@ -45,8 +45,8 @@ export default function AuditCalendarWidget({
     "Juli", "Agustus", "September", "Oktober", "November", "Desember"
   ];
 
-  const cYear = currentMonth ? currentMonth.getFullYear() : 2024;
-  const cMonth = currentMonth ? currentMonth.getMonth() : 7;
+  const cYear = currentMonth ? currentMonth.getFullYear() : new Date().getFullYear();
+  const cMonth = currentMonth ? currentMonth.getMonth() : new Date().getMonth();
 
   const firstDay = new Date(cYear, cMonth, 1).getDay();
   const daysInMonth = new Date(cYear, cMonth + 1, 0).getDate();
@@ -57,15 +57,72 @@ export default function AuditCalendarWidget({
 
   // Helper to check if a date has audit schedules (returns all distinct status dot colors)
   const getScheduleDots = (day: number): string[] => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const checkDate = new Date(cYear, cMonth, day);
+    checkDate.setHours(0, 0, 0, 0);
+
     const checkDateStr = `${cYear}-${String(cMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-    const daySchedules = schedules.filter((s) => s.date === checkDateStr);
+    const dayOfWeekShort = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"][checkDate.getDay()];
+
+    const diffTime = checkDate.getTime() - today.getTime();
+    const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+
+    // BATASAN 1 MINGGU: Jadwal hanya dibatasi 1 minggu (7 hari) ke depan dari hari ini.
+    // Jika lebih dari 7 hari ke depan (misal bulan depan), TIDAK ADA jadwal / titik.
+    if (diffDays > 7) {
+      return [];
+    }
+
+    // Tanggal Masa Lalu (< hari ini):
+    // Hanya periksa jadwal riwayat yang tanggal spesifiknya memang di hari tersebut
+    if (diffDays < 0) {
+      const pastSchedules = schedules.filter((s) => s.date === checkDateStr);
+      if (pastSchedules.length === 0) return [];
+
+      const dots: string[] = [];
+      if (pastSchedules.some((s) => s.status === "Selesai")) dots.push("bg-emerald-500");
+      if (pastSchedules.some((s) => s.status === "Dibatalkan")) dots.push("bg-rose-500");
+      return dots;
+    }
+
+    // Hari Ini (0) atau Mendatang dalam 1 Minggu (1 s/d 7):
+    const daySchedules = schedules.filter((s) => {
+      if (s.date === checkDateStr) return true;
+      if (s.recurrence === "Setiap Hari") return true;
+      if (
+        s.recurrence === "Hari Tertentu" &&
+        Array.isArray(s.selectedDays) &&
+        s.selectedDays.includes(dayOfWeekShort)
+      ) {
+        return true;
+      }
+      return false;
+    });
 
     if (daySchedules.length === 0) return [];
 
     const dots: string[] = [];
-    if (daySchedules.some((s) => s.status === "Terjadwal")) dots.push("bg-purple-500");
-    if (daySchedules.some((s) => s.status === "Selesai")) dots.push("bg-emerald-500");
-    if (daySchedules.some((s) => s.status === "Dibatalkan")) dots.push("bg-rose-500");
+
+    // Jika di masa depan (besok s/d 7 hari ke depan):
+    // Masa depan TIDAK BISA "Selesai", semuanya berstatus "Terjadwal"
+    if (diffDays > 0) {
+      if (daySchedules.some((s) => s.status !== "Dibatalkan")) {
+        dots.push("bg-purple-500");
+      }
+      return dots;
+    }
+
+    // Jika Hari Ini (diffDays === 0, tanggal 21):
+    // Tampilkan status realtime: jika sudah ada yang selesai, utamakan status Selesai
+    const hasScheduled = daySchedules.some((s) => s.status === "Terjadwal");
+    const hasCompleted = daySchedules.some((s) => s.status === "Selesai");
+    const hasCancelled = daySchedules.some((s) => s.status === "Dibatalkan");
+
+    if (hasScheduled && !hasCompleted) dots.push("bg-purple-500");
+    if (hasCompleted) dots.push("bg-emerald-500");
+    if (hasCancelled) dots.push("bg-rose-500");
     return dots;
   };
 
@@ -111,7 +168,7 @@ export default function AuditCalendarWidget({
           isExpanded ? "opacity-100 delay-200" : "opacity-0 pointer-events-none"
         }`}
       >
-        <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <CalendarIcon className="w-4 h-4 text-blue-600" />
             <h3 className="text-[13px] font-bold text-slate-900 whitespace-nowrap">
@@ -137,10 +194,11 @@ export default function AuditCalendarWidget({
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
+                onSelectDate(null);
                 onExpandedChange(false);
               }}
               className="p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer border border-transparent"
-              title="Sembunyikan Kalender"
+              title="Sembunyikan Kalender & Batalkan Filter"
             >
               <X className="w-4 h-4" />
             </button>
@@ -148,7 +206,7 @@ export default function AuditCalendarWidget({
         </div>
 
         {/* Calendar Grid */}
-        <div className="grid grid-cols-7 gap-y-3 text-center mb-6">
+        <div className="grid grid-cols-7 gap-y-1.5 text-center mb-4">
           {["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"].map((day) => (
             <div key={day} className="text-[11px] font-medium text-slate-700">
               {day}
