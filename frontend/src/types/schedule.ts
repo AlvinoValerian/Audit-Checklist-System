@@ -17,6 +17,7 @@ export interface AuditSchedule {
   status: ScheduleStatus;
   notes?: string;
   createdAt: string;
+  deletedAt?: string; // YYYY-MM-DD saat di-soft delete
 }
 
 export interface ScheduleStats {

@@ -207,7 +207,13 @@ export default function LiburTokoPage() {
           holidays={holidays}
           selectedDate={selectedDate}
           isExpanded={isCalendarExpanded}
-          onExpandedChange={setIsCalendarExpanded}
+          onExpandedChange={(expanded) => {
+            setIsCalendarExpanded(expanded);
+            if (!expanded) {
+              setSelectedDate(null);
+              setCurrentPage(1);
+            }
+          }}
           onSelectDate={(date) => {
             setSelectedDate(date);
             setCurrentPage(1);
@@ -341,7 +347,7 @@ export default function LiburTokoPage() {
                 <th className="px-5 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">TANGGAL / DURASI LIBUR</th>
                 <th className="px-5 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">ALASAN</th>
                 <th className="px-5 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">DIBUAT OLEH</th>
-                <th className="px-5 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">STATUS</th>
+                <th className="px-5 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-center">STATUS</th>
                 <th className="px-5 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-center">ACTION</th>
               </tr>
             </thead>
@@ -373,9 +379,12 @@ export default function LiburTokoPage() {
                 paginatedHolidays.map((row) => {
                   const colors = getStatusColor(row.status);
                   const isSoftDeleted = row.status === "Dibatalkan";
+                  const isCompleted = row.status === "Selesai";
+                  const isGrayedOut = isSoftDeleted || isCompleted;
+
                   return (
                     <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className={`px-5 py-3.5 ${isSoftDeleted ? 'opacity-40 grayscale' : ''}`}>
+                      <td className={`px-5 py-3.5 ${isGrayedOut ? 'opacity-40 grayscale' : ''}`}>
                         <div className="flex items-center gap-3">
                           <div className="w-8 h-8 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 shrink-0">
                             <Store className="w-3.5 h-3.5" />
@@ -386,48 +395,51 @@ export default function LiburTokoPage() {
                           </div>
                         </div>
                       </td>
-                      <td className={`px-5 py-3.5 ${isSoftDeleted ? 'opacity-40 grayscale' : ''}`}>
+                      <td className={`px-5 py-3.5 ${isGrayedOut ? 'opacity-40 grayscale' : ''}`}>
                         <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-white border border-slate-200 text-[11px] text-slate-700 font-bold shadow-2xs">
                           <CalendarIcon className="w-3.5 h-3.5 text-slate-400" />
                           {formatDuration(row.startDate, row.endDate, row.durationDays)}
                         </div>
                       </td>
-                      <td className={`px-5 py-3.5 ${isSoftDeleted ? 'opacity-40 grayscale' : ''}`}>
+                      <td className={`px-5 py-3.5 ${isGrayedOut ? 'opacity-40 grayscale' : ''}`}>
                         <p className="text-xs text-slate-700 max-w-[160px] leading-relaxed font-medium">{row.reason}</p>
                       </td>
-                      <td className={`px-5 py-3.5 ${isSoftDeleted ? 'opacity-40 grayscale' : ''}`}>
+                      <td className={`px-5 py-3.5 ${isGrayedOut ? 'opacity-40 grayscale' : ''}`}>
                         <p className="text-[11px] font-bold text-slate-900">{row.createdBy}</p>
                         <p className="text-[10px] text-slate-500 mt-0.5">{row.creatorRole}</p>
                       </td>
-                      <td className="px-5 py-3.5">
+                      <td className="px-5 py-3.5 text-center">
                         <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border ${colors.bg}`}>
                           <div className={`w-1.5 h-1.5 rounded-full ${colors.dot}`}></div>
                           {row.status}
                         </span>
                       </td>
                       <td className="px-5 py-3.5 text-center">
-                        <ActionButtons
-                          align="center"
-                          alignRestoreWithDelete={false}
-                          onView={isSoftDeleted ? undefined : () => {
-                            setSelectedHolidayToView(row);
-                            setIsViewModalOpen(true);
-                          }}
-                          onEdit={isSoftDeleted ? undefined : () => {
-                            setSelectedHolidayToEdit(row);
-                            setIsCreatingView(true);
-                          }}
-                          onDelete={isSoftDeleted ? undefined : () => {
-                            setDeleteTargetHoliday(row);
-                            setIsDeleteModalOpen(true);
-                          }}
-                          onRestore={isSoftDeleted ? () => {
-                            setRestoreTargetHoliday(row);
-                            setIsRestoreModalOpen(true);
-                          } : undefined}
-                          restoreTitle="Aktifkan Kembali Libur Toko"
-                          deleteTitle="Batalkan Libur Toko"
-                        />
+                        {isCompleted ? null : (
+                          <ActionButtons
+                            align="center"
+                            alignRestoreWithDelete={true}
+                            hasViewSlot={true}
+                            onView={isSoftDeleted ? undefined : () => {
+                              setSelectedHolidayToView(row);
+                              setIsViewModalOpen(true);
+                            }}
+                            onEdit={isSoftDeleted ? undefined : () => {
+                              setSelectedHolidayToEdit(row);
+                              setIsCreatingView(true);
+                            }}
+                            onDelete={isSoftDeleted ? undefined : () => {
+                              setDeleteTargetHoliday(row);
+                              setIsDeleteModalOpen(true);
+                            }}
+                            onRestore={isSoftDeleted ? () => {
+                              setRestoreTargetHoliday(row);
+                              setIsRestoreModalOpen(true);
+                            } : undefined}
+                            restoreTitle="Aktifkan Kembali Libur Toko"
+                            deleteTitle="Batalkan Libur Toko"
+                          />
+                        )}
                       </td>
                     </tr>
                   );
@@ -437,32 +449,50 @@ export default function LiburTokoPage() {
           </table>
         </div>
 
-        {/* Pagination */}
-        <div className="p-4 border-t border-slate-100 flex flex-wrap gap-4 items-center justify-between">
-          <p className="text-[11px] text-slate-500">
-            Menampilkan <span className="font-bold text-slate-900">{startIndex}-{endIndex}</span> dari <span className="font-bold text-slate-900">{filteredHolidays.length}</span> jadwal libur
-          </p>
-          <div className="flex gap-1 text-[11px] items-center">
-            <button 
-              disabled={currentPage <= 1}
-              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-              className={`w-7 h-7 flex items-center justify-center rounded-md border border-slate-200 transition-colors ${
-                currentPage <= 1 ? "text-slate-300 cursor-not-allowed" : "text-slate-500 hover:bg-slate-50 cursor-pointer"
-              }`}
+        {/* Table Footer & Pagination */}
+        <div className="p-3.5 sm:p-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-500">
+          <div>
+            Menampilkan <span className="font-semibold text-slate-700">{startIndex}-{endIndex}</span> dari{" "}
+            <span className="font-semibold text-slate-700">{filteredHolidays.length}</span> jadwal libur
+          </div>
+
+          <div className="flex items-center gap-1.5 self-center sm:self-auto">
+            {/* Previous Button */}
+            <button
+              type="button"
+              onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
+              disabled={currentPage === 1}
+              className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              title="Halaman Sebelumnya"
             >
-              <ChevronLeft className="w-4 h-4" />
+              <ChevronLeft className="w-3.5 h-3.5" />
             </button>
-            <div className="px-2.5 py-1 rounded-md bg-[#193f53] text-white flex items-center justify-center font-bold text-xs shadow-2xs">
-              {currentPage} / {totalPages}
-            </div>
-            <button 
-              disabled={currentPage >= totalPages}
-              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-              className={`px-3 h-7 flex items-center justify-center rounded-md border border-slate-200 transition-colors font-bold ml-1 ${
-                currentPage >= totalPages ? "text-slate-300 cursor-not-allowed" : "text-slate-600 hover:bg-slate-50 cursor-pointer"
-              }`}
+
+            {/* Number Buttons */}
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
+              <button
+                key={pageNum}
+                type="button"
+                onClick={() => setCurrentPage(pageNum)}
+                className={`w-7 h-7 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  currentPage === pageNum
+                    ? "bg-[#193f53] text-white shadow-2xs"
+                    : "text-slate-600 hover:bg-slate-100 border border-transparent"
+                }`}
+              >
+                {pageNum}
+              </button>
+            ))}
+
+            {/* Next Button */}
+            <button
+              type="button"
+              onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
+              disabled={currentPage === totalPages}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer text-xs font-medium"
             >
-              Selanjutnya <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
+              <span>Selanjutnya</span>
+              <ChevronRight className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>

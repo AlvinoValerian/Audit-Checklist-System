@@ -263,9 +263,14 @@ export default function DetailLaporanView({ report, onBack }: DetailLaporanViewP
               {/* Sesuai Box */}
               <div className="bg-[#f4fbf6] border border-emerald-200 rounded-2xl p-3.5 flex flex-col justify-between">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-emerald-800 uppercase tracking-wider">
-                    SESUAI
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] font-bold text-emerald-800 uppercase tracking-wider">
+                      SESUAI
+                    </span>
+                    <span className="px-1.5 py-0.2 rounded text-[8px] font-bold uppercase bg-emerald-100 text-emerald-800">
+                      Priority Low
+                    </span>
+                  </div>
                   <div className="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
                     <Check className="w-3 h-3" />
                   </div>
@@ -283,9 +288,14 @@ export default function DetailLaporanView({ report, onBack }: DetailLaporanViewP
               {/* Temuan Box */}
               <div className="bg-[#fef6f6] border border-rose-200 rounded-2xl p-3.5 flex flex-col justify-between">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-rose-800 uppercase tracking-wider">
-                    TEMUAN
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] font-bold text-rose-800 uppercase tracking-wider">
+                      TEMUAN
+                    </span>
+                    <span className="px-1.5 py-0.2 rounded text-[8px] font-extrabold uppercase bg-rose-200 text-rose-800">
+                      Priority High
+                    </span>
+                  </div>
                   <div className="w-5 h-5 rounded-full bg-rose-100 flex items-center justify-center text-rose-600">
                     <XCircle className="w-3.5 h-3.5" />
                   </div>
@@ -374,18 +384,28 @@ export default function DetailLaporanView({ report, onBack }: DetailLaporanViewP
                   </div>
                 </div>
 
-                {/* Status Badge */}
-                <div className="shrink-0">
+                {/* Status & Priority Badge */}
+                <div className="shrink-0 flex items-center gap-1">
                   {item.hasIssue ? (
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 border border-rose-200 text-rose-600">
-                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                      TEMUAN
-                    </span>
+                    <>
+                      <span className="inline-flex items-center gap-1 px-2 py-0.2 rounded-full text-[9px] font-bold bg-rose-50 border border-rose-200 text-rose-600">
+                        <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                        TEMUAN
+                      </span>
+                      <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[8px] font-extrabold uppercase tracking-wider bg-rose-100 text-rose-700 border border-rose-200">
+                        Priority High
+                      </span>
+                    </>
                   ) : (
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 border border-emerald-200 text-emerald-700">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                      SESUAI
-                    </span>
+                    <>
+                      <span className="inline-flex items-center gap-1 px-2 py-0.2 rounded-full text-[9px] font-bold bg-emerald-50 border border-emerald-200 text-emerald-700">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                        SESUAI
+                      </span>
+                      <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[8px] font-semibold uppercase tracking-wider bg-slate-100 text-slate-600 border border-slate-200">
+                        Priority Low
+                      </span>
+                    </>
                   )}
                 </div>
               </div>

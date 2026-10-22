@@ -48,7 +48,7 @@ export default function DashboardMonitoringPage() {
         onEndDateChange={setEndDate}
       />
 
-      {/* 2. Top Summary Metric Cards Row (6 Cards) */}
+      {/* 2. Top Summary Metric Cards Row (4 Cards) */}
       <MetricCards stats={metrics} />
 
       {/* 3. Middle Charts Row: Status Audit (Donut) & Tren Hasil Audit (Line) */}

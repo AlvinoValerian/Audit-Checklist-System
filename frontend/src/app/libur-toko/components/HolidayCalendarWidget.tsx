@@ -114,7 +114,7 @@ export default function HolidayCalendarWidget({
           isExpanded ? "opacity-100 delay-200" : "opacity-0 pointer-events-none"
         }`}
       >
-        <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <CalendarIcon className="w-4 h-4 text-blue-600" />
             <h3 className="text-[13px] font-bold text-slate-900 whitespace-nowrap">
@@ -140,10 +140,11 @@ export default function HolidayCalendarWidget({
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
+                onSelectDate(null);
                 onExpandedChange(false);
               }}
               className="p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer border border-transparent"
-              title="Sembunyikan Kalender"
+              title="Sembunyikan Kalender & Batalkan Filter"
             >
               <X className="w-4 h-4" />
             </button>
@@ -151,7 +152,7 @@ export default function HolidayCalendarWidget({
         </div>
 
         {/* Calendar Grid */}
-        <div className="grid grid-cols-7 gap-y-3 text-center mb-6">
+        <div className="grid grid-cols-7 gap-y-1.5 text-center mb-4">
           {["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"].map((day) => (
             <div key={day} className="text-[11px] font-medium text-slate-700">
               {day}
