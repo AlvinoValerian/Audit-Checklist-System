@@ -6,7 +6,7 @@ interface SoftDeleteModalProps {
   isOpen: boolean;
   holiday: Holiday | null;
   onClose: () => void;
-  onConfirm: () => void;
+  onConfirm: () => void; 
 }
 
 export default function SoftDeleteModal({ isOpen, holiday, onClose, onConfirm }: SoftDeleteModalProps) {

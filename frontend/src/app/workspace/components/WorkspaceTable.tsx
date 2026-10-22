@@ -211,6 +211,7 @@ export default function WorkspaceTable({
                     {/* 6. ACTION */}
                     <td className="px-5 py-3.5 text-right whitespace-nowrap">
                       <ActionButtons
+                        alignRestoreWithDelete={false}
                         onView={() => onDetail?.(ws)}
                         onEdit={isSoftDeleted ? undefined : () => onEdit?.(ws)}
                         onDelete={isSoftDeleted ? undefined : () => onDelete?.(ws)}

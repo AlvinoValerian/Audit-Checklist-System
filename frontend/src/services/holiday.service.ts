@@ -34,7 +34,7 @@ const defaultHolidays: Holiday[] = [
     reason: "Maintenance Kelistrikan & AC",
     createdBy: "Budi Santoso",
     creatorRole: "Admin",
-    status: "Terjadwal",
+    status: "Terjadwal",  
   },
   {
     id: "3",

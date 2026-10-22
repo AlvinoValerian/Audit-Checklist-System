@@ -17,6 +17,7 @@ import {
   Store,
   User,
   MapPin,
+  AlertCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -182,19 +183,40 @@ export default function WorkspacePage() {
         const picName = selectedDetailWorkspace.picName || "Hendra Gunawan";
         const picPhone = selectedDetailWorkspace.picPhone || "+62 812-8899-1023";
 
-        const previewStores =
-          selectedDetailWorkspace.stores && selectedDetailWorkspace.stores.length > 0
-            ? selectedDetailWorkspace.stores
-            : [
-                `Toko ${selectedDetailWorkspace.name.replace(/[^A-Za-z0-9]/g, "").slice(0, 4)}-01: Cabang Pondok Indah`,
-                `Toko ${selectedDetailWorkspace.name.replace(/[^A-Za-z0-9]/g, "").slice(0, 4)}-02: Cabang Kelapa Gading`,
-                `Toko ${selectedDetailWorkspace.name.replace(/[^A-Za-z0-9]/g, "").slice(0, 4)}-03: Cabang Bintaro Sektor 7`,
-              ];
-
-        const remainingStoresCount = Math.max(
-          0,
-          selectedDetailWorkspace.storeCount - previewStores.length
+        const existingStores = selectedDetailWorkspace.stores || [];
+        const targetCount = Math.max(
+          selectedDetailWorkspace.storeCount || 0,
+          existingStores.length
         );
+        const storeList: string[] = [...existingStores];
+
+        if (storeList.length < targetCount) {
+          const isHub =
+            selectedDetailWorkspace.name.toLowerCase().includes("hub") ||
+            (existingStores.length > 0 && existingStores[0].startsWith("Hub"));
+          const prefix = isHub ? "Hub" : "Toko";
+          const code =
+            selectedDetailWorkspace.name.replace(/[^A-Za-z0-9]/g, "").slice(-1).toUpperCase() || "A";
+
+          const defaultLocations = [
+            "Gudang Cimahi Sentral",
+            "Distribusi Pasteur Express",
+            "Depo Ujung Berung",
+            "Hub Transit Padalarang",
+            "Gudang Kopo Sayati",
+            "Cabang Buah Batu",
+            "Cabang Setiabudi",
+            "Cabang Dago",
+            "Cabang Cihampelas",
+            "Cabang Soekarno Hatta",
+          ];
+
+          for (let i = storeList.length + 1; i <= targetCount; i++) {
+            const num = String(i).padStart(2, "0");
+            const loc = defaultLocations[(i - 1) % defaultLocations.length];
+            storeList.push(`${prefix} ${code}-${num}: ${loc}`);
+          }
+        }
 
         return (
           <Modal
@@ -213,8 +235,15 @@ export default function WorkspacePage() {
                     {initials}
                   </div>
                   <div>
-                    <div className="font-bold text-slate-900 text-base leading-tight">
-                      {selectedDetailWorkspace.name}
+                    <div className="flex items-center gap-2">
+                      <div className="font-bold text-slate-900 text-base leading-tight">
+                        {selectedDetailWorkspace.name}
+                      </div>
+                      {selectedDetailWorkspace.status === "Nonaktif" && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-600 border border-rose-200">
+                          Nonaktif
+                        </span>
+                      )}
                     </div>
                     <div className="text-xs text-slate-500 font-medium mt-0.5">
                       {selectedDetailWorkspace.companyName || "PT Sumber Retail Sejahtera"}
@@ -237,6 +266,16 @@ export default function WorkspacePage() {
                   </div>
                 </div>
               </div>
+
+              {/* Soft Delete Notice if Inactive */}
+              {selectedDetailWorkspace.status === "Nonaktif" && (
+                <div className="p-3 bg-amber-50/80 border border-amber-200/80 rounded-xl flex items-center gap-2.5 text-xs text-amber-800">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>
+                    Workspace ini berstatus <strong>Nonaktif (Soft Delete)</strong>. Mode hanya detail dan tidak dapat diedit sebelum diaktifkan kembali.
+                  </span>
+                </div>
+              )}
 
               {/* Total Toko Terdaftar Card */}
               <div className="p-3.5 sm:p-4 rounded-xl border border-slate-200/80 bg-white flex items-center justify-between">
@@ -311,31 +350,31 @@ export default function WorkspacePage() {
 
                   {/* Toko Terdaftar */}
                   <div>
-                    <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center justify-between mb-1.5">
                       <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                        TOKO TERDAFTAR (PREVIEW)
+                        TOKO TERDAFTAR
                       </span>
                       <span className="text-xs text-slate-500 font-medium">
-                        {selectedDetailWorkspace.storeCount} Toko Terdaftar
+                        {storeList.length} Toko Terdaftar
                       </span>
                     </div>
 
-                    <div className="space-y-1.5">
-                      {previewStores.map((storeName, i) => (
-                        <div
-                          key={i}
-                          className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-700 font-medium"
-                        >
-                          {storeName}
+                    <div className="space-y-1.5 max-h-[160px] overflow-y-auto pr-1">
+                      {storeList.length > 0 ? (
+                        storeList.map((storeName, i) => (
+                          <div
+                            key={i}
+                            className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-700 font-medium hover:border-slate-300 transition-colors"
+                          >
+                            {storeName}
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-xs text-slate-400 italic py-3 text-center bg-slate-50 border border-slate-100 rounded-lg">
+                          Belum ada toko yang terdaftar
                         </div>
-                      ))}
+                      )}
                     </div>
-
-                    {remainingStoresCount > 0 && (
-                      <div className="text-[11px] text-slate-400 italic mt-1 pl-1">
-                        +{remainingStoresCount} toko lainnya dalam klaster ini
-                      </div>
-                    )}
                   </div>
                 </div>
               </div>
@@ -349,18 +388,20 @@ export default function WorkspacePage() {
                 >
                   Tutup
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const wsToEdit = selectedDetailWorkspace;
-                    setSelectedDetailWorkspace(null);
-                    handleOpenEditModal(wsToEdit);
-                  }}
-                  className="px-5 py-2 text-xs sm:text-sm font-semibold text-white bg-[#193f53] hover:bg-[#143343] rounded-lg transition-colors shadow-2xs flex items-center gap-2 cursor-pointer"
-                >
-                  <Pencil className="w-3.5 h-3.5" />
-                  <span>Edit Workspace</span>
-                </button>
+                {selectedDetailWorkspace.status !== "Nonaktif" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const wsToEdit = selectedDetailWorkspace;
+                      setSelectedDetailWorkspace(null);
+                      handleOpenEditModal(wsToEdit);
+                    }}
+                    className="px-5 py-2 text-xs sm:text-sm font-semibold text-white bg-[#193f53] hover:bg-[#143343] rounded-lg transition-colors shadow-2xs flex items-center gap-2 cursor-pointer"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                    <span>Edit Workspace</span>
+                  </button>
+                )}
               </div>
             </div>
           </Modal>
