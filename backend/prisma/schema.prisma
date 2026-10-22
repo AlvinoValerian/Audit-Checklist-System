@@ -1,13 +1,266 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model admin {
+  admin_id           BigInt               @id @default(autoincrement())
+  workspace_id       BigInt
+  email              String               @unique @db.VarChar(255)
+  name               String               @db.VarChar(255)
+  password           String               @db.VarChar(255)
+  status             String?              @default("active") @db.VarChar(20)
+  created_at         DateTime?            @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime?            @default(now()) @db.Timestamptz(6)
+  workspace          workspace            @relation(fields: [workspace_id], references: [workspace_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_admin_workspace")
+  checklist_template checklist_template[]
+  schedule           schedule[]
+  schedule_exception schedule_exception[]
+  staff              staff[]
+  store              store[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model attachment {
+  attachment_id    BigInt            @id @default(autoincrement())
+  report_id        BigInt
+  answer_id        BigInt?
+  file_url         Bytes
+  file_type        String            @db.VarChar(50)
+  caption          String?
+  signer_name      String?           @db.VarChar(255)
+  signer_role      String?           @db.VarChar(100)
+  created_at       DateTime?         @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime?         @default(now()) @db.Timestamptz(6)
+  ai_audit_log     ai_audit_log[]
+  checklist_answer checklist_answer? @relation(fields: [answer_id], references: [answer_id], onUpdate: NoAction, map: "fk_attachment_answer")
+  checklist_report checklist_report  @relation(fields: [report_id], references: [report_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_attachment_report")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model checklist_answer {
+  answer_id        BigInt           @id @default(autoincrement())
+  report_id        BigInt
+  task_id          BigInt
+  answer           String?          @db.VarChar(10)
+  comment          String?
+  answered_at      DateTime?        @default(now()) @db.Timestamptz(6)
+  created_at       DateTime?        @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime?        @default(now()) @db.Timestamptz(6)
+  ai_audit_log     ai_audit_log[]
+  attachment       attachment[]
+  checklist_report checklist_report @relation(fields: [report_id], references: [report_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_answer_report")
+  template_task    template_task    @relation(fields: [task_id], references: [task_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_answer_task")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model checklist_report {
+  report_id          BigInt             @id @default(autoincrement())
+  schedule_id        BigInt
+  staff_id           BigInt
+  started_at         DateTime?          @db.Timestamptz(6)
+  completed_at       DateTime?          @db.Timestamptz(6)
+  duration_minute    Int?
+  status             String?            @db.VarChar(50)
+  total_questions    Int?               @default(0)
+  answered_questions Int?               @default(0)
+  skipped_questions  Int?               @default(0)
+  total_attachments  Int?               @default(0)
+  created_at         DateTime?          @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime?          @default(now()) @db.Timestamptz(6)
+  ai_audit_log       ai_audit_log[]
+  attachment         attachment[]
+  checklist_answer   checklist_answer[]
+  schedule           schedule           @relation(fields: [schedule_id], references: [schedule_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_report_schedule")
+  staff              staff              @relation(fields: [staff_id], references: [staff_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_report_staff")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model checklist_template {
+  template_id       BigInt              @id @default(autoincrement())
+  store_id          BigInt
+  admin_id          BigInt
+  template_name     String              @db.VarChar(255)
+  description       String?
+  status            String?             @default("active") @db.VarChar(20)
+  time_submitted    DateTime?           @db.Time(6)
+  radius            Decimal?            @db.Decimal(10, 2)
+  created_at        DateTime?           @default(now()) @db.Timestamptz(6)
+  admin             admin               @relation(fields: [admin_id], references: [admin_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_template_admin")
+  store             store               @relation(fields: [store_id], references: [store_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_template_store")
+  schedule          schedule[]
+  template_category template_category[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model schedule {
+  schedule_id        BigInt               @id @default(autoincrement())
+  admin_id           BigInt
+  store_id           BigInt
+  template_id        BigInt
+  title              String               @db.VarChar(255)
+  start_time         DateTime             @db.Time(6)
+  end_time           DateTime             @db.Time(6)
+  repeat_time        String?              @default("daily") @db.VarChar(50)
+  start_date         DateTime             @db.Date
+  end_date           DateTime?            @db.Date
+  status             String?              @default("active") @db.VarChar(20)
+  created_at         DateTime?            @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime?            @default(now()) @db.Timestamptz(6)
+  checklist_report   checklist_report[]
+  admin              admin                @relation(fields: [admin_id], references: [admin_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_schedule_admin")
+  store              store                @relation(fields: [store_id], references: [store_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_schedule_store")
+  checklist_template checklist_template   @relation(fields: [template_id], references: [template_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_schedule_template")
+  schedule_exception schedule_exception[]
+  schedule_staff     schedule_staff[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model schedule_exception {
+  schedule_exception_id BigInt    @id @default(autoincrement())
+  schedule_id           BigInt
+  created_by_admin_id   BigInt
+  start_date            DateTime  @db.Date
+  end_date              DateTime  @db.Date
+  is_skip               Boolean?  @default(true)
+  note                  String?
+  created_at            DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime? @default(now()) @db.Timestamptz(6)
+  admin                 admin     @relation(fields: [created_by_admin_id], references: [admin_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_exception_admin")
+  schedule              schedule  @relation(fields: [schedule_id], references: [schedule_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_exception_schedule")
+}
+
+model schedule_staff {
+  schedule_staff_id BigInt    @id @default(autoincrement())
+  schedule_id       BigInt
+  staff_id          BigInt
+  role_in_schedule  String?   @default("on duty") @db.VarChar(100)
+  created_at        DateTime? @default(now()) @db.Timestamptz(6)
+  schedule          schedule  @relation(fields: [schedule_id], references: [schedule_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_schedulestaff_schedule")
+  staff             staff     @relation(fields: [staff_id], references: [staff_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_schedulestaff_staff")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model staff {
+  staff_id         BigInt             @id @default(autoincrement())
+  store_id         BigInt
+  admin_id         BigInt
+  email            String             @unique @db.VarChar(255)
+  name             String             @db.VarChar(255)
+  phone_number     String?            @db.VarChar(50)
+  password         String             @db.VarChar(255)
+  status           String?            @default("active") @db.VarChar(20)
+  assigned_at      DateTime?          @default(now()) @db.Timestamptz(6)
+  created_at       DateTime?          @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime?          @default(now()) @db.Timestamptz(6)
+  photo            String?            @db.VarChar(255)
+  checklist_report checklist_report[]
+  schedule_staff   schedule_staff[]
+  admin            admin              @relation(fields: [admin_id], references: [admin_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_staff_admin")
+  store            store              @relation(fields: [store_id], references: [store_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_staff_store")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model store {
+  store_id            BigInt               @id @default(autoincrement())
+  workspace_id        BigInt
+  admin_id            BigInt
+  store_name          String               @db.VarChar(255)
+  time_zone           String?              @default("UTC") @db.VarChar(100)
+  address             String?
+  location_radius_gps Decimal?             @db.Decimal(10, 2)
+  description         String?
+  store_picture       String?              @db.VarChar(255)
+  status              String?              @default("active") @db.VarChar(20)
+  created_at          DateTime?            @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime?            @default(now()) @db.Timestamptz(6)
+  latitude            Decimal?             @db.Decimal(10, 8)
+  longitude           Decimal?             @db.Decimal(11, 8)
+  city                String?              @db.VarChar(100)
+  checklist_template  checklist_template[]
+  schedule            schedule[]
+  staff               staff[]
+  admin               admin                @relation(fields: [admin_id], references: [admin_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_store_admin")
+  workspace           workspace            @relation(fields: [workspace_id], references: [workspace_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_store_workspace")
+}
+
+model super_admin {
+  super_admin_id BigInt      @id @default(autoincrement())
+  email          String      @unique @db.VarChar(255)
+  name           String      @db.VarChar(255)
+  phone_number   String?     @db.VarChar(50)
+  password       String      @db.VarChar(255)
+  company_name   String?     @db.VarChar(255)
+  created_at     DateTime?   @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime?   @default(now()) @db.Timestamptz(6)
+  workspace      workspace[]
+}
+
+model template_category {
+  category_id        BigInt             @id @default(autoincrement())
+  template_id        BigInt
+  category_name      String             @db.VarChar(255)
+  sort_order         Int?               @default(0)
+  created_at         DateTime?          @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime?          @default(now()) @db.Timestamptz(6)
+  checklist_template checklist_template @relation(fields: [template_id], references: [template_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_category_template")
+  template_task      template_task[]
+}
+
+model template_task {
+  task_id           BigInt             @id @default(autoincrement())
+  kategori_id       BigInt
+  task_description  String
+  is_photo_required Boolean?           @default(false)
+  sort_order        Int?               @default(0)
+  created_at        DateTime?          @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime?          @default(now()) @db.Timestamptz(6)
+  checklist_answer  checklist_answer[]
+  template_category template_category  @relation(fields: [kategori_id], references: [category_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_task_category")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model workspace {
+  workspace_id        BigInt      @id @default(autoincrement())
+  super_admin_id      BigInt
+  company_name        String      @db.VarChar(255)
+  description         String?
+  pic_name            String?     @db.VarChar(255)
+  pic_contact         String?     @db.VarChar(100)
+  head_office_address String?
+  status              String?     @default("active") @db.VarChar(20)
+  created_at          DateTime?   @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime?   @default(now()) @db.Timestamptz(6)
+  category            String?     @db.VarChar(100)
+  admin               admin[]
+  store               store[]
+  super_admin         super_admin @relation(fields: [super_admin_id], references: [super_admin_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_workspace_super_admin")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model ai_audit_log {
+  ai_log_id         BigInt            @id @default(autoincrement())
+  report_id         BigInt?
+  answer_id         BigInt?
+  attachment_id     BigInt?
+  feature_type      String            @db.VarChar(50)
+  model_name        String            @db.VarChar(100)
+  prompt_input      Json
+  ai_output         Json?
+  prompt_tokens     Int?              @default(0)
+  completion_tokens Int?              @default(0)
+  total_tokens      Int?              @default(0)
+  latency_ms        Int?
+  status            String?           @default("success") @db.VarChar(30)
+  error_message     String?
+  created_at        DateTime?         @default(now()) @db.Timestamptz(6)
+  checklist_answer  checklist_answer? @relation(fields: [answer_id], references: [answer_id], onUpdate: NoAction, map: "fk_ai_answer")
+  attachment        attachment?       @relation(fields: [attachment_id], references: [attachment_id], onUpdate: NoAction, map: "fk_ai_attachment")
+  checklist_report  checklist_report? @relation(fields: [report_id], references: [report_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_ai_report")
+
+  @@index([report_id], map: "idx_ai_log_report_id")
 }

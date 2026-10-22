@@ -85,7 +85,69 @@ export const INITIAL_WORKSPACES: Workspace[] = [
   },
 ];
 
+const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+
 export const WorkspaceService = {
+  async fetchAll(): Promise<Workspace[]> {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/workspaces`);
+      if (!res.ok) throw new Error("Gagal mengambil data dari API");
+      const json = await res.json();
+      if (json.status === "success" && Array.isArray(json.data) && json.data.length > 0) {
+        if (typeof window !== "undefined") {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(json.data));
+        }
+        return json.data;
+      }
+      return this.getAll();
+    } catch {
+      return this.getAll();
+    }
+  },
+
+  async createAsync(workspace: Omit<Workspace, "id" | "createdAt">): Promise<Workspace> {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/workspaces`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(workspace),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.status === "success" && json.data) {
+          const list = this.getAll();
+          const updated = [json.data, ...list];
+          if (typeof window !== "undefined") {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+          }
+          return json.data;
+        }
+      }
+    } catch {
+      // fallback to local create
+    }
+    return this.create(workspace);
+  },
+
+  async updateAsync(id: string, data: Partial<Workspace>): Promise<Workspace | null> {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/workspaces/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.status === "success" && json.data) {
+          return json.data;
+        }
+      }
+    } catch {
+      // fallback to local update
+    }
+    return this.update(id, data);
+  },
+
   getAll(): Workspace[] {
     if (typeof window === "undefined") return INITIAL_WORKSPACES;
     try {
