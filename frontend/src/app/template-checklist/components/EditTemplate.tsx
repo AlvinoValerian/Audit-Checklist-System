@@ -678,8 +678,8 @@ export default function EditTemplate({
           onClick={handleBack}
           className="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer shadow-2xs"
         >
-          Batal / Buang
-        </button>
+          Batal
+        </button> 
         <button
           type="button"
           onClick={handleSaveTemplate}

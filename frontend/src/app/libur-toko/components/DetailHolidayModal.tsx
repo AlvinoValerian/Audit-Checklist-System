@@ -6,7 +6,7 @@ interface DetailHolidayModalProps {
   isOpen: boolean;
   holiday: Holiday | null;
   onClose: () => void;
-  onEdit: () => void;
+  onEdit: () => void; 
 }
 
 const schedulesList = [

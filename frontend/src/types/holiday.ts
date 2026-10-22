@@ -13,5 +13,5 @@ export interface Holiday {
   status: HolidayStatus;
   liburType?: "full" | "partial";
   schedules?: string[];
-  deletedAt?: string;
+  deletedAt?: string;  
 }

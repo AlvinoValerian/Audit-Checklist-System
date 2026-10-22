@@ -7,7 +7,7 @@ import { Holiday } from "@/types/holiday";
 
 interface HolidayCalendarWidgetProps {
   holidays: Holiday[];
-  selectedDate: Date | null;
+  selectedDate: Date | null; 
   isExpanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
   onSelectDate: (date: Date | null) => void;
