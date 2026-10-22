@@ -23,6 +23,13 @@ export const INITIAL_WORKSPACES: Workspace[] = [
       "Toko A-01: Cabang Pondok Indah",
       "Toko A-02: Cabang Kelapa Gading",
       "Toko A-03: Cabang Bintaro Sektor 7",
+      "Toko A-04: Cabang Grand Indonesia",
+      "Toko A-05: Cabang Senayan City",
+      "Toko A-06: Cabang Central Park",
+      "Toko A-07: Cabang Mall Kelapa Gading 3",
+      "Toko A-08: Cabang Puri Indah",
+      "Toko A-09: Cabang Kemang Village",
+      "Toko A-10: Cabang Kota Kasablanka",
     ],
   },
   {
@@ -45,6 +52,11 @@ export const INITIAL_WORKSPACES: Workspace[] = [
       "Toko B-01: Cabang Tunjungan Plaza",
       "Toko B-02: Cabang Rungkut Industri",
       "Toko B-03: Cabang Darmo Permai",
+      "Toko B-04: Cabang Galaxy Mall",
+      "Toko B-05: Cabang Pakuwon Mall",
+      "Toko B-06: Cabang Manyar Kertoarjo",
+      "Toko B-07: Cabang Kertajaya Indah",
+      "Toko B-08: Cabang Ciputra World",
     ],
   },
   {
@@ -67,6 +79,8 @@ export const INITIAL_WORKSPACES: Workspace[] = [
       "Hub C-01: Gudang Cimahi Sentral",
       "Hub C-02: Distribusi Pasteur Express",
       "Hub C-03: Depo Ujung Berung",
+      "Hub C-04: Hub Transit Padalarang",
+      "Hub C-05: Gudang Kopo Sayati",
     ],
   },
 ];
@@ -97,7 +111,7 @@ export const WorkspaceService = {
                 picName: item.picName || initial.picName,
                 picPhone: item.picPhone || initial.picPhone,
                 stores:
-                  item.stores && item.stores.length > 0
+                  item.stores && item.stores.length >= (initial.stores?.length || 0)
                     ? item.stores
                     : initial.stores,
               };

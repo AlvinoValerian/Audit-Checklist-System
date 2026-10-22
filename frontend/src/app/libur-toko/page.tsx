@@ -361,7 +361,7 @@ export default function LiburTokoPage() {
                       {selectedDate
                         ? `Tidak ada jadwal libur toko pada tanggal ${format(selectedDate, "d MMMM yyyy")}.`
                         : "Coba sesuaikan kata kunci pencarian atau filter status."}
-                    </p>
+                    </p> 
                     {selectedDate && (
                       <button
                         onClick={() => {

@@ -4,9 +4,9 @@ import { HolidayService } from "@/services/holiday.service";
 import { Holiday } from "@/types/holiday";
 
 interface CreateHolidayViewProps {
-  initialData?: Holiday | null;  
+  initialData?: Holiday | null;   
   onBack: () => void;
-  onSave: (data: any) => void;
+  onSave: (data: any) => void; 
 }
 
 export default function CreateHolidayView({ initialData, onBack, onSave }: CreateHolidayViewProps) {
