@@ -185,16 +185,18 @@ export default function DetailHolidayModal({ isOpen, holiday, onClose, onEdit }:
           >
             Tutup
           </button>
-          <button 
-            onClick={() => {
-              onClose();
-              onEdit();
-            }}
-            className="flex items-center gap-2 px-5 py-2.5 bg-[#193f53] hover:bg-[#143343] text-white font-semibold text-xs rounded-lg transition-colors cursor-pointer"
-          >
-            <Pencil className="w-3.5 h-3.5" />
-            Edit Libur Toko
-          </button>
+          {holiday.status !== "Selesai" && holiday.status !== "Dibatalkan" && (
+            <button 
+              onClick={() => {
+                onClose();
+                onEdit();
+              }}
+              className="flex items-center gap-2 px-5 py-2.5 bg-[#193f53] hover:bg-[#143343] text-white font-semibold text-xs rounded-lg transition-colors cursor-pointer"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+              Edit Libur Toko
+            </button>
+          )}
         </div>
       </div>
     </div>
