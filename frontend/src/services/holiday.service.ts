@@ -74,10 +74,41 @@ const defaultHolidays: Holiday[] = [
   },
 ];
 
+// Helper to get today's date formatted as YYYY-MM-DD
+const getTodayStr = () => {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+};
+
+// Helper to auto-update status to "Selesai" if endDate has passed
+const applyAutoCompletedStatus = (holidays: Holiday[]): { updated: Holiday[]; hasChanges: boolean } => {
+  const todayStr = getTodayStr();
+  let hasChanges = false;
+
+  const updated = holidays.map((h) => {
+    const end = h.endDate || h.startDate;
+    // Auto-update to "Selesai" if current status is "Terjadwal" and deadline/endDate is strictly before today
+    if (h.status === "Terjadwal" && end < todayStr) {
+      hasChanges = true;
+      return { ...h, status: "Selesai" as HolidayStatus };
+    }
+    return h;
+  });
+
+  return { updated, hasChanges };
+};
+
 export const HolidayService = {
   getAll: (): Holiday[] => {
-    if (typeof window === "undefined") return defaultHolidays;
+    if (typeof window === "undefined") {
+      const { updated } = applyAutoCompletedStatus(defaultHolidays);
+      return updated;
+    }
     const stored = localStorage.getItem(HOLIDAY_STORAGE_KEY);
+    let list: Holiday[] = [];
     if (!stored) {
       // Check legacy storage key
       const legacy = localStorage.getItem("audit_pro_holidays");
@@ -86,23 +117,41 @@ export const HolidayService = {
           const parsedLegacy: Holiday[] = JSON.parse(legacy);
           const hasOld2024 = parsedLegacy.some((h) => h.startDate.startsWith("2024-08"));
           if (!hasOld2024) {
-            localStorage.setItem(HOLIDAY_STORAGE_KEY, JSON.stringify(parsedLegacy));
-            return parsedLegacy;
+            list = parsedLegacy;
           }
         } catch {
           // ignore
         }
       }
-      localStorage.setItem(HOLIDAY_STORAGE_KEY, JSON.stringify(defaultHolidays));
-      return defaultHolidays;
+      if (list.length === 0) {
+        list = defaultHolidays;
+      }
+    } else {
+      try {
+        list = JSON.parse(stored);
+      } catch {
+        list = defaultHolidays;
+      }
     }
-    return JSON.parse(stored);
+
+    const { updated, hasChanges } = applyAutoCompletedStatus(list);
+    if (hasChanges || !stored) {
+      localStorage.setItem(HOLIDAY_STORAGE_KEY, JSON.stringify(updated));
+    }
+
+    return updated;
   },
 
   create: (data: Omit<Holiday, "id">): Holiday => {
     const holidays = HolidayService.getAll();
+    const todayStr = getTodayStr();
+    const end = data.endDate || data.startDate;
+    const computedStatus: HolidayStatus =
+      data.status === "Terjadwal" && end < todayStr ? "Selesai" : data.status;
+
     const newHoliday: Holiday = {
       ...data,
+      status: computedStatus,
       id: Date.now().toString(),
     };
     holidays.unshift(newHoliday);
@@ -115,7 +164,14 @@ export const HolidayService = {
     const index = holidays.findIndex((h) => h.id === id);
     if (index === -1) return null;
 
-    holidays[index] = { ...holidays[index], ...data };
+    const merged = { ...holidays[index], ...data };
+    const todayStr = getTodayStr();
+    const end = merged.endDate || merged.startDate;
+    if (merged.status === "Terjadwal" && end < todayStr) {
+      merged.status = "Selesai";
+    }
+
+    holidays[index] = merged;
     localStorage.setItem(HOLIDAY_STORAGE_KEY, JSON.stringify(holidays));
     return holidays[index];
   },

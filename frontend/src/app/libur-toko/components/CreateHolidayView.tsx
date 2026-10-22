@@ -38,14 +38,36 @@ export default function CreateHolidayView({ initialData, onBack, onSave }: Creat
   const isFullConflict = conflictingHolidays.some(h => h.liburType === "full" || !h.liburType);
   const takenSchedules = conflictingHolidays.filter(h => h.liburType === "partial").flatMap(h => h.schedules || []);
 
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+
   const handleSaveClick = () => {
     if (!selectedStore || !startDate || !endDate || !reason) {
       alert("Mohon lengkapi semua field yang wajib diisi!");
       return;
     }
+    if (startDate < todayStr) {
+      alert("Tanggal mulai libur tidak boleh menggunakan tanggal yang sudah terlewat!");
+      return;
+    }
+    if (endDate < startDate) {
+      alert("Tanggal selesai libur tidak boleh lebih awal dari tanggal mulai!");
+      return;
+    }
     if (isFullConflict) {
       alert("Toko sudah diliburkan penuh pada tanggal ini. Tidak dapat menyimpan jadwal.");
       return;
+    }
+    if (liburType === "full" && startDate === todayStr && unavailableScheduleIds.length === 4) {
+      alert("Seluruh jadwal audit toko hari ini sudah terlewat jam operasionalnya!");
+      return;
+    }
+    if (liburType === "partial") {
+      const validSchedules = selectedSchedules.filter(id => !unavailableScheduleIds.includes(id));
+      if (validSchedules.length === 0) {
+        alert("Jadwal audit yang dipilih sudah terlewat jam operasionalnya untuk hari ini!");
+        return;
+      }
     }
     const start = new Date(startDate);
     const end = new Date(endDate);
@@ -62,7 +84,7 @@ export default function CreateHolidayView({ initialData, onBack, onSave }: Creat
       creatorRole: initialData?.creatorRole || "Admin",
       status: initialData?.status || "Terjadwal",
       liburType,
-      schedules: liburType === "partial" ? selectedSchedules : []
+      schedules: liburType === "partial" ? activeSelected : []
     });
   };
 
@@ -116,13 +138,21 @@ export default function CreateHolidayView({ initialData, onBack, onSave }: Creat
   const diliburkanCount = (liburType === null || selectedStore === "" || startDate === "") ? 0 : activeSelected.length;
   const berjalanCount = (liburType === null || selectedStore === "" || startDate === "") ? 0 : 4 - diliburkanCount - unavailableScheduleIds.length;
 
+  const isDateInPast = Boolean(startDate && startDate < todayStr);
+  const isEndBeforeStart = Boolean(startDate && endDate && endDate < startDate);
+  const isTodayAllShiftsPassed = Boolean(liburType === "full" && startDate === todayStr && unavailableScheduleIds.length === 4);
+  const hasNoAvailableSchedules = Boolean(liburType === "partial" && activeSelected.length === 0);
+
   const isSaveDisabled = isFullConflict || 
     !selectedStore || 
     !startDate || 
     !endDate || 
     !reason || 
     liburType === null || 
-    (liburType === "partial" && selectedSchedules.length === 0);
+    isDateInPast ||
+    isEndBeforeStart ||
+    isTodayAllShiftsPassed ||
+    hasNoAvailableSchedules;
 
   return (
     <div className="pb-24">
@@ -273,11 +303,22 @@ export default function CreateHolidayView({ initialData, onBack, onSave }: Creat
                     <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input 
                       type="date" 
+                      min={todayStr}
                       value={startDate}
-                      onChange={(e) => setStartDate(e.target.value)}
+                      onChange={(e) => {
+                        setStartDate(e.target.value);
+                        if (endDate && e.target.value > endDate) {
+                          setEndDate(e.target.value);
+                        }
+                      }}
                       className="w-full pl-9 pr-4 py-2.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#193f53]/20 focus:border-[#193f53]"
                     />
                   </div>
+                  {isDateInPast && (
+                    <p className="text-[10px] text-red-500 mt-1.5 font-semibold flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3 shrink-0" /> Tanggal tidak boleh di masa lampau (sudah terlewat).
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-[11px] font-bold text-slate-700 mb-2 uppercase tracking-wider">
@@ -287,11 +328,17 @@ export default function CreateHolidayView({ initialData, onBack, onSave }: Creat
                     <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input 
                       type="date" 
+                      min={startDate || todayStr}
                       value={endDate}
                       onChange={(e) => setEndDate(e.target.value)}
                       className="w-full pl-9 pr-4 py-2.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#193f53]/20 focus:border-[#193f53]"
                     />
                   </div>
+                  {isEndBeforeStart && (
+                    <p className="text-[10px] text-red-500 mt-1.5 font-semibold flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3 shrink-0" /> Tanggal selesai tidak boleh lebih awal dari tanggal mulai.
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -353,7 +400,7 @@ export default function CreateHolidayView({ initialData, onBack, onSave }: Creat
               ) : (
                 <div className="flex gap-3 text-[11px] font-semibold shrink-0">
                   <button onClick={() => setSelectedSchedules(["1", "2", "3", "4"])} className="text-blue-600 hover:text-blue-700 cursor-pointer">Pilih Semua</button>
-                  <button onClick={() => setSelectedSchedules([])} className="text-slate-500 hover:text-slate-700 cursor-pointer">Hapus Semua</button>
+                  <button onClick={() => setSelectedSchedules([])} className="text-red-600 hover:text-red-700 cursor-pointer transition-colors">Hapus Semua</button>
                 </div>
               )}
             </div>
@@ -388,6 +435,30 @@ export default function CreateHolidayView({ initialData, onBack, onSave }: Creat
                     {liburType === "full" 
                       ? "Semua 4 jadwal audit di Cabang ini akan otomatis dinonaktifkan/diliburkan penuh pada tanggal yang dipilih." 
                       : "Auditor untuk jadwal lain pada hari tersebut akan tetap menerima tugas seperti biasa."}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {isTodayAllShiftsPassed && (
+              <div className="flex items-start gap-3 p-4 rounded-xl border mb-5 bg-amber-50/70 border-amber-200 text-amber-900">
+                <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="text-xs font-bold mb-1">Seluruh Jam Audit Hari Ini Telah Terlewat</h4>
+                  <p className="text-[11px] opacity-90 leading-relaxed">
+                    Semua shift jam audit untuk hari ini telah selesai atau terlewat. Anda tidak dapat membuat jadwal libur baru untuk hari ini. Silakan pilih tanggal besok atau setelahnya.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {!isTodayAllShiftsPassed && hasNoAvailableSchedules && liburType === "partial" && startDate === todayStr && (
+              <div className="flex items-start gap-3 p-4 rounded-xl border mb-5 bg-amber-50/70 border-amber-200 text-amber-900">
+                <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="text-xs font-bold mb-1">Shift Jam Audit Telah Terlewat</h4>
+                  <p className="text-[11px] opacity-90 leading-relaxed">
+                    Shift audit yang Anda pilih untuk hari ini sudah terlewat jam mulainya. Tidak dapat menambahkan pengecualian libur untuk jam yang sudah berlalu.
                   </p>
                 </div>
               </div>
