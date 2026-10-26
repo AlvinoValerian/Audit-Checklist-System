@@ -43,8 +43,12 @@ export default function WorkspacePage() {
   const [selectedDetailWorkspace, setSelectedDetailWorkspace] =
     useState<Workspace | null>(null);
 
-  const refreshData = () => {
-    const list = WorkspaceService.getAll();
+  const refreshData = async () => {
+    const cached = WorkspaceService.getAll();
+    setWorkspaces(cached);
+    setStats(WorkspaceService.getStats(cached));
+
+    const list = await WorkspaceService.fetchAll();
     setWorkspaces(list);
     setStats(WorkspaceService.getStats(list));
   };
@@ -67,7 +71,7 @@ export default function WorkspacePage() {
     setIsDeleteModalOpen(true);
   };
 
-  const handleCreateSubmit = (formData: {
+  const handleCreateSubmit = async (formData: {
     name: string;
     companyName: string;
     category: string;
@@ -75,7 +79,7 @@ export default function WorkspacePage() {
     headquartersAddress: string;
     status: "Aktif" | "Nonaktif";
   }) => {
-    WorkspaceService.create({
+    await WorkspaceService.createAsync({
       name: formData.name,
       companyName: formData.companyName,
       category: formData.category,
@@ -93,9 +97,9 @@ export default function WorkspacePage() {
     refreshData();
   };
 
-  const handleEditSubmit = (formData: Partial<Workspace>) => {
+  const handleEditSubmit = async (formData: Partial<Workspace>) => {
     if (!selectedWorkspaceToEdit) return;
-    WorkspaceService.update(selectedWorkspaceToEdit.id, formData);
+    await WorkspaceService.updateAsync(selectedWorkspaceToEdit.id, formData);
     toast.success(
       `Workspace "${formData.companyName || formData.name}" berhasil diperbarui!`
     );
@@ -104,12 +108,12 @@ export default function WorkspacePage() {
     refreshData();
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!deleteTargetWorkspace) return;
     const isDeactivating = deleteTargetWorkspace.status === "Aktif";
     const newStatus = isDeactivating ? "Nonaktif" : "Aktif";
 
-    WorkspaceService.update(deleteTargetWorkspace.id, { status: newStatus });
+    await WorkspaceService.updateAsync(deleteTargetWorkspace.id, { status: newStatus });
     toast.success(
       isDeactivating
         ? `Workspace "${deleteTargetWorkspace.name}" berhasil dinonaktifkan.`

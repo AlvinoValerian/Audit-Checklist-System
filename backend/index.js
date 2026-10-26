@@ -24,7 +24,10 @@ app.use(cookieParser());
 
 // Routes
 const aiRoutes = require('./src/routes/ai.routes');
+const workspaceRoutes = require('./src/routes/workspace.routes');
+
 app.use('/api/ai', aiRoutes);
+app.use('/api/workspaces', workspaceRoutes);
 
 // Base Route / Health Check
 app.get('/api/health', (req, res) => {
