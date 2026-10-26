@@ -78,6 +78,20 @@ export default function LiburTokoPage() {
     return { bg: "bg-[#fef2f2] border-[#fecaca] text-[#b91c1c]", dot: "bg-[#ef4444]" };
   };
 
+  const formatDateRange = (start: string, end: string) => {
+    const s = new Date(start);
+    const e = new Date(end);
+    const options: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short' };
+
+    if (start === end) {
+      return s.toLocaleDateString('id-ID', { ...options, year: 'numeric' });
+    }
+
+    const startStr = s.toLocaleDateString('id-ID', options);
+    const endStr = e.toLocaleDateString('id-ID', { ...options, year: 'numeric' });
+    return `${startStr} - ${endStr}`;
+  };
+
   const formatDuration = (start: string, end: string, days: number) => {
     const s = new Date(start);
     const e = new Date(end);
@@ -340,15 +354,15 @@ export default function LiburTokoPage() {
 
         {/* Table Content */}
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="w-full table-fixed text-left border-collapse">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
-                <th className="px-5 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">NAMA TOKO</th>
-                <th className="px-5 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">TANGGAL / DURASI LIBUR</th>
-                <th className="px-5 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">ALASAN</th>
-                <th className="px-5 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">DIBUAT OLEH</th>
-                <th className="px-5 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-center">STATUS</th>
-                <th className="px-5 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-center">ACTION</th>
+                <th className="w-[21%] px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">NAMA TOKO</th>
+                <th className="w-[20%] px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">TANGGAL / DURASI LIBUR</th>
+                <th className="w-[25%] px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">ALASAN</th>
+                <th className="w-[14%] px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">DIBUAT OLEH</th>
+                <th className="w-[10%] px-2 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-center">STATUS</th>
+                <th className="w-[10%] px-2 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-center">ACTION</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -384,37 +398,51 @@ export default function LiburTokoPage() {
 
                   return (
                     <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className={`px-5 py-3.5 ${isGrayedOut ? 'opacity-40 grayscale' : ''}`}>
+                      <td className={`px-4 py-3.5 ${isGrayedOut ? 'opacity-40 grayscale' : ''}`}>
                         <div className="flex items-center gap-3">
                           <div className="w-8 h-8 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 shrink-0">
                             <Store className="w-3.5 h-3.5" />
                           </div>
-                          <div>
-                            <p className="text-xs font-bold text-slate-900 leading-tight">{row.storeName}</p>
-                            <p className="text-[11px] text-slate-500 mt-0.5">{row.storeLocation}</p>
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold text-slate-900 leading-tight truncate">{row.storeName}</p>
+                            <p className="text-[11px] text-slate-500 mt-0.5 truncate">{row.storeLocation}</p>
                           </div>
                         </div>
                       </td>
-                      <td className={`px-5 py-3.5 ${isGrayedOut ? 'opacity-40 grayscale' : ''}`}>
-                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-white border border-slate-200 text-[11px] text-slate-700 font-bold shadow-2xs">
-                          <CalendarIcon className="w-3.5 h-3.5 text-slate-400" />
-                          {formatDuration(row.startDate, row.endDate, row.durationDays)}
+                      <td className={`px-4 py-3.5 ${isGrayedOut ? 'opacity-40 grayscale' : ''}`}>
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-500 shrink-0">
+                            <CalendarIcon className="w-3.5 h-3.5 text-slate-500" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold text-slate-900 leading-tight truncate">
+                              {formatDateRange(row.startDate, row.endDate)}
+                            </p>
+                            <p className="text-[10px] text-slate-500 font-medium mt-0.5 truncate">
+                              Durasi: {row.durationDays} Hari
+                            </p>
+                          </div>
                         </div>
                       </td>
-                      <td className={`px-5 py-3.5 ${isGrayedOut ? 'opacity-40 grayscale' : ''}`}>
-                        <p className="text-xs text-slate-700 max-w-[160px] leading-relaxed font-medium">{row.reason}</p>
+                      <td className={`px-4 py-3.5 ${isGrayedOut ? 'opacity-40 grayscale' : ''}`}>
+                        <p
+                          className="text-xs text-slate-700 leading-relaxed font-medium break-words line-clamp-2"
+                          title={row.reason}
+                        >
+                          {row.reason}
+                        </p>
                       </td>
-                      <td className={`px-5 py-3.5 ${isGrayedOut ? 'opacity-40 grayscale' : ''}`}>
-                        <p className="text-[11px] font-bold text-slate-900">{row.createdBy}</p>
-                        <p className="text-[10px] text-slate-500 mt-0.5">{row.creatorRole}</p>
+                      <td className={`px-4 py-3.5 ${isGrayedOut ? 'opacity-40 grayscale' : ''}`}>
+                        <p className="text-[11px] font-bold text-slate-900 truncate">{row.createdBy}</p>
+                        <p className="text-[10px] text-slate-500 mt-0.5 truncate">{row.creatorRole}</p>
                       </td>
-                      <td className="px-5 py-3.5 text-center">
+                      <td className="px-2 py-3.5 text-center whitespace-nowrap">
                         <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border ${colors.bg}`}>
                           <div className={`w-1.5 h-1.5 rounded-full ${colors.dot}`}></div>
                           {row.status}
                         </span>
                       </td>
-                      <td className="px-5 py-3.5 text-center">
+                      <td className="px-2 py-3.5 text-center whitespace-nowrap">
                         {isCompleted ? null : (
                           <ActionButtons
                             align="center"
