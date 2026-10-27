@@ -19,10 +19,10 @@ interface CreateSchedulePanelProps {
   initialData?: AuditSchedule | null;
   schedule?: AuditSchedule | null;
   onClose: () => void;
-  onSubmit: (data: Omit<AuditSchedule, "id">) => void;
+  onSubmit: (data: Omit<AuditSchedule, "id"> | Array<Omit<AuditSchedule, "id">>) => void;
 }
 
-const STORE_OPTIONS = [
+export const STORE_OPTIONS = [
   { name: "Cabang Sudirman", location: "Jakarta Pusat" },
   { name: "Cabang Thamrin", location: "Jakarta Pusat" },
   { name: "Cabang Kemang", location: "Jakarta Selatan" },
@@ -101,7 +101,13 @@ export default function CreateSchedulePanel({
 
     if (targetData) {
       setScheduleName(targetData.scheduleName || "");
-      setSelectedStores([targetData.storeName]);
+      if (targetData.selectedStores && targetData.selectedStores.length > 0) {
+        setSelectedStores(targetData.selectedStores);
+      } else if (targetData.storeName === "Semua Toko") {
+        setSelectedStores(STORE_OPTIONS.map((s) => s.name));
+      } else {
+        setSelectedStores([targetData.storeName]);
+      }
       setStoreSearch("");
       setTemplate(
         TEMPLATE_OPTIONS.includes(targetData.scheduleName)
@@ -141,7 +147,12 @@ export default function CreateSchedulePanel({
 
   /* ─── Dynamic store list (include schedule store if not in predefined list) ── */
   const availableStores = useMemo(() => {
-    if (targetData && !STORE_OPTIONS.some((s) => s.name === targetData.storeName)) {
+    if (
+      targetData &&
+      targetData.storeName !== "Semua Toko" &&
+      !targetData.storeName.includes("Toko Terpilih") &&
+      !STORE_OPTIONS.some((s) => s.name === targetData.storeName)
+    ) {
       return [
         { name: targetData.storeName, location: targetData.storeLocation || "Jakarta" },
         ...STORE_OPTIONS,
@@ -228,30 +239,57 @@ export default function CreateSchedulePanel({
       return;
     }
 
-    const chosenStore =
-      availableStores.find((s) => s.name === selectedStores[0]) || {
-        name: selectedStores[0],
-        location: targetData?.storeLocation || "Jakarta",
-      };
-
-    const finalName = scheduleName.trim() || template;
+    const finalName = scheduleName.trim() || targetData?.scheduleName || template;
     const finalStatus: ScheduleStatus = isActive ? "Terjadwal" : "Dibatalkan";
 
-    onSubmit({
-      storeName: chosenStore.name,
-      storeLocation: chosenStore.location,
-      scheduleName: finalName,
-      date: targetData?.date || new Date().toISOString().split("T")[0],
-      startTime,
-      endTime,
-      timeRange: `${startTime} - ${endTime}`,
-      recurrence,
-      selectedDays: recurrence === "Setiap Hari" ? [...ALL_DAYS] : selectedDays,
-      status: finalStatus,
-      notes: notes.trim() || undefined,
-      createdAt: targetData?.createdAt || new Date().toISOString().split("T")[0],
-      auditorName: targetData?.auditorName,
-    });
+    if (isEdit) {
+      // Mode Edit: edit 1 jadwal toko spesifik
+      const chosenStore =
+        availableStores.find((s) => s.name === selectedStores[0]) || {
+          name: selectedStores[0],
+          location: targetData?.storeLocation || "Jakarta",
+        };
+
+      onSubmit({
+        storeName: chosenStore.name,
+        storeLocation: chosenStore.location,
+        scheduleName: finalName,
+        date: targetData?.date || new Date().toISOString().split("T")[0],
+        startTime,
+        endTime,
+        timeRange: `${startTime} - ${endTime}`,
+        recurrence,
+        selectedDays: recurrence === "Setiap Hari" ? [...ALL_DAYS] : selectedDays,
+        status: finalStatus,
+        notes: notes.trim() || undefined,
+        createdAt: targetData?.createdAt || new Date().toISOString().split("T")[0],
+        auditorName: targetData?.auditorName,
+      });
+    } else {
+      // Mode Create: buat 1 log terpisah per toko yang dipilih (Bulk Create)
+      const schedulesToCreate: Array<Omit<AuditSchedule, "id">> = selectedStores.map((storeName) => {
+        const storeObj = availableStores.find((s) => s.name === storeName) || {
+          name: storeName,
+          location: "Jakarta",
+        };
+        return {
+          storeName: storeObj.name,
+          storeLocation: storeObj.location,
+          scheduleName: finalName,
+          date: new Date().toISOString().split("T")[0],
+          startTime,
+          endTime,
+          timeRange: `${startTime} - ${endTime}`,
+          recurrence,
+          selectedDays: recurrence === "Setiap Hari" ? [...ALL_DAYS] : selectedDays,
+          status: finalStatus,
+          notes: notes.trim() || undefined,
+          createdAt: new Date().toISOString().split("T")[0],
+        };
+      });
+
+      onSubmit(schedulesToCreate);
+    }
 
     onClose();
   };
@@ -311,7 +349,7 @@ export default function CreateSchedulePanel({
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-4">
+        <form onSubmit={handleSubmit} autoComplete="off" className="flex-1 overflow-y-auto p-5 space-y-4">
           {/* Nama Jadwal */}
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1.5">
@@ -319,6 +357,10 @@ export default function CreateSchedulePanel({
             </label>
             <input
               type="text"
+              name="auditScheduleTitle"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
               required
               value={scheduleName}
               onChange={(e) => setScheduleName(e.target.value)}
@@ -399,7 +441,7 @@ export default function CreateSchedulePanel({
                     onClick={() => setIsStoreDropdownOpen(false)}
                   />
                   <div className="absolute left-0 right-0 mt-1.5 bg-white border border-slate-200 rounded-xl shadow-xl z-20 overflow-hidden max-h-56 overflow-y-auto">
-                    {/* Pilih semua row (only in create mode) */}
+                    {/* Pilih semua row (hanya di form baru) */}
                     {!isEdit && (
                       <label className="flex items-center gap-3 px-3.5 py-2.5 hover:bg-slate-50 cursor-pointer border-b border-slate-100">
                         <input

@@ -404,12 +404,21 @@ export const ScheduleService = {
         return nextItem;
       });
 
+      // Bersihkan baris placeholder/test lama jika ada (misal 'Semua Toko' atau 'N Toko Terpilih')
+      const cleanedList = updated.filter(
+        (item) => item.storeName !== "Semua Toko" && !item.storeName.includes("Toko Terpilih")
+      );
+
+      if (cleanedList.length !== updated.length) {
+        changed = true;
+      }
+
       if (changed || !data) {
-        localStorage.setItem(SCHEDULE_STORAGE_KEY, JSON.stringify(updated));
+        localStorage.setItem(SCHEDULE_STORAGE_KEY, JSON.stringify(cleanedList));
       }
 
       // Sembunyikan item yang sudah di-soft delete setelah 15 hari
-      return updated.filter((item) => {
+      return cleanedList.filter((item) => {
         if (item.status === "Dibatalkan") {
           const expired = isSoftDeletedExpired(item.deletedAt, item.date, now);
           if (expired) return false;
@@ -429,7 +438,7 @@ export const ScheduleService = {
     const list = this.getAll();
     const newSchedule: AuditSchedule = {
       ...data,
-      id: `sch-${Date.now()}`,
+      id: `sch-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
       createdAt: data.createdAt || new Date().toISOString().split("T")[0],
     };
     const updated = [newSchedule, ...list];
@@ -437,6 +446,21 @@ export const ScheduleService = {
       localStorage.setItem(SCHEDULE_STORAGE_KEY, JSON.stringify(updated));
     }
     return newSchedule;
+  },
+
+  createBatch(items: Array<Omit<AuditSchedule, "id">>): AuditSchedule[] {
+    const list = this.getAll();
+    const now = Date.now();
+    const newSchedules: AuditSchedule[] = items.map((data, idx) => ({
+      ...data,
+      id: `sch-${now}-${idx}-${Math.floor(Math.random() * 10000)}`,
+      createdAt: data.createdAt || new Date().toISOString().split("T")[0],
+    }));
+    const updated = [...newSchedules, ...list];
+    if (typeof window !== "undefined") {
+      localStorage.setItem(SCHEDULE_STORAGE_KEY, JSON.stringify(updated));
+    }
+    return newSchedules;
   },
 
   update(id: string, data: Partial<AuditSchedule>): AuditSchedule | null {

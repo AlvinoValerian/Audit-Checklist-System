@@ -91,10 +91,19 @@ export default function JadwalAuditPage() {
     setIsSchedulePanelOpen(true);
   };
 
-  const handleSaveSchedule = (scheduleData: Omit<AuditSchedule, "id">) => {
-    if (scheduleToEdit) {
+  const handleSaveSchedule = (
+    scheduleData: Omit<AuditSchedule, "id"> | Array<Omit<AuditSchedule, "id">>
+  ) => {
+    if (scheduleToEdit && !Array.isArray(scheduleData)) {
       ScheduleService.update(scheduleToEdit.id, scheduleData);
       toast.success(`Jadwal untuk "${scheduleData.storeName}" berhasil diperbarui!`);
+    } else if (Array.isArray(scheduleData)) {
+      ScheduleService.createBatch(scheduleData);
+      if (scheduleData.length === 1) {
+        toast.success(`Jadwal audit untuk "${scheduleData[0].storeName}" berhasil dibuat!`);
+      } else {
+        toast.success(`${scheduleData.length} jadwal audit cabang berhasil dibuat!`);
+      }
     } else {
       ScheduleService.create(scheduleData);
       toast.success(`Jadwal audit untuk "${scheduleData.storeName}" berhasil dibuat!`);
@@ -148,6 +157,10 @@ export default function JadwalAuditPage() {
         schedule.storeName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         schedule.storeLocation.toLowerCase().includes(searchTerm.toLowerCase()) ||
         schedule.scheduleName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (Array.isArray(schedule.selectedStores) &&
+          schedule.selectedStores.some((s) =>
+            s.toLowerCase().includes(searchTerm.toLowerCase())
+          )) ||
         (schedule.auditorName && schedule.auditorName.toLowerCase().includes(searchTerm.toLowerCase()));
 
       const matchesStatus =

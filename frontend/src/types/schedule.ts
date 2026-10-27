@@ -5,6 +5,7 @@ export interface AuditSchedule {
   id: string;
   storeName: string;
   storeLocation: string;
+  selectedStores?: string[];
   scheduleName: string;
   templateId?: string;
   auditorName?: string;
