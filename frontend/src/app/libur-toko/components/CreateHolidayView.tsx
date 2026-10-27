@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { ArrowLeft, CalendarOff, Settings2, AlertTriangle, ShieldAlert, Calendar, Clock, Store, Check, Info, XCircle } from "lucide-react";
+import { ArrowLeft, CalendarOff, Settings2, AlertTriangle, ShieldAlert, Calendar, Clock, Store, Check, Info, XCircle, ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
 import { HolidayService } from "@/services/holiday.service";
 import { Holiday } from "@/types/holiday";
 
@@ -42,6 +42,50 @@ export default function CreateHolidayView({ initialData, onBack, onSave }: Creat
 
   const today = new Date();
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+
+  const [calendarMonth, setCalendarMonth] = useState<Date>(() => {
+    if (initialData?.startDate) {
+      const d = new Date(initialData.startDate);
+      if (!isNaN(d.getTime())) return new Date(d.getFullYear(), d.getMonth(), 1);
+    }
+    return new Date();
+  });
+
+  const monthNames = [
+    "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+    "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+  ];
+  const dayNames = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
+
+  const cYear = calendarMonth.getFullYear();
+  const cMonth = calendarMonth.getMonth();
+
+  const firstDay = new Date(cYear, cMonth, 1).getDay();
+  const daysInMonth = new Date(cYear, cMonth + 1, 0).getDate();
+  const daysInPrevMonth = new Date(cYear, cMonth, 0).getDate();
+
+  const prevMonthDays = Array.from({ length: firstDay }).map((_, i) => daysInPrevMonth - firstDay + 1 + i);
+  const currentMonthDays = Array.from({ length: daysInMonth }).map((_, i) => i + 1);
+  const totalGridCells = firstDay + daysInMonth;
+  const nextMonthDaysCount = totalGridCells % 7 === 0 ? 0 : 7 - (totalGridCells % 7);
+  const nextMonthDays = Array.from({ length: nextMonthDaysCount }).map((_, i) => i + 1);
+
+  const handleCalendarDateClick = (dateStr: string) => {
+    if (!selectedStore) return;
+    if (dateStr < todayStr) return;
+
+    if (!startDate || (startDate && endDate && startDate !== endDate)) {
+      setStartDate(dateStr);
+      setEndDate(dateStr);
+    } else if (startDate && (!endDate || startDate === endDate)) {
+      if (dateStr < startDate) {
+        setStartDate(dateStr);
+        setEndDate(startDate);
+      } else {
+        setEndDate(dateStr);
+      }
+    }
+  };
 
   const handleSaveClick = () => {
     if (!selectedStore || !startDate || !endDate || !reason.trim()) {
@@ -310,15 +354,22 @@ export default function CreateHolidayView({ initialData, onBack, onSave }: Creat
                     <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input 
                       type="date" 
+                      disabled={!selectedStore}
                       min={todayStr}
                       value={startDate}
                       onChange={(e) => {
                         setStartDate(e.target.value);
+                        if (e.target.value) {
+                          const d = new Date(e.target.value);
+                          if (!isNaN(d.getTime())) {
+                            setCalendarMonth(new Date(d.getFullYear(), d.getMonth(), 1));
+                          }
+                        }
                         if (endDate && e.target.value > endDate) {
                           setEndDate(e.target.value);
                         }
                       }}
-                      className="w-full pl-9 pr-4 py-2.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#193f53]/20 focus:border-[#193f53]"
+                      className="w-full pl-9 pr-4 py-2.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#193f53]/20 focus:border-[#193f53] disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
                     />
                   </div>
                   {isDateInPast && (
@@ -335,10 +386,11 @@ export default function CreateHolidayView({ initialData, onBack, onSave }: Creat
                     <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input 
                       type="date" 
+                      disabled={!selectedStore}
                       min={startDate || todayStr}
                       value={endDate}
                       onChange={(e) => setEndDate(e.target.value)}
-                      className="w-full pl-9 pr-4 py-2.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#193f53]/20 focus:border-[#193f53]"
+                      className="w-full pl-9 pr-4 py-2.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#193f53]/20 focus:border-[#193f53] disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
                     />
                   </div>
                   {isEndBeforeStart && (
@@ -346,6 +398,203 @@ export default function CreateHolidayView({ initialData, onBack, onSave }: Creat
                       <AlertTriangle className="w-3 h-3 shrink-0" /> Tanggal selesai tidak boleh lebih awal dari tanggal mulai.
                     </p>
                   )}
+                </div>
+              </div>
+
+              {/* KALENDER INTERAKTIF KOMPAK: TAMPILAN STATUS LIBUR PENUH (MERAH) & SEBAGIAN (KUNING) */}
+              <div className="p-3 sm:p-3.5 bg-slate-50/90 border border-slate-200 rounded-xl space-y-2.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-200">
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-6 h-6 rounded-md bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
+                      <Calendar className="w-3.5 h-3.5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-[11px] font-bold text-slate-900">
+                          Peta Libur & Pilih Tanggal
+                        </h3>
+                        {selectedStore && (
+                          <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                            {storeNameValue}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[9px] text-slate-500">
+                        {selectedStore ? "Klik tanggal pada kotak untuk memilih periode libur." : "Pilih cabang di atas untuk melihat libur spesifik."}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-1.5 self-end sm:self-auto">
+                    <div className="flex items-center bg-white border border-slate-200 rounded-md p-0.5 shadow-2xs">
+                      <button
+                        type="button"
+                        onClick={() => setCalendarMonth(new Date(cYear, cMonth - 1, 1))}
+                        className="p-1 hover:bg-slate-100 rounded text-slate-600 transition-colors cursor-pointer"
+                        title="Bulan Sebelumnya"
+                      >
+                        <ChevronLeft className="w-3 h-3" />
+                      </button>
+                      <span className="px-2 text-[11px] font-bold text-slate-800 whitespace-nowrap min-w-[95px] text-center">
+                        {monthNames[cMonth]} {cYear}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setCalendarMonth(new Date(cYear, cMonth + 1, 1))}
+                        className="p-1 hover:bg-slate-100 rounded text-slate-600 transition-colors cursor-pointer"
+                        title="Bulan Berikutnya"
+                      >
+                        <ChevronRight className="w-3 h-3" />
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setCalendarMonth(new Date())}
+                      className="px-2 py-1 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-md text-[9px] font-semibold transition-colors flex items-center gap-1 cursor-pointer shadow-2xs"
+                      title="Kembali ke bulan saat ini"
+                    >
+                      <RotateCcw className="w-2.5 h-2.5" />
+                      <span>Bulan Ini</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Day Labels */}
+                <div className="grid grid-cols-7 gap-1 text-center">
+                  {dayNames.map((d, idx) => (
+                    <div key={d} className={`text-[9px] font-bold py-0.5 ${idx === 0 ? "text-red-500" : "text-slate-500"}`}>
+                      {d}
+                    </div>
+                  ))}
+
+                  {/* Previous month days */}
+                  {prevMonthDays.map((d, i) => (
+                    <div
+                      key={`prev-${i}`}
+                      className="h-9 sm:h-9.5 rounded-lg border border-transparent bg-slate-100/40 text-slate-300 flex items-center justify-center text-[10px] font-medium cursor-not-allowed"
+                    >
+                      <span>{d}</span>
+                    </div>
+                  ))}
+
+                  {/* Current month days */}
+                  {currentMonthDays.map((d) => {
+                    const dateStr = `${cYear}-${String(cMonth + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+                    const holidaysOnDate = existingHolidays.filter(h => {
+                      if (!selectedStore) return false;
+                      if (h.status === "Dibatalkan") return false;
+                      if (initialData && h.id === initialData.id) return false;
+                      if (h.storeName !== storeNameValue) return false;
+                      const hStart = h.startDate;
+                      const hEnd = h.endDate || h.startDate;
+                      return dateStr >= hStart && dateStr <= hEnd;
+                    });
+
+                    const isFullHoliday = holidaysOnDate.some(h => h.liburType === "full" || !h.liburType);
+                    const isPartialHoliday = !isFullHoliday && holidaysOnDate.some(h => h.liburType === "partial");
+
+                    const isPast = dateStr < todayStr;
+                    const isToday = dateStr === todayStr;
+                    const isSelectedStart = startDate === dateStr;
+                    const isSelectedEnd = endDate === dateStr;
+                    const isInRange = Boolean(startDate && endDate && dateStr >= startDate && dateStr <= endDate);
+
+                    let cellCls = "bg-white text-slate-700 hover:bg-blue-50/70 hover:border-blue-300 hover:text-blue-700 border-slate-200 cursor-pointer shadow-2xs";
+
+                    if (!selectedStore) {
+                      cellCls = "bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed opacity-60";
+                    } else if (isPast) {
+                      cellCls = "bg-slate-100/60 text-slate-300 border-slate-100 cursor-not-allowed";
+                    } else if (isFullHoliday) {
+                      // KOTAK MERAH UNTUK LIBUR TOKO FULL
+                      cellCls = "bg-red-500 text-white font-bold border-red-600 shadow-xs hover:bg-red-600 cursor-pointer";
+                      if (isInRange) cellCls += " ring-2 ring-blue-600 ring-offset-1";
+                    } else if (isPartialHoliday) {
+                      // KOTAK KUNING UNTUK LIBUR SEBAGIAN
+                      cellCls = "bg-amber-300 text-amber-950 font-bold border-amber-400 shadow-xs hover:bg-amber-400 cursor-pointer";
+                      if (isInRange) cellCls += " ring-2 ring-blue-600 ring-offset-1";
+                    } else if (isInRange) {
+                      if (isSelectedStart || isSelectedEnd) {
+                        cellCls = "bg-[#193f53] text-white font-bold border-[#193f53] shadow-xs cursor-pointer";
+                      } else {
+                        cellCls = "bg-sky-100 text-[#193f53] font-bold border-sky-300 cursor-pointer";
+                      }
+                    }
+
+                    return (
+                      <button
+                        key={`curr-${d}`}
+                        type="button"
+                        disabled={!selectedStore || isPast}
+                        onClick={() => handleCalendarDateClick(dateStr)}
+                        className={`h-9 sm:h-9.5 rounded-lg border flex flex-col items-center justify-center p-0.5 transition-all ${cellCls}`}
+                        title={
+                          !selectedStore
+                            ? "Pilih cabang toko di atas terlebih dahulu"
+                            : isFullHoliday
+                            ? `${d} ${monthNames[cMonth]} ${cYear}: Libur Toko Penuh (Full)`
+                            : isPartialHoliday
+                            ? `${d} ${monthNames[cMonth]} ${cYear}: Libur Sebagian (Shift Spesifik)`
+                            : `${d} ${monthNames[cMonth]} ${cYear}: Operasional Normal (Klik untuk pilih)`
+                        }
+                      >
+                        <span className="text-[11px] sm:text-xs leading-none font-bold">{d}</span>
+                        {isFullHoliday ? (
+                          <span className="text-[7.5px] font-extrabold leading-none mt-0.5 tracking-tight text-white uppercase">
+                            Full
+                          </span>
+                        ) : isPartialHoliday ? (
+                          <span className="text-[7.5px] font-extrabold leading-none mt-0.5 tracking-tight text-amber-950 uppercase">
+                            Sebagian
+                          </span>
+                        ) : isInRange ? (
+                          <span className={`text-[7.5px] font-semibold leading-none mt-0.5 tracking-tight ${isSelectedStart || isSelectedEnd ? 'text-white' : 'text-[#193f53]'}`}>
+                            {isSelectedStart && isSelectedEnd ? "1 Hari" : isSelectedStart ? "Mulai" : isSelectedEnd ? "Selesai" : "Pilih"}
+                          </span>
+                        ) : isToday ? (
+                          <span className="text-[7.5px] font-bold leading-none mt-0.5 tracking-tight text-blue-600">
+                            Hari Ini
+                          </span>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+
+                  {/* Next month days */}
+                  {nextMonthDays.map((d, i) => (
+                    <div
+                      key={`next-${i}`}
+                      className="h-9 sm:h-9.5 rounded-lg border border-transparent bg-slate-100/40 text-slate-300 flex items-center justify-center text-[10px] font-medium cursor-not-allowed"
+                    >
+                      <span>{d}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Compact Legend */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200 text-[10px]">
+                  <div className="flex flex-wrap items-center gap-2.5 sm:gap-3.5">
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-2.5 h-2.5 rounded bg-red-500 border border-red-600 shrink-0"></div>
+                      <span className="font-semibold text-slate-700">Libur Full</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-2.5 h-2.5 rounded bg-amber-300 border border-amber-400 shrink-0"></div>
+                      <span className="font-semibold text-slate-700">Libur Sebagian</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-2.5 h-2.5 rounded bg-[#193f53] border border-[#193f53] shrink-0"></div>
+                      <span className="font-semibold text-slate-700">Dipilih</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-2.5 h-2.5 rounded bg-white border border-slate-300 shrink-0"></div>
+                      <span className="text-slate-500">Normal</span>
+                    </div>
+                  </div>
+                  <span className="text-[9px] text-slate-400 italic">
+                    *Klik untuk pilih tanggal
+                  </span>
                 </div>
               </div>
 
