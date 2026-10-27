@@ -9,6 +9,8 @@ interface CreateHolidayViewProps {
   onSave: (data: any) => void; 
 }
 
+const MAX_REASON_LENGTH = 150;
+
 export default function CreateHolidayView({ initialData, onBack, onSave }: CreateHolidayViewProps) {
   const [liburType, setLiburType] = useState<"full" | "partial" | null>(initialData ? (initialData.liburType || "full") : null);
   const [selectedSchedules, setSelectedSchedules] = useState<string[]>(initialData?.schedules || []);
@@ -42,8 +44,12 @@ export default function CreateHolidayView({ initialData, onBack, onSave }: Creat
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
 
   const handleSaveClick = () => {
-    if (!selectedStore || !startDate || !endDate || !reason) {
+    if (!selectedStore || !startDate || !endDate || !reason.trim()) {
       alert("Mohon lengkapi semua field yang wajib diisi!");
+      return;
+    }
+    if (reason.length > MAX_REASON_LENGTH) {
+      alert(`Alasan tidak boleh melebihi ${MAX_REASON_LENGTH} karakter!`);
       return;
     }
     if (startDate < todayStr) {
@@ -147,7 +153,8 @@ export default function CreateHolidayView({ initialData, onBack, onSave }: Creat
     !selectedStore || 
     !startDate || 
     !endDate || 
-    !reason || 
+    !reason.trim() || 
+    reason.length > MAX_REASON_LENGTH ||
     liburType === null || 
     isDateInPast ||
     isEndBeforeStart ||
@@ -343,17 +350,38 @@ export default function CreateHolidayView({ initialData, onBack, onSave }: Creat
               </div>
 
               <div>
-                <label className="block text-[11px] font-bold text-slate-700 mb-2 uppercase tracking-wider">
-                  ALASAN LIBUR / KETERANGAN PENGECUALIAN <span className="text-red-500">*</span>
-                </label>
-                <input 
-                  type="text"
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+                    ALASAN LIBUR / KETERANGAN PENGECUALIAN <span className="text-red-500">*</span>
+                  </label>
+                  <span className={`text-[10px] font-semibold ${
+                    reason.length >= MAX_REASON_LENGTH
+                      ? "text-rose-500"
+                      : reason.length >= MAX_REASON_LENGTH * 0.8
+                      ? "text-amber-600"
+                      : "text-slate-400"
+                  }`}>
+                    {reason.length} / {MAX_REASON_LENGTH} karakter
+                  </span>
+                </div>
+                <textarea 
+                  rows={3}
+                  maxLength={MAX_REASON_LENGTH}
                   value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  placeholder="Masukkan alasan libur atau keterangan pengecualian..."
-                  className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#193f53]/20 focus:border-[#193f53]"
+                  onChange={(e) => setReason(e.target.value.slice(0, MAX_REASON_LENGTH))}
+                  placeholder={`Masukkan alasan libur atau keterangan pengecualian (maksimal ${MAX_REASON_LENGTH} karakter)...`}
+                  className={`w-full px-4 py-2.5 bg-white border rounded-lg text-xs font-medium focus:outline-none focus:ring-2 transition-all resize-none ${
+                    reason.length >= MAX_REASON_LENGTH
+                      ? "border-amber-300 focus:ring-amber-500/20 focus:border-amber-500"
+                      : "border-slate-200 focus:ring-[#193f53]/20 focus:border-[#193f53]"
+                  }`}
                 />
-                <p className="text-[10px] text-slate-500 mt-1.5">Alasan ini akan tercatat di log riwayat dan kalender penugasan auditor lapangan.</p>
+                <div className="flex items-center justify-between text-[10px] text-slate-500 mt-1.5">
+                  <p>Alasan ini akan tercatat di log riwayat dan kalender penugasan auditor lapangan.</p>
+                  {reason.length >= MAX_REASON_LENGTH && (
+                    <span className="text-rose-500 font-semibold shrink-0">Batas maksimal tercapai</span>
+                  )}
+                </div>
               </div>
             </div>
           </div>

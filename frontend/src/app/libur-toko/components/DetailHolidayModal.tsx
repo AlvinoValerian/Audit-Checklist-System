@@ -101,7 +101,7 @@ export default function DetailHolidayModal({ isOpen, holiday, onClose, onEdit }:
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-5 border-t border-slate-100">
               <div>
                 <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Alasan Penetapan Libur</div>
-                <p className="text-xs text-slate-700 leading-relaxed font-medium">{holiday.reason}</p>
+                <p className="text-xs text-slate-700 leading-relaxed font-medium break-words max-h-28 overflow-y-auto pr-1">{holiday.reason}</p>
               </div>
               <div>
                 <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Dibuat Oleh</div>

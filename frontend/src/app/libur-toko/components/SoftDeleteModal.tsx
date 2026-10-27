@@ -33,8 +33,8 @@ export default function SoftDeleteModal({ isOpen, holiday, onClose, onConfirm }:
         onClick={onClose}
       ></div>
       
-      <div className="bg-white rounded-2xl w-full max-w-lg relative flex flex-col shadow-2xl">
-        <div className="p-6 pb-4">
+      <div className="bg-white rounded-2xl w-full max-w-lg relative flex flex-col max-h-[90vh] shadow-2xl overflow-hidden my-auto">
+        <div className="p-6 pb-4 overflow-y-auto flex-1">
           <button onClick={onClose} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors">
             <X className="w-5 h-5" />
           </button>
@@ -69,8 +69,10 @@ export default function SoftDeleteModal({ isOpen, holiday, onClose, onConfirm }:
               <div className="text-slate-500 font-medium">Tipe Libur:</div>
               <div className="font-bold text-slate-900">{holiday.liburType === "partial" ? "Libur Sebagian (Partial)" : "Libur Toko Penuh (Full)"}</div>
               
-              <div className="text-slate-500 font-medium">Alasan:</div>
-              <div className="font-bold text-slate-900">{holiday.reason}</div>
+              <div className="text-slate-500 font-medium pt-0.5">Alasan:</div>
+              <div className="font-bold text-slate-900 break-words max-h-24 overflow-y-auto pr-1">
+                {holiday.reason}
+              </div>
               
               <div className="text-slate-500 font-medium mt-1">Dampak Jadwal:</div>
               <div className="font-bold text-blue-600 flex items-center gap-1.5 mt-1">
@@ -87,7 +89,7 @@ export default function SoftDeleteModal({ isOpen, holiday, onClose, onConfirm }:
           </div>
         </div>
 
-        <div className="p-4 border-t border-slate-100 flex justify-end items-center gap-3 bg-slate-50 rounded-b-2xl">
+        <div className="p-4 border-t border-slate-100 flex justify-end items-center gap-3 bg-slate-50 rounded-b-2xl shrink-0">
           <button 
             onClick={onClose}
             className="px-5 py-2.5 bg-white border border-slate-200 text-slate-700 font-semibold text-xs rounded-lg hover:bg-slate-50 transition-colors cursor-pointer"
