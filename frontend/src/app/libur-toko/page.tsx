@@ -3,11 +3,14 @@
 import React, { useState, useEffect, useMemo } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import Header from "@/components/layout/Header";
-import { Calendar as CalendarIcon, CheckCircle2, XCircle, Search, Filter, Plus, Store, X, ChevronLeft, ChevronRight } from "lucide-react";
+import { Calendar as CalendarIcon, CheckCircle2, XCircle, Search, Filter, Plus, Store, X, ChevronLeft, ChevronRight, Building2 } from "lucide-react";
 import { HolidayService } from "@/services/holiday.service";
 import { Holiday, HolidayStatus } from "@/types/holiday";
 import { toast } from "sonner";
 import { format } from "date-fns";
+import { AuthService } from "@/lib/auth";
+import { WorkspaceService } from "@/services/workspace.service";
+import { Workspace } from "@/types/workspace";
 import CreateHolidayView from "./components/CreateHolidayView";
 import DetailHolidayModal from "./components/DetailHolidayModal";
 import SoftDeleteModal from "./components/SoftDeleteModal";
@@ -37,6 +40,8 @@ export default function LiburTokoPage() {
   // Restore Modal States
   const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false);
   const [restoreTargetHoliday, setRestoreTargetHoliday] = useState<Holiday | null>(null);
+  const [isSubmittingDelete, setIsSubmittingDelete] = useState(false);
+  const [isSubmittingRestore, setIsSubmittingRestore] = useState(false);
 
   // Search & Filter State
   const [searchTerm, setSearchTerm] = useState("");
@@ -47,30 +52,101 @@ export default function LiburTokoPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 5;
 
-  const refreshData = () => {
-    const list = HolidayService.getAll();
-    const now = new Date();
-    
-    // Sembunyikan jadwal (Selesai/Dibatalkan) yang sudah terlewat lebih dari 15 hari
-    const filteredList = list.filter(holiday => {
-      if (holiday.status === "Selesai" || holiday.status === "Dibatalkan") {
-        const endDate = new Date(holiday.endDate);
-        const diffTime = now.getTime() - endDate.getTime();
-        const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-        if (diffDays > 15) {
-          return false;
-        }
-      }
-      return true;
-    });
+  // Workspace Switcher States
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>("");
+  const [currentWorkspaceName, setCurrentWorkspaceName] = useState<string>("Workspace");
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
-    setHolidays(filteredList);
-    setStats(HolidayService.getStats(filteredList));
+  const refreshData = async (customWsId?: string) => {
+    try {
+      const activeWs = AuthService.getActiveWorkspace();
+      const wsId = customWsId !== undefined ? customWsId : (selectedWorkspaceId || activeWs?.id);
+      const list = await HolidayService.fetchAll(wsId);
+      const now = new Date();
+      
+      // Sembunyikan jadwal (Selesai/Dibatalkan) yang sudah terlewat lebih dari 5 hari (diperbarui dari 15 hari)
+      const filteredList = list.filter((holiday) => {
+        if (holiday.status === "Selesai" || holiday.status === "Dibatalkan") {
+          const endDate = new Date(holiday.endDate || holiday.startDate);
+          const diffTime = now.getTime() - endDate.getTime();
+          const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+          if (diffDays > 5) {
+            return false;
+          }
+        }
+        return true;
+      });
+
+      setHolidays(filteredList);
+      setStats(HolidayService.getStats(filteredList));
+    } catch (err) {
+      console.error("Gagal refresh data libur:", err);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   useEffect(() => {
-    refreshData();
+    const init = async () => {
+      setIsLoading(true);
+      const user = AuthService.getCurrentUser();
+      const activeWs = AuthService.getActiveWorkspace();
+      const isSA = user?.role === "Super Admin";
+      setIsSuperAdmin(isSA);
+
+      let targetWsId = activeWs?.id || user?.workspaceId || "";
+      let targetWsName = activeWs?.name || user?.workspaceName || "Workspace";
+
+      if (isSA) {
+        try {
+          const wsList = await WorkspaceService.fetchAll();
+          setWorkspaces(wsList);
+          if (wsList.length > 0) {
+            const matched = wsList.find((w) => w.id === targetWsId && w.status !== "Nonaktif");
+            if (matched) {
+              targetWsId = matched.id;
+              targetWsName = matched.companyName || matched.name;
+            } else {
+              const firstActive = wsList.find((w) => w.status !== "Nonaktif") || wsList[0];
+              targetWsId = firstActive.id;
+              targetWsName = firstActive.companyName || firstActive.name;
+              AuthService.setActiveWorkspace({
+                id: firstActive.id,
+                name: targetWsName,
+              });
+            }
+          }
+        } catch (err) {
+          console.warn("Gagal memuat daftar workspace:", err);
+        }
+      }
+
+      setSelectedWorkspaceId(targetWsId);
+      setCurrentWorkspaceName(targetWsName);
+      await refreshData(targetWsId);
+    };
+
+    init();
   }, []);
+
+  const handleWorkspaceChange = async (newWsId: string) => {
+    const chosen = workspaces.find((w) => w.id === newWsId);
+    if (chosen?.status === "Nonaktif") {
+      toast.error(`Workspace "${chosen.companyName || chosen.name}" sedang nonaktif dan tidak dapat dipilih.`);
+      return;
+    }
+
+    setSelectedWorkspaceId(newWsId);
+    if (chosen) {
+      const name = chosen.companyName || chosen.name;
+      setCurrentWorkspaceName(name);
+      AuthService.setActiveWorkspace({ id: chosen.id, name });
+      toast.info(`Menampilkan libur toko untuk workspace "${name}"`);
+    }
+    await refreshData(newWsId);
+  };
 
   const getStatusColor = (status: HolidayStatus) => {
     if (status === "Terjadwal") return { bg: "bg-purple-50 border-purple-200 text-purple-700", dot: "bg-purple-600" };
@@ -138,33 +214,99 @@ export default function LiburTokoPage() {
   const startIndex = filteredHolidays.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0;
   const endIndex = Math.min(currentPage * itemsPerPage, filteredHolidays.length);
 
+  // Pengecekan tabrakan / collision jadwal libur saat restore
+  const conflictHolidayForRestore = useMemo(() => {
+    if (!restoreTargetHoliday) return null;
+    const rStart = restoreTargetHoliday.startDate;
+    const rEnd = restoreTargetHoliday.endDate || restoreTargetHoliday.startDate;
+    const rStore = restoreTargetHoliday.storeName.trim().toLowerCase();
+    const rType = restoreTargetHoliday.liburType || "full";
+    const rSchedules = restoreTargetHoliday.schedules || [];
+
+    return (
+      holidays.find((h) => {
+        if (h.id === restoreTargetHoliday.id || h.status === "Dibatalkan") return false;
+        if (h.storeName.trim().toLowerCase() !== rStore) return false;
+        const hStart = h.startDate;
+        const hEnd = h.endDate || h.startDate;
+        const dateOverlap = !(hEnd < rStart || hStart > rEnd);
+        if (!dateOverlap) return false;
+
+        const hType = h.liburType || "full";
+        if (rType === "full" || hType === "full") return true;
+
+        // Kedua libur adalah partial: periksa irisan shift / jadwal audit
+        const hSchedules = h.schedules || [];
+        const hasOverlap = rSchedules.some((s) => hSchedules.includes(s));
+        return hasOverlap || rSchedules.length === 0 || hSchedules.length === 0;
+      }) || null
+    );
+  }, [restoreTargetHoliday, holidays]);
+
   return (
     <DashboardLayout>
       {isCreatingView ? (
         <CreateHolidayView 
           initialData={selectedHolidayToEdit}
+          workspaceId={selectedWorkspaceId}
+          workspaceName={currentWorkspaceName}
           onBack={() => {
             setIsCreatingView(false);
             setSelectedHolidayToEdit(null);
           }} 
-          onSave={(data) => { 
-            if (selectedHolidayToEdit) {
-              HolidayService.update(selectedHolidayToEdit.id, data);
-              toast.success(`Jadwal libur untuk ${data.storeName} berhasil diperbarui!`);
-            } else {
-              HolidayService.create(data); 
-              toast.success(`Jadwal libur untuk ${data.storeName} berhasil ditambahkan!`); 
+          onSave={async (data) => { 
+            try {
+              if (selectedHolidayToEdit) {
+                await HolidayService.updateAsync(selectedHolidayToEdit.id, data);
+                toast.success(`Jadwal libur untuk ${data.storeName} berhasil diperbarui!`);
+              } else if (Array.isArray(data)) {
+                await HolidayService.createBatchAsync(data);
+                toast.success(`Jadwal libur untuk ${data.length} toko berhasil disimpan ke database!`);
+              } else {
+                await HolidayService.createAsync(data); 
+                toast.success(`Jadwal libur untuk ${data.storeName} berhasil ditambahkan!`); 
+              }
+              setIsCreatingView(false); 
+              setSelectedHolidayToEdit(null);
+              await refreshData(); 
+            } catch (err: unknown) {
+              const msg = err instanceof Error ? err.message : "Gagal menyimpan jadwal libur";
+              toast.error(msg);
             }
-            setIsCreatingView(false); 
-            setSelectedHolidayToEdit(null);
-            refreshData(); 
           }} 
         />
       ) : (
         <>
           <Header
             title="Libur Toko & Pengecualian"
-            subtitle="Kelola dan pantau jadwal operasional khusus dan hari libur untuk semua cabang toko."
+            subtitle={`Kelola dan pantau jadwal operasional khusus dan hari libur untuk cabang di ${currentWorkspaceName}.`}
+            action={
+              isSuperAdmin && workspaces.length > 1 ? (
+                <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs">
+                  <Building2 className="w-4 h-4 text-sky-600 shrink-0" />
+                  <span className="text-xs font-semibold text-slate-600 shrink-0">Workspace:</span>
+                  <select
+                    value={selectedWorkspaceId}
+                    onChange={(e) => handleWorkspaceChange(e.target.value)}
+                    className="bg-transparent text-slate-800 text-xs font-bold focus:outline-none cursor-pointer pr-1"
+                  >
+                    {workspaces.map((w) => {
+                      const isInactive = w.status === "Nonaktif";
+                      return (
+                        <option
+                          key={w.id}
+                          value={w.id}
+                          disabled={isInactive}
+                          className={isInactive ? "text-slate-400 bg-slate-100 italic" : "text-slate-800"}
+                        >
+                          {w.companyName || w.name} {isInactive ? "(Nonaktif)" : `(${w.storeCount} Toko)`}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              ) : undefined
+            }
           />
 
       {/* Stats and Calendar Section */}
@@ -358,11 +500,11 @@ export default function LiburTokoPage() {
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
                 <th className="w-[21%] px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">NAMA TOKO</th>
-                <th className="w-[20%] px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">TANGGAL / DURASI LIBUR</th>
-                <th className="w-[25%] px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">ALASAN</th>
-                <th className="w-[14%] px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">DIBUAT OLEH</th>
+                <th className="w-[16%] px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">TANGGAL / DURASI LIBUR</th>
+                <th className="w-[20%] px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">ALASAN</th>
+                <th className="w-[13%] px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">DIBUAT OLEH</th>
                 <th className="w-[10%] px-2 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-center">STATUS</th>
-                <th className="w-[10%] px-2 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-center">ACTION</th>
+                <th className="w-[13%] px-2 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-center">ACTION</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -370,7 +512,7 @@ export default function LiburTokoPage() {
                 <tr>
                   <td colSpan={6} className="py-12 text-center text-slate-400">
                     <CalendarIcon className="w-8 h-8 mx-auto mb-2 text-slate-300 stroke-[1.5]" />
-                    <p className="font-semibold text-slate-600 text-sm">Tidak ada jadwal libur ditemukan</p>
+                    <p className="font-semibold text-slate-600 text-sm">Tidak ada jadwal libur ditemukan di {currentWorkspaceName}</p>
                     <p className="text-xs text-slate-400 mt-0.5">
                       {selectedDate
                         ? `Tidak ada jadwal libur toko pada tanggal ${format(selectedDate, "d MMMM yyyy")}.`
@@ -399,29 +541,21 @@ export default function LiburTokoPage() {
                   return (
                     <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
                       <td className={`px-4 py-3.5 ${isGrayedOut ? 'opacity-40 grayscale' : ''}`}>
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 shrink-0">
-                            <Store className="w-3.5 h-3.5" />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-xs font-bold text-slate-900 leading-tight truncate">{row.storeName}</p>
-                            <p className="text-[11px] text-slate-500 mt-0.5 truncate">{row.storeLocation}</p>
-                          </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-slate-900 leading-tight line-clamp-2 break-words" title={row.storeName}>
+                            {row.storeName}
+                          </p>
+                          <p className="text-[11px] text-slate-500 mt-0.5 truncate">{row.storeLocation}</p>
                         </div>
                       </td>
                       <td className={`px-4 py-3.5 ${isGrayedOut ? 'opacity-40 grayscale' : ''}`}>
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-500 shrink-0">
-                            <CalendarIcon className="w-3.5 h-3.5 text-slate-500" />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-xs font-bold text-slate-900 leading-tight truncate">
-                              {formatDateRange(row.startDate, row.endDate)}
-                            </p>
-                            <p className="text-[10px] text-slate-500 font-medium mt-0.5 truncate">
-                              Durasi: {row.durationDays} Hari
-                            </p>
-                          </div>
+                        <div className="min-w-0 whitespace-nowrap">
+                          <p className="text-xs font-bold text-slate-900 leading-tight">
+                            {formatDateRange(row.startDate, row.endDate)}
+                          </p>
+                          <p className="text-[10px] text-slate-500 font-medium mt-0.5">
+                            Durasi: {row.durationDays} Hari
+                          </p>
                         </div>
                       </td>
                       <td className={`px-4 py-3.5 ${isGrayedOut ? 'opacity-40 grayscale' : ''}`}>
@@ -531,14 +665,26 @@ export default function LiburTokoPage() {
       <SoftDeleteModal
         isOpen={isDeleteModalOpen}
         holiday={deleteTargetHoliday}
+        isSubmitting={isSubmittingDelete}
         onClose={() => setIsDeleteModalOpen(false)}
-        onConfirm={() => {
+        onConfirm={async () => {
           if (deleteTargetHoliday) {
-            HolidayService.update(deleteTargetHoliday.id, { status: "Dibatalkan" });
-            toast.success(`Libur toko untuk ${deleteTargetHoliday.storeName} berhasil dibatalkan.`);
-            setIsDeleteModalOpen(false);
-            setDeleteTargetHoliday(null);
-            refreshData();
+            setIsSubmittingDelete(true);
+            try {
+              await Promise.all([
+                HolidayService.deleteAsync(deleteTargetHoliday.id),
+                new Promise((r) => setTimeout(r, 450)),
+              ]);
+              toast.success(`Libur toko untuk ${deleteTargetHoliday.storeName} berhasil dibatalkan.`);
+              setIsDeleteModalOpen(false);
+              setDeleteTargetHoliday(null);
+              await refreshData();
+            } catch (err: unknown) {
+              const msg = err instanceof Error ? err.message : "Gagal membatalkan libur toko";
+              toast.error(msg);
+            } finally {
+              setIsSubmittingDelete(false);
+            }
           }
         }}
       />
@@ -556,20 +702,33 @@ export default function LiburTokoPage() {
       <RestoreHolidayModal
         isOpen={isRestoreModalOpen}
         holiday={restoreTargetHoliday}
+        conflictHoliday={conflictHolidayForRestore}
+        isSubmitting={isSubmittingRestore}
         onClose={() => setIsRestoreModalOpen(false)}
-        onConfirm={() => {
+        onConfirm={async () => {
           if (restoreTargetHoliday) {
-            const endDate = new Date(restoreTargetHoliday.endDate);
-            endDate.setHours(23, 59, 59, 999);
-            
-            // Jika tanggal libur sudah lewat, status otomatis Selesai, bukan Terjadwal
-            const newStatus = new Date().getTime() > endDate.getTime() ? "Selesai" : "Terjadwal";
-            
-            HolidayService.update(restoreTargetHoliday.id, { status: newStatus });
-            toast.success(`Libur toko untuk ${restoreTargetHoliday.storeName} berhasil dipulihkan.`);
-            setIsRestoreModalOpen(false);
-            setRestoreTargetHoliday(null);
-            refreshData();
+            if (conflictHolidayForRestore) {
+              toast.error(
+                `Tidak dapat mengaktifkan kembali: Jadwal libur bertabrakan dengan libur aktif yang sudah ada pada tanggal tersebut.`
+              );
+              return;
+            }
+            setIsSubmittingRestore(true);
+            try {
+              await Promise.all([
+                HolidayService.restoreAsync(restoreTargetHoliday.id),
+                new Promise((r) => setTimeout(r, 450)),
+              ]);
+              toast.success(`Libur toko untuk ${restoreTargetHoliday.storeName} berhasil dipulihkan.`);
+              setIsRestoreModalOpen(false);
+              setRestoreTargetHoliday(null);
+              await refreshData();
+            } catch (err: unknown) {
+              const msg = err instanceof Error ? err.message : "Gagal memulihkan libur toko";
+              toast.error(msg);
+            } finally {
+              setIsSubmittingRestore(false);
+            }
           }
         }}
       />

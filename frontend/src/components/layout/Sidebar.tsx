@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -19,6 +19,7 @@ import {
   Image,
   FileText,
   Sparkles,
+  ArrowLeft,
 } from "lucide-react";
 import { toast } from "sonner";
 import { AuthService } from "@/lib/auth";
@@ -27,6 +28,16 @@ export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const user = AuthService.getCurrentUser();
+      if (user?.role === "Super Admin") {
+        setIsSuperAdmin(true);
+      }
+    }
+  }, []);
 
   const handleLogout = () => {
     AuthService.logout();
@@ -141,43 +152,55 @@ export default function Sidebar() {
         <div className="md:hidden fixed inset-0 top-[53px] bg-slate-900/40 backdrop-blur-xs z-30 animate-in fade-in duration-150">
           <div className="bg-white border-b border-slate-200 p-4 space-y-3 shadow-xl max-h-[calc(100vh-60px)] overflow-y-auto">
             {isAdminPortal ? (
-              <nav className="space-y-1">
-                {adminNavItems.map((item) => {
-                  const Icon = item.icon;
-                  const isActive =
-                    pathname === item.href || pathname.startsWith(item.href + "/");
-                  return (
-                    <Link
-                      key={item.name}
-                      href={item.href}
-                      onClick={() => setIsMobileMenuOpen(false)}
-                      className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm transition-all ${
-                        isActive
-                          ? "border border-sky-400 bg-sky-50/70 text-sky-600 font-semibold shadow-2xs"
-                          : "text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium"
-                      }`}
-                    >
-                      <Icon
-                        className={`w-4 h-4 shrink-0 ${
-                          isActive ? "text-sky-600" : "text-slate-400"
+              <div className="space-y-2">
+                {isSuperAdmin && (
+                  <Link
+                    href="/workspace"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="w-full flex items-center gap-2.5 px-3.5 py-2 rounded-lg text-xs font-bold text-[#193f53] bg-slate-100 hover:bg-slate-200 transition-colors"
+                  >
+                    <ArrowLeft className="w-4 h-4 text-[#193f53]" />
+                    <span>Kembali ke Workspace</span>
+                  </Link>
+                )}
+                <nav className="space-y-1">
+                  {adminNavItems.map((item) => {
+                    const Icon = item.icon;
+                    const isActive =
+                      pathname === item.href || pathname.startsWith(item.href + "/");
+                    return (
+                      <Link
+                        key={item.name}
+                        href={item.href}
+                        onClick={() => setIsMobileMenuOpen(false)}
+                        className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm transition-all ${
+                          isActive
+                            ? "border border-sky-400 bg-sky-50/70 text-sky-600 font-semibold shadow-2xs"
+                            : "text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium"
                         }`}
-                      />
-                      <span className="truncate">{item.name}</span>
-                      {item.badge && (
-                        <span
-                          className={`ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded tracking-wider ${
-                            isActive
-                              ? "bg-[#102d3c] text-white"
-                              : "text-slate-400 bg-slate-100 border border-slate-200"
+                      >
+                        <Icon
+                          className={`w-4 h-4 shrink-0 ${
+                            isActive ? "text-sky-600" : "text-slate-400"
                           }`}
-                        >
-                          {item.badge}
-                        </span>
-                      )}
-                    </Link>
-                  );
-                })}
-              </nav>
+                        />
+                        <span className="truncate">{item.name}</span>
+                        {item.badge && (
+                          <span
+                            className={`ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded tracking-wider ${
+                              isActive
+                                ? "bg-[#102d3c] text-white"
+                                : "text-slate-400 bg-slate-100 border border-slate-200"
+                            }`}
+                          >
+                            {item.badge}
+                          </span>
+                        )}
+                      </Link>
+                    );
+                  })}
+                </nav>
+              </div>
             ) : (
               <nav className="space-y-1">
                 <Link
@@ -251,6 +274,20 @@ export default function Sidebar() {
               </p>
             </div>
           </div>
+
+          {/* Quick Back to Super Admin Portal if Super Admin */}
+          {isSuperAdmin && isAdminPortal && (
+            <div className="mb-4">
+              <Link
+                href="/workspace"
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold text-[#193f53] bg-slate-100 hover:bg-slate-200/90 transition-colors group shadow-2xs"
+                title="Kembali ke Daftar Workspace"
+              >
+                <ArrowLeft className="w-3.5 h-3.5 transition-transform group-hover:-translate-x-0.5 text-[#193f53]" />
+                <span>Kembali ke Workspace</span>
+              </Link>
+            </div>
+          )}
 
           {/* Navigation Items */}
           {isAdminPortal ? (

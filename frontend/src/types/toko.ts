@@ -5,6 +5,7 @@ export type StoreTimezone = "WIB (UTC+7)" | "WITA (UTC+8)" | "WIT (UTC+9)";
 export interface StoreItem {
   id: string;
   name: string;
+  storeName?: string;
   city?: string;
   address: string;
   timezone: StoreTimezone;
@@ -19,6 +20,9 @@ export interface StoreItem {
   phone?: string;
   managerName?: string;
   workspace?: string;
+  workspaceId?: string;
+  storePicture?: string | null;
+  isImageEncrypted?: boolean;
   createdAt?: string;
 }
 

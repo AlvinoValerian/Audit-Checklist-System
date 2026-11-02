@@ -1,16 +1,44 @@
-import React from "react";  
-import { X, RotateCcw, CalendarDays, Info } from "lucide-react";
+import React, { useState, useEffect } from "react";  
+import { X, RotateCcw, CalendarDays, Info, Loader2, AlertTriangle } from "lucide-react";
 import { Holiday } from "@/types/holiday";
 
 interface RestoreHolidayModalProps {
   isOpen: boolean;
   holiday: Holiday | null;
+  conflictHoliday?: Holiday | null;
   onClose: () => void;
   onConfirm: () => void; 
+  isSubmitting?: boolean;
 }
 
-export default function RestoreHolidayModal({ isOpen, holiday, onClose, onConfirm }: RestoreHolidayModalProps) {
+export default function RestoreHolidayModal({
+  isOpen,
+  holiday,
+  conflictHoliday,
+  onClose,
+  onConfirm,
+  isSubmitting = false,
+}: RestoreHolidayModalProps) {
+  const [isInternalSubmitting, setIsInternalSubmitting] = useState(false);
+  const isLoading = isSubmitting || isInternalSubmitting;
+
+  useEffect(() => {
+    if (!isOpen) {
+      setIsInternalSubmitting(false);
+    }
+  }, [isOpen]);
+
   if (!isOpen || !holiday) return null;
+
+  const handleConfirm = async () => {
+    if (conflictHoliday) return;
+    setIsInternalSubmitting(true);
+    try {
+      await onConfirm();
+    } finally {
+      setIsInternalSubmitting(false);
+    }
+  };
 
   const formatDate = (dateString: string) => {
     const d = new Date(dateString);
@@ -30,12 +58,16 @@ export default function RestoreHolidayModal({ isOpen, holiday, onClose, onConfir
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       <div 
         className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" 
-        onClick={onClose}
+        onClick={isSubmitting ? undefined : onClose}
       ></div>
       
       <div className="bg-white rounded-2xl w-full max-w-lg relative flex flex-col max-h-[90vh] shadow-2xl overflow-hidden my-auto">
         <div className="p-6 pb-4 overflow-y-auto flex-1">
-          <button onClick={onClose} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors">
+          <button
+            onClick={onClose}
+            disabled={isSubmitting}
+            className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
             <X className="w-5 h-5" />
           </button>
 
@@ -81,27 +113,69 @@ export default function RestoreHolidayModal({ isOpen, holiday, onClose, onConfir
             </div>
           </div>
 
-          <div className="flex items-start gap-3 p-4 bg-blue-50/80 border border-blue-200 rounded-xl">
-            <Info className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
-            <p className="text-xs text-blue-800 leading-relaxed">
-              Setelah dipulihkan, status jadwal akan kembali menjadi <span className="font-bold">Terjadwal</span> dan memengaruhi kalender audit cabang.
-            </p>
-          </div>
+          {/* Peringatan Bentrok / Tabrakan Jadwal Libur */}
+          {conflictHoliday ? (
+            <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-xl mb-4 text-red-900 animate-in fade-in">
+              <AlertTriangle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+              <div>
+                <h4 className="text-xs font-bold mb-1 text-red-800">
+                  Tidak Dapat Diaktifkan Kembali (Bentrok Jadwal)
+                </h4>
+                <p className="text-xs text-red-700 leading-relaxed">
+                  Cabang <span className="font-semibold">{conflictHoliday.storeName}</span> sudah memiliki jadwal libur aktif pada rentang tanggal{" "}
+                  <span className="font-semibold">
+                    {conflictHoliday.startDate === conflictHoliday.endDate
+                      ? formatDate(conflictHoliday.startDate)
+                      : `${formatDate(conflictHoliday.startDate)} - ${formatDate(conflictHoliday.endDate)}`}
+                  </span>{" "}
+                  ({conflictHoliday.liburType === "partial" ? "Libur Sebagian" : "Libur Penuh"}: &quot;{conflictHoliday.reason}&quot;).
+                </p>
+                <p className="text-[11px] text-red-600 mt-2 font-medium">
+                  Harap batalkan atau ubah libur aktif tersebut terlebih dahulu sebelum mengaktifkan kembali jadwal ini agar tidak terjadi tumpang tindih (dobel libur).
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-start gap-3 p-4 bg-blue-50/80 border border-blue-200 rounded-xl">
+              <Info className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+              <p className="text-xs text-blue-800 leading-relaxed">
+                Setelah dipulihkan, status jadwal akan kembali menjadi <span className="font-bold">Terjadwal</span> dan memengaruhi kalender audit cabang.
+              </p>
+            </div>
+          )}
         </div>
 
         <div className="p-4 border-t border-slate-100 flex justify-end items-center gap-3 bg-slate-50 rounded-b-2xl shrink-0">
           <button 
+            type="button"
             onClick={onClose}
-            className="px-5 py-2.5 bg-white border border-slate-200 text-slate-700 font-semibold text-xs rounded-lg hover:bg-slate-50 transition-colors cursor-pointer"
+            disabled={isLoading}
+            className="px-5 py-2.5 bg-white border border-slate-200 text-slate-700 font-semibold text-xs rounded-lg hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
           >
             Batal
           </button>
           <button 
-            onClick={onConfirm}
-            className="flex items-center gap-2 px-5 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-semibold text-xs rounded-lg transition-colors cursor-pointer shadow-sm"
+            type="button"
+            onClick={handleConfirm}
+            disabled={isLoading || Boolean(conflictHoliday)}
+            title={conflictHoliday ? "Tidak dapat mengaktifkan: Bertabrakan dengan libur aktif lain" : undefined}
+            className={`flex items-center gap-2 px-5 py-2.5 font-semibold text-xs rounded-lg transition-colors shadow-sm ${
+              conflictHoliday
+                ? "bg-slate-300 text-slate-500 cursor-not-allowed"
+                : "bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white cursor-pointer"
+            }`}
           >
-            <RotateCcw className="w-4 h-4" />
-            Ya, Aktifkan Kembali
+            {isLoading ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Memulihkan...</span>
+              </>
+            ) : (
+              <>
+                <RotateCcw className="w-4 h-4" />
+                <span>{conflictHoliday ? "Jadwal Bertabrakan" : "Ya, Aktifkan Kembali"}</span>
+              </>
+            )}
           </button>
         </div>
       </div>

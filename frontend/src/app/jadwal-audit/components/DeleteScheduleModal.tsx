@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { X, Trash2, AlertCircle } from "lucide-react";
+import { X, Trash2, AlertCircle, Loader2 } from "lucide-react";
 import { AuditSchedule } from "@/types/schedule";
 
 interface DeleteScheduleModalProps {
@@ -9,6 +9,7 @@ interface DeleteScheduleModalProps {
   schedule: AuditSchedule | null;
   onClose: () => void;
   onConfirm: () => void;
+  isSubmitting?: boolean;
 }
 
 export default function DeleteScheduleModal({
@@ -16,6 +17,7 @@ export default function DeleteScheduleModal({
   schedule,
   onClose,
   onConfirm,
+  isSubmitting = false,
 }: DeleteScheduleModalProps) {
   if (!isOpen || !schedule) return null;
 
@@ -23,15 +25,16 @@ export default function DeleteScheduleModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div
         className="absolute inset-0 bg-slate-900/40 backdrop-blur-xs transition-opacity"
-        onClick={onClose}
+        onClick={isSubmitting ? undefined : onClose}
       />
 
       <div className="bg-white rounded-3xl w-full max-w-lg relative flex flex-col shadow-2xl border border-slate-100 overflow-hidden z-10 animate-in fade-in zoom-in-95 duration-150">
         <div className="p-6 pb-2 relative">
           <button
             onClick={onClose}
+            disabled={isSubmitting}
             type="button"
-            className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 transition-colors p-1.5 rounded-lg hover:bg-slate-100 cursor-pointer"
+            className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors p-1.5 rounded-lg hover:bg-slate-100 cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -109,17 +112,28 @@ export default function DeleteScheduleModal({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl transition-colors cursor-pointer shadow-2xs"
+            disabled={isSubmitting}
+            className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl transition-colors cursor-pointer shadow-2xs"
           >
             Batal
           </button>
           <button
             type="button"
             onClick={onConfirm}
-            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 rounded-xl transition-colors shadow-sm cursor-pointer"
+            disabled={isSubmitting}
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl transition-colors shadow-sm cursor-pointer"
           >
-            <Trash2 className="w-3.5 h-3.5" />
-            <span>Ya, Batalkan Jadwal</span>
+            {isSubmitting ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Membatalkan...</span>
+              </>
+            ) : (
+              <>
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Ya, Batalkan Jadwal</span>
+              </>
+            )}
           </button>
         </div>
       </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import MonitoringHeader, {
   getCurrentMonthDateRange,
@@ -11,6 +11,9 @@ import AuditStatusDonutChart from "./components/AuditStatusDonutChart";
 import AuditTrendLineChart from "./components/AuditTrendLineChart";
 import StorePerformanceRanking from "./components/StorePerformanceRanking";
 import FindingsAnalysis from "./components/FindingsAnalysis";
+import { AuthService } from "@/lib/auth";
+import { WorkspaceService } from "@/services/workspace.service";
+import { AlertTriangle } from "lucide-react";
 
 export default function DashboardMonitoringPage() {
   const dynamicMonthOptions = getDynamicMonthOptions();
@@ -21,6 +24,29 @@ export default function DashboardMonitoringPage() {
   const [selectedStatus, setSelectedStatus] = useState("Status Audit");
   const [startDate, setStartDate] = useState(initialDateRange.startDate);
   const [endDate, setEndDate] = useState(initialDateRange.endDate);
+  const [activeWorkspaceName, setActiveWorkspaceName] = useState<string>("");
+  const [isWorkspaceInactive, setIsWorkspaceInactive] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const activeWs = AuthService.getActiveWorkspace();
+      const currentUser = AuthService.getCurrentUser();
+      const name = activeWs?.name || currentUser?.workspaceName || "";
+      setActiveWorkspaceName(name);
+
+      WorkspaceService.fetchAll()
+        .then((wsList) => {
+          const targetId = activeWs?.id;
+          const found = wsList.find(
+            (w) => (targetId && w.id === targetId) || w.name === name || w.companyName === name
+          );
+          if (found && found.status === "Nonaktif") {
+            setIsWorkspaceInactive(true);
+          }
+        })
+        .catch(console.warn);
+    }
+  }, []);
 
   // Dynamic metrics state matching the screenshot
   const [metrics] = useState<MetricStats>({
@@ -36,6 +62,7 @@ export default function DashboardMonitoringPage() {
     <DashboardLayout>
       {/* 1. Header & Filters Toolbar */}
       <MonitoringHeader
+        activeWorkspaceName={activeWorkspaceName}
         selectedMonth={selectedMonth}
         onMonthChange={setSelectedMonth}
         selectedStore={selectedStore}
@@ -47,6 +74,19 @@ export default function DashboardMonitoringPage() {
         endDate={endDate}
         onEndDateChange={setEndDate}
       />
+
+      {/* Warning Banner: Jika Workspace Dinonaktifkan */}
+      {isWorkspaceInactive && (
+        <div className="mb-5 rounded-2xl border border-rose-300 bg-rose-50/90 p-4 sm:p-5 text-rose-800 shadow-xs flex items-start gap-3.5">
+          <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+          <div>
+            <h4 className="font-bold text-sm text-rose-900">Workspace Dinonaktifkan - Seluruh Sistem Diberhentikan</h4>
+            <p className="text-xs text-rose-700 mt-0.5 leading-relaxed">
+              Workspace &quot;{activeWorkspaceName}&quot; saat ini berstatus <strong>Nonaktif</strong>. Seluruh proses audit, jadwal berkala, penugasan toko, dan checklist operasional untuk unit kerja ini diberhentikan sementara hingga workspace diaktifkan kembali.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* 2. Top Summary Metric Cards Row (4 Cards) */}
       <MetricCards stats={metrics} />

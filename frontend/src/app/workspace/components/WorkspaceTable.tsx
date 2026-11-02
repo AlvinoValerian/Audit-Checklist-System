@@ -1,18 +1,24 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
+import Link from "next/link";
 import {
   Search,
   Filter,
   Plus,
   ChevronLeft,
   ChevronRight,
+  Loader2,
+  ExternalLink,
+  Building2,
 } from "lucide-react";
 import { Workspace } from "@/types/workspace";
 import ActionButtons from "@/components/ui/ActionButtons";
+import { AuthService } from "@/lib/auth";
 
 interface WorkspaceTableProps {
   workspaces: Workspace[];
+  isLoading?: boolean;
   onAdd?: () => void;
   onDetail?: (workspace: Workspace) => void;
   onEdit?: (workspace: Workspace) => void;
@@ -21,6 +27,7 @@ interface WorkspaceTableProps {
 
 export default function WorkspaceTable({
   workspaces,
+  isLoading = false,
   onAdd,
   onDetail,
   onEdit,
@@ -82,8 +89,8 @@ export default function WorkspaceTable({
               type="button"
               onClick={() => setIsFilterOpen(!isFilterOpen)}
               className={`flex items-center gap-1.5 px-3 py-2 bg-white border ${statusFilter !== "Semua"
-                  ? "border-sky-500 text-sky-600"
-                  : "border-slate-200 text-slate-700"
+                ? "border-sky-500 text-sky-600"
+                : "border-slate-200 text-slate-700"
                 } rounded-lg text-xs font-semibold hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer`}
             >
               <Filter className="w-3.5 h-3.5" />
@@ -107,8 +114,8 @@ export default function WorkspaceTable({
                         setCurrentPage(1);
                       }}
                       className={`w-full text-left px-3.5 py-1.5 text-xs font-medium transition-colors ${statusFilter === status
-                          ? "bg-sky-50 text-sky-600 font-semibold"
-                          : "text-slate-600 hover:bg-slate-50"
+                        ? "bg-sky-50 text-sky-600 font-semibold"
+                        : "text-slate-600 hover:bg-slate-50"
                         }`}
                     >
                       {status}
@@ -147,7 +154,17 @@ export default function WorkspaceTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 text-xs">
-            {paginatedWorkspaces.length === 0 ? (
+            {isLoading ? (
+              <tr>
+                <td colSpan={6} className="text-center py-16 text-slate-400 text-xs">
+                  <div className="flex flex-col items-center justify-center gap-2">
+                    <Loader2 className="w-5 h-5 text-[#193f53] animate-spin" />
+                    <span className="text-xs font-semibold text-slate-600">Memuat data workspace...</span>
+                    <span className="text-[11px] text-slate-400">Menghubungkan ke Database</span>
+                  </div>
+                </td>
+              </tr>
+            ) : paginatedWorkspaces.length === 0 ? (
               <tr>
                 <td colSpan={6} className="text-center py-10 text-slate-400 text-xs">
                   Tidak ada data workspace yang sesuai.
@@ -163,14 +180,47 @@ export default function WorkspaceTable({
                   >
                     {/* 1. WORKSPACE */}
                     <td className={`px-5 py-3.5 ${isSoftDeleted ? "opacity-40 grayscale" : ""}`}>
-                      <span className="font-bold text-slate-900 text-xs sm:text-[13px]">
-                        {ws.name}
-                      </span>
-                      {ws.companyName && (
-                        <div className="text-[11px] text-slate-500 mt-0.5">
-                          {ws.companyName}
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-sky-50 text-sky-600 border border-sky-100 flex items-center justify-center shrink-0">
+                          <Building2 className="w-4 h-4" />
                         </div>
-                      )}
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {isSoftDeleted ? (
+                              <span
+                                className="font-bold text-slate-500 text-xs sm:text-[13px] inline-flex items-center gap-1.5 cursor-not-allowed select-none"
+                                title="Workspace ini dinonaktifkan - Sistem operasional diberhentikan"
+                              >
+                                <span className="line-through text-slate-400">{ws.name}</span>
+                                <span className="text-[10px] font-bold text-slate-500 bg-slate-200/90 border border-slate-300 px-1.5 py-0.5 rounded">
+                                  Nonaktif
+                                </span>
+                              </span>
+                            ) : (
+                              <Link
+                                href={`/dashboard-monitoring?workspaceId=${ws.id}`}
+                                onClick={() => {
+                                  AuthService.setActiveWorkspace({
+                                    id: ws.id,
+                                    name: ws.name,
+                                    companyName: ws.companyName || ws.name,
+                                  });
+                                }}
+                                className="font-bold text-slate-900 text-xs sm:text-[13px] hover:text-sky-600 transition-colors inline-flex items-center gap-1.5 group/link cursor-pointer"
+                                title={`Klik untuk masuk ke dashboard monitoring ${ws.name}`}
+                              >
+                                <span className="group-hover/link:underline">{ws.name}</span>
+                                <ExternalLink className="w-3.5 h-3.5 text-sky-500 opacity-75 group-hover/link:opacity-100 group-hover/link:translate-x-0.5 transition-all shrink-0" />
+                              </Link>
+                            )}
+                          </div>
+                          {ws.companyName && (
+                            <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                              {ws.companyName}
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </td>
 
                     {/* 2. TOTAL TOKO */}
@@ -216,7 +266,7 @@ export default function WorkspaceTable({
                         onEdit={isSoftDeleted ? undefined : () => onEdit?.(ws)}
                         onDelete={isSoftDeleted ? undefined : () => onDelete?.(ws)}
                         onRestore={isSoftDeleted ? () => onDelete?.(ws) : undefined}
-                        viewTitle="Lihat Detail Workspace"
+                        viewTitle="Lihat Detail & Masuk Workspace"
                         editTitle="Edit Workspace"
                         deleteTitle="Nonaktifkan Workspace"
                         restoreTitle="Aktifkan Kembali Workspace"
@@ -260,8 +310,8 @@ export default function WorkspaceTable({
               type="button"
               onClick={() => setCurrentPage(pageNum)}
               className={`w-7 h-7 flex items-center justify-center rounded-md text-xs font-bold transition-colors cursor-pointer ${currentPage === pageNum
-                  ? "bg-[#193f53] text-white shadow-2xs"
-                  : "border border-slate-200 text-slate-600 hover:bg-slate-50"
+                ? "bg-[#193f53] text-white shadow-2xs"
+                : "border border-slate-200 text-slate-600 hover:bg-slate-50"
                 }`}
             >
               {pageNum}

@@ -1,16 +1,41 @@
 import React from "react";  
-import { X, Trash2, CalendarDays, AlertCircle } from "lucide-react";
+import { X, Trash2, CalendarDays, AlertCircle, Loader2 } from "lucide-react";
 import { Holiday } from "@/types/holiday";
 
 interface SoftDeleteModalProps {
   isOpen: boolean;
   holiday: Holiday | null;
   onClose: () => void;
-  onConfirm: () => void; 
+  onConfirm: () => void;
+  isSubmitting?: boolean;
 }
 
-export default function SoftDeleteModal({ isOpen, holiday, onClose, onConfirm }: SoftDeleteModalProps) {
+export default function SoftDeleteModal({
+  isOpen,
+  holiday,
+  onClose,
+  onConfirm,
+  isSubmitting = false,
+}: SoftDeleteModalProps) {
+  const [isInternalSubmitting, setIsInternalSubmitting] = React.useState(false);
+  const isLoading = isSubmitting || isInternalSubmitting;
+
+  React.useEffect(() => {
+    if (!isOpen) {
+      setIsInternalSubmitting(false);
+    }
+  }, [isOpen]);
+
   if (!isOpen || !holiday) return null;
+
+  const handleConfirm = async () => {
+    setIsInternalSubmitting(true);
+    try {
+      await onConfirm();
+    } finally {
+      setIsInternalSubmitting(false);
+    }
+  };
 
   const formatDate = (dateString: string) => {
     const d = new Date(dateString);
@@ -22,20 +47,26 @@ export default function SoftDeleteModal({ isOpen, holiday, onClose, onConfirm }:
     ? formatDate(holiday.startDate)
     : `${formatDate(holiday.startDate)} - ${formatDate(holiday.endDate)}`;
 
-  const diliburkanCount = holiday.liburType === "full" || !holiday.liburType 
+  const diliburkanCount = holiday.schedules && holiday.schedules.length > 0
+    ? holiday.schedules.length 
+    : holiday.liburType === "full" || !holiday.liburType 
     ? 4 
-    : (holiday.schedules?.length || 0);
+    : 0;
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       <div 
         className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" 
-        onClick={onClose}
+        onClick={isSubmitting ? undefined : onClose}
       ></div>
       
       <div className="bg-white rounded-2xl w-full max-w-lg relative flex flex-col max-h-[90vh] shadow-2xl overflow-hidden my-auto">
         <div className="p-6 pb-4 overflow-y-auto flex-1">
-          <button onClick={onClose} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors">
+          <button
+            onClick={onClose}
+            disabled={isSubmitting}
+            className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
             <X className="w-5 h-5" />
           </button>
 
@@ -91,19 +122,30 @@ export default function SoftDeleteModal({ isOpen, holiday, onClose, onConfirm }:
 
         <div className="p-4 border-t border-slate-100 flex justify-end items-center gap-3 bg-slate-50 rounded-b-2xl shrink-0">
           <button 
+            type="button"
             onClick={onClose}
-            className="px-5 py-2.5 bg-white border border-slate-200 text-slate-700 font-semibold text-xs rounded-lg hover:bg-slate-50 transition-colors cursor-pointer"
+            disabled={isLoading}
+            className="px-5 py-2.5 bg-white border border-slate-200 text-slate-700 font-semibold text-xs rounded-lg hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
           >
             Batal
           </button>
           <button 
-            onClick={() => {
-              onConfirm();
-            }}
-            className="flex items-center gap-2 px-5 py-2.5 bg-red-500 hover:bg-red-600 text-white font-semibold text-xs rounded-lg transition-colors cursor-pointer shadow-sm"
+            type="button"
+            onClick={handleConfirm}
+            disabled={isLoading}
+            className="flex items-center gap-2 px-5 py-2.5 bg-red-500 hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold text-xs rounded-lg transition-colors cursor-pointer shadow-sm"
           >
-            <Trash2 className="w-4 h-4" />
-            Ya, Batalkan Libur Toko
+            {isLoading ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Membatalkan...</span>
+              </>
+            ) : (
+              <>
+                <Trash2 className="w-4 h-4" />
+                <span>Ya, Batalkan Libur Toko</span>
+              </>
+            )}
           </button>
         </div>
       </div>

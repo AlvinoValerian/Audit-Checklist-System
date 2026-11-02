@@ -11,7 +11,12 @@ export const QUICK_PROMPT_SUGGESTIONS = [
   "Ringkas laporan audit kasir dan perangkat POS",
 ];
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+const getBackendUrl = (): string => {
+  if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
+  if (typeof window !== "undefined") return "";
+  return "http://127.0.0.1:5000";
+};
+const BACKEND_URL = getBackendUrl();
 
 export class AIService {
   static getInitialMessages(): ChatMessage[] {

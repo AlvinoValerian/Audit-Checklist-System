@@ -7,12 +7,14 @@ import {
   Plus,
   ChevronLeft,
   ChevronRight,
+  Loader2,
 } from "lucide-react";
 import { AdminUser } from "@/types/admin";
 import ActionButtons from "@/components/ui/ActionButtons";
 
 interface AdminTableProps {
   admins: AdminUser[];
+  isLoading?: boolean;
   onAdd?: () => void;
   onEdit?: (admin: AdminUser) => void;
   onDelete?: (admin: AdminUser) => void;
@@ -21,6 +23,7 @@ interface AdminTableProps {
 
 export default function AdminTable({
   admins,
+  isLoading = false,
   onAdd,
   onEdit,
   onDelete,
@@ -205,7 +208,17 @@ export default function AdminTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 text-xs">
-            {paginatedAdmins.length === 0 ? (
+            {isLoading ? (
+              <tr>
+                <td colSpan={6} className="text-center py-16 text-slate-400 text-xs">
+                  <div className="flex flex-col items-center justify-center gap-2">
+                    <Loader2 className="w-5 h-5 text-[#193f53] animate-spin" />
+                    <span className="text-xs font-semibold text-slate-600">Memuat data admin...</span>
+                    <span className="text-[11px] text-slate-400">Menghubungkan ke Database</span>
+                  </div>
+                </td>
+              </tr>
+            ) : paginatedAdmins.length === 0 ? (
               <tr>
                 <td colSpan={6} className="text-center py-10 text-slate-400 text-xs">
                   Tidak ada data admin yang sesuai.
@@ -214,6 +227,7 @@ export default function AdminTable({
             ) : (
               paginatedAdmins.map((adm) => {
                 const isSoftDeleted = adm.status === "Nonaktif";
+                const isSuperAdmin = adm.role === "Super Admin";
                 return (
                   <tr
                     key={adm.id}
@@ -224,11 +238,6 @@ export default function AdminTable({
                       <span className="font-bold text-slate-900 text-xs sm:text-[13px]">
                         {adm.fullName}
                       </span>
-                      {adm.phone && (
-                        <div className="text-[11px] text-slate-500 mt-0.5">
-                          {adm.phone}
-                        </div>
-                      )}
                     </td>
 
                     {/* 2. WORKSPACE */}
@@ -267,8 +276,8 @@ export default function AdminTable({
                     <td className="px-5 py-3.5 text-right whitespace-nowrap">
                       <ActionButtons
                         onEdit={isSoftDeleted ? undefined : () => onEdit?.(adm)}
-                        onDelete={isSoftDeleted ? undefined : () => (onToggleStatus || onDelete)?.(adm)}
-                        onRestore={isSoftDeleted ? () => (onToggleStatus || onDelete)?.(adm) : undefined}
+                        onDelete={isSoftDeleted || isSuperAdmin ? undefined : () => (onToggleStatus || onDelete)?.(adm)}
+                        onRestore={isSoftDeleted && !isSuperAdmin ? () => (onToggleStatus || onDelete)?.(adm) : undefined}
                         editTitle="Edit Admin"
                         deleteTitle="Nonaktifkan Admin"
                         restoreTitle="Aktifkan Kembali Admin"

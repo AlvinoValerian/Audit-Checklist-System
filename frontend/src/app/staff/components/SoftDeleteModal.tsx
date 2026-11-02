@@ -1,14 +1,15 @@
 "use client";
 
 import React from "react";
-import { X, Trash2, AlertCircle, Info } from "lucide-react";
+import { X, Trash2, Info, Loader2 } from "lucide-react";
 import { StaffUser } from "@/types/staff";
 
 interface SoftDeleteModalProps {
   isOpen: boolean;
   staff: StaffUser | null;
   onClose: () => void;
-  onConfirm: () => void;
+  onConfirm: () => Promise<void> | void;
+  isSubmitting?: boolean;
 }
 
 export default function SoftDeleteModal({
@@ -16,6 +17,7 @@ export default function SoftDeleteModal({
   staff,
   onClose,
   onConfirm,
+  isSubmitting = false,
 }: SoftDeleteModalProps) {
   if (!isOpen || !staff) return null;
 
@@ -24,7 +26,7 @@ export default function SoftDeleteModal({
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-slate-900/40 backdrop-blur-xs transition-opacity"
-        onClick={onClose}
+        onClick={isSubmitting ? undefined : onClose}
       />
 
       {/* Modal Card */}
@@ -33,8 +35,9 @@ export default function SoftDeleteModal({
         <div className="p-6 pb-3 relative">
           <button
             onClick={onClose}
+            disabled={isSubmitting}
             type="button"
-            className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 transition-colors p-1 rounded-lg hover:bg-slate-100 cursor-pointer"
+            className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 disabled:opacity-40 transition-colors p-1 rounded-lg hover:bg-slate-100 cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -53,7 +56,7 @@ export default function SoftDeleteModal({
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                Penonaktifan akun staf auditor dari aktivitas operasional .
+                Penonaktifan akun staf auditor dari aktivitas operasional.
               </p>
             </div>
           </div>
@@ -126,17 +129,28 @@ export default function SoftDeleteModal({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 bg-white border border-slate-200 text-slate-700 font-semibold text-xs rounded-lg hover:bg-slate-50 transition-colors cursor-pointer"
+            disabled={isSubmitting}
+            className="px-4 py-2 bg-white border border-slate-200 text-slate-700 font-semibold text-xs rounded-lg hover:bg-slate-50 disabled:opacity-40 transition-colors cursor-pointer"
           >
             Batal
           </button>
           <button
             type="button"
             onClick={onConfirm}
-            className="flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs rounded-lg transition-colors shadow-2xs cursor-pointer"
+            disabled={isSubmitting}
+            className="flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-70 text-white font-semibold text-xs rounded-lg transition-colors shadow-2xs cursor-pointer min-w-[170px] justify-center"
           >
-            <Trash2 className="w-3.5 h-3.5" />
-            <span>Ya, Nonaktifkan Staff</span>
+            {isSubmitting ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Menonaktifkan...</span>
+              </>
+            ) : (
+              <>
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Ya, Nonaktifkan Staff</span>
+              </>
+            )}
           </button>
         </div>
       </div>

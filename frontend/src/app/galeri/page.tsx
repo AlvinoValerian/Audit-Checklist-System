@@ -376,6 +376,7 @@ export default function GaleriPage() {
                       <img
                         src={photo.url}
                         alt={photo.caption}
+                        referrerPolicy="no-referrer"
                         onError={(e) => handleImageError(photo.category, e)}
                         className="w-full h-full object-cover group-hover:brightness-95 transition-all"
                         loading="lazy"

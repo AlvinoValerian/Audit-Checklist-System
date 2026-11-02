@@ -1,134 +1,192 @@
 import { AdminUser, AdminStatsData } from "@/types/admin";
+import { AuthService } from "@/lib/auth";
 
-const STORAGE_KEY = "audit_pro_admins_v2_data";
+const getBackendUrl = (): string => {
+  if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
+  if (typeof window !== "undefined") return "";
+  return "http://127.0.0.1:5000";
+};
+const BACKEND_URL = getBackendUrl();
 
-export const INITIAL_ADMINS: AdminUser[] = [
-  {
-    id: "adm-1",
-    fullName: "Andi Setiawan",
-    email: "andi@example.com",
-    phone: "0812-8822-1920",
-    role: "Admin",
-    workspaceName: "Workspace A",
-    status: "Aktif",
-    createdAt: "12 Okt 2023",
-  },
-  {
-    id: "adm-2",
-    fullName: "Budi Santoso",
-    email: "budi@example.com",
-    phone: "0813-7711-4455",
-    role: "Admin",
-    workspaceName: "Workspace B",
-    status: "Aktif",
-    createdAt: "15 Nov 2023",
-  },
-  {
-    id: "adm-3",
-    fullName: "Siti Rahmawati",
-    email: "siti@example.com",
-    phone: "0856-9933-2211",
-    role: "Admin",
-    workspaceName: "Workspace C",
-    status: "Nonaktif",
-    createdAt: "01 Jan 2024",
-  },
-  {
-    id: "adm-4",
-    fullName: "Alvino Valerian",
-    email: "superadmin@storeaudit.com",
-    phone: "0811-2233-4455",
-    role: "Super Admin",
-    workspaceName: "All Workspaces (Central)",
-    status: "Aktif",
-    createdAt: "01 Jan 2023",
-  },
-];
+/**
+ * Helper untuk menyusun headers otentikasi user saat ini
+ */
+const getAuthHeaders = (): Record<string, string> => {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  const token = AuthService.getToken();
+  const user = AuthService.getCurrentUser();
+
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
+  if (rawId && !rawId.startsWith("adm-")) {
+    headers["x-super-admin-id"] = rawId;
+    headers["x-user-id"] = rawId;
+  }
+  if (user?.email) {
+    headers["x-user-email"] = user.email;
+  }
+  return headers;
+};
 
 export const AdminService = {
-  getAll(): AdminUser[] {
-    if (typeof window === "undefined") return INITIAL_ADMINS;
+  cachedAdmins: [] as AdminUser[],
+
+  /**
+   * Mengambil data admin dan super admin yang HANYA berelasi dengan akun yang sedang login
+   */
+  async fetchAll(): Promise<AdminUser[]> {
     try {
-      const data = localStorage.getItem(STORAGE_KEY);
-      if (data) {
-        const parsed = JSON.parse(data);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
-        }
+      const user = AuthService.getCurrentUser();
+      const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
+
+      let queryParam = "";
+      if (rawId && !rawId.startsWith("adm-")) {
+        queryParam = `?superAdminId=${rawId}`;
+      } else if (user?.email) {
+        queryParam = `?email=${encodeURIComponent(user.email)}`;
       }
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(INITIAL_ADMINS));
-      return INITIAL_ADMINS;
-    } catch {
-      return INITIAL_ADMINS;
+
+      const res = await fetch(`${BACKEND_URL}/api/admins${queryParam}`, {
+        method: "GET",
+        headers: getAuthHeaders(),
+        cache: "no-store",
+      });
+
+      if (!res.ok) {
+        throw new Error(`Gagal mengambil data admin dari server (HTTP ${res.status})`);
+      }
+
+      const json = await res.json();
+      if (json.status === "success" && Array.isArray(json.data)) {
+        this.cachedAdmins = json.data;
+        return json.data;
+      }
+
+      return [];
+    } catch (error) {
+      console.warn("Backend API offline or unreachable:", error);
+      return this.cachedAdmins;
     }
+  },
+
+  getAll(): AdminUser[] {
+    return this.cachedAdmins;
   },
 
   getById(id: string): AdminUser | undefined {
-    const list = this.getAll();
-    return list.find((a) => a.id === id);
+    return this.cachedAdmins.find((a) => a.id === id);
   },
 
-  create(admin: Omit<AdminUser, "id" | "createdAt">): AdminUser {
-    const list = this.getAll();
-    const newAdmin: AdminUser = {
-      ...admin,
-      id: `adm-${Date.now()}`,
-      createdAt: new Date().toLocaleDateString("id-ID", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-      }),
-    };
-    const updated = [newAdmin, ...list];
-    if (typeof window !== "undefined") {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+  /**
+   * Menambahkan akun admin baru langsung ke database PostgreSQL
+   */
+  async createAsync(adminData: {
+    fullName: string;
+    email: string;
+    phone?: string;
+    role?: "Admin" | "Super Admin" | "Staff";
+    workspaceName?: string;
+    workspaceId?: string;
+    status?: "Aktif" | "Nonaktif";
+    password?: string;
+  }): Promise<AdminUser> {
+    const user = AuthService.getCurrentUser();
+    const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
+
+    let res: Response;
+    try {
+      res = await fetch(`${BACKEND_URL}/api/admins`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          ...adminData,
+          superAdminId: rawId,
+          email: user?.email,
+        }),
+      });
+    } catch (networkErr: unknown) {
+      console.error("Network error on POST /api/admins:", networkErr);
+      throw new Error("Tidak dapat terhubung ke server backend (http://localhost:5000). Pastikan backend sedang aktif.");
     }
-    return newAdmin;
-  },
 
-  update(id: string, data: Partial<AdminUser>): AdminUser | null {
-    const list = this.getAll();
-    const index = list.findIndex((a) => a.id === id);
-    if (index === -1) return null;
-
-    const updatedAdmin = { ...list[index], ...data };
-    list[index] = updatedAdmin;
-    if (typeof window !== "undefined") {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json.status !== "success") {
+      throw new Error(json.message || `Gagal membuat akun admin di server (HTTP ${res.status})`);
     }
-    return updatedAdmin;
+
+    return json.data;
   },
 
-  softDelete(id: string): AdminUser | null {
-    return this.update(id, { status: "Nonaktif" });
-  },
+  /**
+   * Memperbarui data akun admin di database PostgreSQL
+   */
+  async updateAsync(
+    id: string,
+    updateData: Partial<AdminUser> & { password?: string; workspaceId?: string }
+  ): Promise<AdminUser> {
+    const user = AuthService.getCurrentUser();
+    const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
 
-  deactivate(id: string): AdminUser | null {
-    return this.update(id, { status: "Nonaktif" });
-  },
-
-  activate(id: string): AdminUser | null {
-    return this.update(id, { status: "Aktif" });
-  },
-
-  delete(id: string): boolean {
-    const list = this.getAll();
-    const filtered = list.filter((a) => a.id !== id);
-    if (filtered.length === list.length) return false;
-
-    if (typeof window !== "undefined") {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
+    let res: Response;
+    try {
+      res = await fetch(`${BACKEND_URL}/api/admins/${id}`, {
+        method: "PUT",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          ...updateData,
+          superAdminId: rawId,
+        }),
+      });
+    } catch (networkErr: unknown) {
+      console.error("Network error on PUT /api/admins:", networkErr);
+      throw new Error("Tidak dapat terhubung ke server backend (http://localhost:5000). Pastikan backend sedang aktif.");
     }
+
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json.status !== "success") {
+      throw new Error(json.message || `Gagal memperbarui admin di server (HTTP ${res.status})`);
+    }
+
+    return json.data;
+  },
+
+  /**
+   * Menghapus admin secara permanen dari database PostgreSQL
+   */
+  async deleteAsync(id: string): Promise<boolean> {
+    let res: Response;
+    try {
+      res = await fetch(`${BACKEND_URL}/api/admins/${id}`, {
+        method: "DELETE",
+        headers: getAuthHeaders(),
+      });
+    } catch (networkErr: unknown) {
+      console.error("Network error on DELETE /api/admins:", networkErr);
+      throw new Error("Tidak dapat terhubung ke server backend (http://localhost:5000). Pastikan backend sedang aktif.");
+    }
+
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json.status !== "success") {
+      throw new Error(json.message || `Gagal menghapus admin di server (HTTP ${res.status})`);
+    }
+
     return true;
   },
 
-  getStats(admins?: AdminUser[]): AdminStatsData {
-    const list = admins || this.getAll();
+  /**
+   * Menghitung statistik berdasarkan data admin riil dari database
+   */
+  getStats(admins: AdminUser[] = []): AdminStatsData {
     return {
-      totalAdmins: list.length,
-      activeAdmins: list.filter((a) => a.status === "Aktif").length,
-      inactiveAdmins: list.filter((a) => a.status === "Nonaktif").length,
-      totalAuditors: list.filter((a) => a.role === "Staff").length,
+      totalAdmins: admins.length,
+      activeAdmins: admins.filter((a) => a.status === "Aktif").length,
+      inactiveAdmins: admins.filter((a) => a.status === "Nonaktif").length,
+      totalAuditors: admins.filter((a) => a.role === "Staff").length,
     };
   },
 };

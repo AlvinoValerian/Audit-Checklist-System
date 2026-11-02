@@ -29,10 +29,13 @@ export default function DetailHolidayModal({ isOpen, holiday, onClose, onEdit }:
     ? formatDate(holiday.startDate)
     : `${formatDate(holiday.startDate)} - ${formatDate(holiday.endDate)}`;
 
-  const diliburkanCount = holiday.liburType === "full" || !holiday.liburType 
+  const hasSavedSchedules = Boolean(holiday.schedules && holiday.schedules.length > 0);
+  const diliburkanCount = holiday.schedules && holiday.schedules.length > 0
+    ? holiday.schedules.length 
+    : holiday.liburType === "full" || !holiday.liburType 
     ? 4 
-    : (holiday.schedules?.length || 0);
-  const berjalanCount = 4 - diliburkanCount;
+    : 0;
+  const berjalanCount = Math.max(0, 4 - diliburkanCount);
 
   const getStatusColor = (status: HolidayStatus) => {
     if (status === "Terjadwal") return { bg: "bg-purple-50 text-purple-700", dot: "bg-purple-600" };
@@ -149,7 +152,9 @@ export default function DetailHolidayModal({ isOpen, holiday, onClose, onEdit }:
             <h3 className="text-sm font-bold text-slate-900 mb-3">Status Jadwal Audit di Toko Ini</h3>
             <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100">
               {schedulesList.map((schedule) => {
-                const isLibur = holiday.liburType === "full" || !holiday.liburType || holiday.schedules?.includes(schedule.id);
+                const isLibur = hasSavedSchedules
+                  ? holiday.schedules?.includes(schedule.id)
+                  : holiday.liburType === "full" || !holiday.liburType;
                 return (
                   <div key={schedule.id} className="p-4 flex items-center justify-between">
                     <div className="flex items-center gap-3">
