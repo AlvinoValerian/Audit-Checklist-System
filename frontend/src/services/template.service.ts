@@ -1,235 +1,274 @@
 import { TemplateItem, TemplateStats, TemplateStatus } from "@/types/template";
+import { AuthService } from "@/lib/auth";
 
+const getBackendUrl = (): string => {
+  if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
+  if (typeof window !== "undefined") return "";
+  return "http://127.0.0.1:5000";
+};
+const BACKEND_URL = getBackendUrl();
 const TEMPLATE_STORAGE_KEY = "audit_pro_template_checklist_v1";
+
+const getAuthHeaders = (): Record<string, string> => {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  const token = AuthService.getToken();
+  const user = AuthService.getCurrentUser();
+  const activeWs = AuthService.getActiveWorkspace();
+
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
+  if (rawId && !rawId.startsWith("adm-")) {
+    headers["x-super-admin-id"] = rawId;
+    headers["x-user-id"] = rawId;
+  }
+  if (user?.email) {
+    headers["x-user-email"] = user.email;
+  }
+  if (activeWs?.id) {
+    headers["x-workspace-id"] = activeWs.id;
+  } else if (user?.workspaceId) {
+    headers["x-workspace-id"] = user.workspaceId;
+  }
+
+  return headers;
+};
 
 export const defaultTemplates: TemplateItem[] = [
   {
-    id: "tpl-1",
-    title: "Checklist Operasional Harian Toko Retail",
-    description: "Pemeriksaan kesiapan operasional harian gerai toko meliputi kesiapan kasir, display, dan kebersihan toko sebelum jam buka.",
-    category: "Operasional Harian",
-    lastRevision: "24 Okt 2024",
-    createdBy: "Hendra Wijaya",
-    creatorRole: "Admin Utama",
-    status: "Aktif",
-    itemsCount: 15,
-    items: [
-      { id: "chk-1", question: "Apakah area pintu masuk dan etalase kaca bersih dari debu dan noda?", category: "Kebersihan", required: true },
-      { id: "chk-2", question: "Apakah seluruh mesin kasir POS dan printer struk berfungsi normal?", category: "Kasir & Perangkat", required: true },
-      { id: "chk-3", question: "Apakah pendingin ruangan (AC) dan penerangan utama berfungsi normal?", category: "Fasilitas", required: true },
-      { id: "chk-4", question: "Apakah uang modal kasir telah dihitung dan diverifikasi sesuai ketentuan?", category: "Kasir & Perangkat", required: true },
-      { id: "chk-5", question: "Apakah banner promosi terpasang rapi dan masa berlaku valid?", category: "Visual Merchandising", required: false },
-    ],
-    createdAt: "10 Jan 2024",
-  },
-  {
-    id: "tpl-2",
-    title: "Audit Kerapihan & Standar Display Planogram",
-    description: "Evaluasi kesesuaian penataan rak gondola, eye level display, label harga, dan kesesuaian layout planogram retail.",
-    category: "Visual Merchandising",
-    lastRevision: "18 Okt 2024",
-    createdBy: "Siti Rahmawati",
-    creatorRole: "Super Admin",
-    status: "Aktif",
-    itemsCount: 18,
-    items: [
-      { id: "chk-6", question: "Apakah seluruh produk di rak display tertata rapi sesuai panduan planogram?", category: "Display", required: true },
-      { id: "chk-7", question: "Apakah label harga (price tag) tersedia dan sesuai dengan harga sistem?", category: "Labeling", required: true },
-      { id: "chk-8", question: "Apakah produk fast moving tidak mengalami kekosongan pada rak depan?", category: "Display", required: true },
-    ],
-    createdAt: "15 Jan 2024",
-  },
-  {
-    id: "tpl-3",
-    title: "Checklist Kebersihan & K3 Fasilitas Toko",
-    description: "Standar inspeksi kesehatan, kebersihan toilet, area gudang, dan pemenuhan keselamatan kerja (K3).",
-    category: "K3 & Kebersihan",
-    lastRevision: "12 Okt 2024",
-    createdBy: "Budi Santoso",
-    creatorRole: "Admin Utama",
-    status: "Aktif",
-    itemsCount: 12,
-    items: [
-      { id: "chk-9", question: "Apakah jalur evakuasi dan pintu darurat bebas dari halangan barang?", category: "K3", required: true },
-      { id: "chk-10", question: "Apakah kotak P3K terisi lengkap dengan obat-obatan yang masih berlaku?", category: "K3", required: true },
-      { id: "chk-11", question: "Apakah tempat sampah terpilah dan dikosongkan secara berkala?", category: "Kebersihan", required: true },
-    ],
-    createdAt: "01 Feb 2024",
-  },
-  {
-    id: "tpl-4",
-    title: "Inspeksi Perangkat POS, Kasir & Mesin EDC",
-    description: "Pemeriksaan teknis integritas perangkat keras mesin kasir, scanner barcode, uninterruptible power supply (UPS), dan mesin EDC bank.",
-    category: "IT & Peralatan",
-    lastRevision: "05 Okt 2024",
-    createdBy: "Ahmad Fauzi",
-    creatorRole: "Super Admin",
-    status: "Aktif",
-    itemsCount: 10,
-    items: [
-      { id: "chk-12", question: "Apakah kabel power dan data mesin kasir terpasang rapi dan aman?", category: "Hardware", required: true },
-      { id: "chk-13", question: "Apakah printer thermal mencetak struk dengan jelas tanpa garis putus?", category: "Hardware", required: true },
-      { id: "chk-14", question: "Apakah seluruh mesin EDC terkoneksi dengan sinyal stabil?", category: "Jaringan", required: true },
-    ],
-    createdAt: "10 Feb 2024",
-  },
-  {
-    id: "tpl-5",
-    title: "Audit Stok & Inventori Gudang",
-    description: "Pemeriksaan berkala kesesuaian fisik stok gudang dengan database ERP serta pencegahan produk kedaluwarsa (FEFO).",
-    category: "Inventori",
-    lastRevision: "15 Sep 2024",
-    archivedDate: "15 Sep 2024",
-    createdBy: "Hendra Wijaya",
-    creatorRole: "Admin Utama",
-    status: "Nonaktif",
-    itemsCount: 14,
-    items: [
-      { id: "chk-15", question: "Apakah susunan karton barang gudang tidak melebihi batas tumpukan maksimal?", category: "Gudang", required: true },
-      { id: "chk-16", question: "Apakah kartu stok fisik terisi mutasi terbaru?", category: "Administrasi", required: true },
-    ],
-    createdAt: "20 Feb 2024",
-  },
-  {
-    id: "tpl-6",
-    title: "Audit Keselamatan Kerja & Tabung APAR",
-    description: "Inspeksi berkala kondisi fisik, segel tekanan, dan tanggal kadaluarsa tabung pemadam api ringan di seluruh area toko.",
-    category: "K3 & Fasilitas",
-    lastRevision: "28 Sep 2024",
-    createdBy: "Siti Rahmawati",
-    creatorRole: "Super Admin",
-    status: "Aktif",
-    itemsCount: 8,
-    items: [
-      { id: "chk-17", question: "Apakah jarum indikator tekanan APAR berada pada zona hijau?", category: "K3", required: true },
-      { id: "chk-18", question: "Apakah petunjuk penggunaan APAR terlihat jelas dan tidak tertutup benda?", category: "K3", required: true },
-    ],
-    createdAt: "01 Mar 2024",
-  },
-  {
-    id: "tpl-7",
-    title: "Checklist Pembukaan & Penutupan Toko (Opening/Closing)",
-    description: "Prosedur operasional standar pembukaan rolling door, alarm toko, penguncian brankas, dan pemadaman utilitas saat closing.",
-    category: "Operasional Harian",
-    lastRevision: "20 Sep 2024",
-    createdBy: "Budi Santoso",
-    creatorRole: "Admin Utama",
-    status: "Aktif",
-    itemsCount: 16,
-    items: [
-      { id: "chk-19", question: "Apakah alarm keamanan dan sensor toko dinonaktifkan dengan kode otoritas yang benar?", category: "Keamanan", required: true },
-      { id: "chk-20", question: "Apakah seluruh uang tunai hasil penjualan telah dimasukkan ke brankas utama?", category: "Keuangan", required: true },
-    ],
-    createdAt: "12 Mar 2024",
-  },
-  {
-    id: "tpl-8",
-    title: "Pemeriksaan Standar Layanan Kasir & Grooming Staff",
-    description: "Evaluasi keramahan pelayanan, salam pembuka/penutup kasir, kesesuaian seragam, name tag, dan kerapihan staf garda terdepan.",
-    category: "Standar Layanan",
-    lastRevision: "10 Sep 2024",
-    createdBy: "Ahmad Fauzi",
-    creatorRole: "Super Admin",
-    status: "Aktif",
-    itemsCount: 11,
-    items: [
-      { id: "chk-21", question: "Apakah kasir mengucapkan 5S (Senyum, Salam, Sapa, Sopan, Santun) kepada pelanggan?", category: "Layanan", required: true },
-      { id: "chk-22", question: "Apakah staf mengenakan seragam resmi yang rapi, bersih, dan memakai name tag?", category: "Grooming", required: true },
-    ],
-    createdAt: "22 Mar 2024",
-  },
-  {
-    id: "tpl-9",
-    title: "Audit Fasilitas Pendingin & Cold Storage Showcase",
-    description: "Monitoring suhu showcase minuman, chiller susu olahan, dan freezer daging beku guna menjaga kesegaran produk.",
-    category: "Fasilitas Toko",
-    lastRevision: "01 Sep 2024",
-    createdBy: "Hendra Wijaya",
-    creatorRole: "Admin Utama",
+    id: "1",
+    title: "Checklist Opening & Kesiapan Operasional Pagi",
+    description: "Audit kebersihan area makan, kesiapan kasir, dan suhu chiller sebelum operasional buka",
+    category: "Area Kasir & Entrance Depan",
+    lastRevision: "19 Sep 2026",
+    createdBy: "Sari Melati",
+    creatorRole: "Head Auditor",
     status: "Aktif",
     itemsCount: 9,
     items: [
-      { id: "chk-23", question: "Apakah temperatur chiller showcase berada pada rentang 2°C hingga 6°C?", category: "Pendingin", required: true },
-      { id: "chk-24", question: "Apakah freezer daging beku berada pada temperatur minimal -18°C?", category: "Pendingin", required: true },
+      { id: "chk-1", question: "Apakah mesin POS kasir dan printer struk menyala normal?", category: "Area Kasir & Entrance Depan", required: true, requirePhoto: false },
+      { id: "chk-2", question: "Pastikan uang kembalian (modal kasir) sudah dihitung dan siap di laci", category: "Area Kasir & Entrance Depan", required: true, requirePhoto: false },
+      { id: "chk-3", question: "Ambil foto area pintu masuk/entrance untuk memastikan banner promo terpasang rapi", category: "Area Kasir & Entrance Depan", required: true, requirePhoto: true },
+      { id: "chk-4", question: "Apakah semua meja dan kursi telah dilap bersih bebas noda minyak/saus?", category: "Area Dining Room & Kebersihan Meja", required: true, requirePhoto: false },
+      { id: "chk-5", question: "Pastikan lantai area dine-in sudah disapu dan dipel wangi", category: "Area Dining Room & Kebersihan Meja", required: true, requirePhoto: false },
+      { id: "chk-6", question: "Ambil foto sudut pandang luas area meja makan sebelum pengunjung masuk", category: "Area Dining Room & Kebersihan Meja", required: true, requirePhoto: true },
+      { id: "chk-7", question: "Cek suhu chiller penyimpanan mi dan pangsit (standar 2 - 6 derajat Celcius)", category: "Area Dapur & Chiller Bahan Baku", required: true, requirePhoto: false },
+      { id: "chk-8", question: "Ambil foto termometer/indikator display suhu chiller sebagai bukti", category: "Area Dapur & Chiller Bahan Baku", required: true, requirePhoto: true },
+      { id: "chk-9", question: "Pastikan minyak goreng pada penggorengan pangsit bersih dan siap digunakan", category: "Area Dapur & Chiller Bahan Baku", required: true, requirePhoto: false },
     ],
-    createdAt: "05 Apr 2024",
+    createdAt: "19 Sep 2026",
   },
   {
-    id: "tpl-10",
-    title: "Checklist Verifikasi Promo, Price Tag & Labeling",
-    description: "Pemeriksaan konsistensi diskon promosi berkala, pemasangan wobbler, tent card, dan pembaruan label harga elektronik/kertas.",
-    category: "Visual Merchandising",
-    lastRevision: "25 Agu 2024",
-    createdBy: "Siti Rahmawati",
-    creatorRole: "Super Admin",
+    id: "2",
+    title: "Checklist Quality Control & Kitchen Mid-Day",
+    description: "Pengecekan higienitas dapur, stok bahan baku mi/dimsum, dan kebersihan exhaust hood saat jam sibuk",
+    category: "Operasional Toko",
+    lastRevision: "19 Sep 2026",
+    createdBy: "Sari Melati",
+    creatorRole: "Head Auditor",
     status: "Aktif",
-    itemsCount: 13,
-    items: [
-      { id: "chk-25", question: "Apakah seluruh materi promosi katalog aktif telah terpasang di gondola terkait?", category: "Promosi", required: true },
-      { id: "chk-26", question: "Apakah tidak ada materi promosi yang telah kedaluwarsa masih terpasang?", category: "Promosi", required: true },
-    ],
-    createdAt: "18 Apr 2024",
+    itemsCount: 0,
+    items: [],
+    createdAt: "19 Sep 2026",
   },
   {
-    id: "tpl-11",
-    title: "Audit Keamanan CCTV & Pintu Darurat",
-    description: "Inspeksi sudut pandang kamera CCTV, rekaman DVR 30 hari terakhir, pencahayaan area rawan, serta akses tangga darurat.",
-    category: "Keamanan",
-    lastRevision: "15 Agu 2024",
-    createdBy: "Budi Santoso",
-    creatorRole: "Admin Utama",
+    id: "3",
+    title: "Checklist Kebersihan Toilet & Wastafel Dine-in",
+    description: "Pemeriksaan ketersediaan sabun, kebersihan lantai toilet, dan fungsi kran air pengunjung",
+    category: "Operasional Toko",
+    lastRevision: "19 Sep 2026",
+    createdBy: "Sari Melati",
+    creatorRole: "Head Auditor",
     status: "Aktif",
-    itemsCount: 8,
-    items: [
-      { id: "chk-27", question: "Apakah seluruh kamera CCTV aktif dan menghasilkan rekaman visual yang jelas?", category: "Keamanan", required: true },
-      { id: "chk-28", question: "Apakah kapasitas hard disk DVR mencukupi rekaman minimal 30 hari ke belakang?", category: "Keamanan", required: true },
-    ],
-    createdAt: "02 Mei 2024",
+    itemsCount: 0,
+    items: [],
+    createdAt: "19 Sep 2026",
   },
   {
-    id: "tpl-12",
-    title: "Formulir Audit Merchant Partner & Qris Terminal (Arsip)",
-    description: "Verifikasi mesin EDC pihak ketiga dan barcode statis QRIS pembayaran non-tunai di meja kasir.",
-    category: "Pembayaran & Finansial",
-    lastRevision: "01 Agu 2024",
-    archivedDate: "01 Agu 2024",
-    createdBy: "Ahmad Fauzi",
-    creatorRole: "Super Admin",
-    status: "Nonaktif",
-    itemsCount: 6,
-    items: [
-      { id: "chk-29", question: "Apakah stiker QRIS terverifikasi resmi tanpa tanda-tanda penempelan stiker palsu?", category: "Keamanan Pembayaran", required: true },
-    ],
-    createdAt: "15 Mei 2024",
+    id: "4",
+    title: "Checklist Closing & Rekonsiliasi Kasir Malam",
+    description: "Pemeriksaan pemadaman alat listrik non-esensial, kunci pintu gudang, dan rekonsiliasi setoran kasir",
+    category: "Operasional Toko",
+    lastRevision: "19 Sep 2026",
+    createdBy: "Sari Melati",
+    creatorRole: "Head Auditor",
+    status: "Aktif",
+    itemsCount: 0,
+    items: [],
+    createdAt: "19 Sep 2026",
   },
 ];
 
 export const TemplateService = {
-  getAll(): TemplateItem[] {
-    if (typeof window === "undefined") return defaultTemplates;
+  cachedTemplatesByWs: {} as Record<string, TemplateItem[]>,
+
+  getWorkspaceKey(wsId?: string): string {
+    const activeWs = AuthService.getActiveWorkspace();
+    const user = AuthService.getCurrentUser();
+    const raw = wsId || activeWs?.id || user?.workspaceId || "1";
+    return String(raw).replace(/^ws-/, "");
+  },
+
+  /**
+   * Mengambil data template langsung dari backend PostgreSQL khusus workspace tertentu
+   */
+  async fetchAll(customWorkspaceId?: string): Promise<TemplateItem[]> {
+    const wsKey = this.getWorkspaceKey(customWorkspaceId);
     try {
-      const data = localStorage.getItem(TEMPLATE_STORAGE_KEY);
+      const activeWs = AuthService.getActiveWorkspace();
+      const targetWsId = customWorkspaceId || activeWs?.id;
+
+      const params = new URLSearchParams();
+      if (targetWsId && targetWsId !== "all") {
+        params.append("workspaceId", targetWsId);
+      }
+
+      const headers = getAuthHeaders();
+      if (targetWsId) {
+        headers["x-workspace-id"] = targetWsId;
+      }
+
+      const queryString = params.toString() ? `?${params.toString()}` : "";
+      const res = await fetch(`${BACKEND_URL}/api/templates${queryString}`, {
+        method: "GET",
+        headers,
+      });
+
+      if (!res.ok) {
+        throw new Error(`Gagal fetch template (Status ${res.status})`);
+      }
+
+      const body = await res.json();
+      if (body.success && Array.isArray(body.data)) {
+        this.cachedTemplatesByWs[wsKey] = body.data;
+        const cacheKey = `${TEMPLATE_STORAGE_KEY}_${wsKey}`;
+        if (typeof window !== "undefined") {
+          localStorage.setItem(cacheKey, JSON.stringify(body.data));
+        }
+        return body.data;
+      }
+      this.cachedTemplatesByWs[wsKey] = [];
+      return [];
+    } catch (err) {
+      console.warn("⚠️ [TemplateService.fetchAll]: Menggunakan cache lokal:", err);
+      return this.getAll(customWorkspaceId);
+    }
+  },
+
+  getAll(customWorkspaceId?: string): TemplateItem[] {
+    const wsKey = this.getWorkspaceKey(customWorkspaceId);
+    const cacheKey = `${TEMPLATE_STORAGE_KEY}_${wsKey}`;
+
+    // 1. Cek memory cache khusus workspace ini
+    if (this.cachedTemplatesByWs[wsKey]) {
+      return this.cachedTemplatesByWs[wsKey];
+    }
+
+    if (typeof window === "undefined") {
+      return wsKey === "1" ? defaultTemplates : [];
+    }
+
+    // 2. Cek localStorage khusus workspace ini
+    try {
+      const data = localStorage.getItem(cacheKey);
       if (data) {
         const parsed = JSON.parse(data);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map((t: TemplateItem) => ({
+        if (Array.isArray(parsed)) {
+          const list = parsed.map((t: TemplateItem) => ({
             ...t,
             status: (t.status as string) === "Dinonaktifkan" ? "Nonaktif" : t.status,
           }));
+          this.cachedTemplatesByWs[wsKey] = list;
+          return list;
         }
       }
-      localStorage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(defaultTemplates));
-      return defaultTemplates;
+      // Hanya Workspace 1 (Mie Gacoan) yang memiliki defaultTemplates jika storage kosong
+      if (wsKey === "1") {
+        localStorage.setItem(cacheKey, JSON.stringify(defaultTemplates));
+        this.cachedTemplatesByWs[wsKey] = defaultTemplates;
+        return defaultTemplates;
+      }
+      this.cachedTemplatesByWs[wsKey] = [];
+      return [];
     } catch {
-      return defaultTemplates;
+      return wsKey === "1" ? defaultTemplates : [];
     }
+  },
+
+  async getByIdAsync(id: string): Promise<TemplateItem | undefined> {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/templates/${id}`, {
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) {
+        const body = await res.json();
+        if (body.success && body.data) {
+          return body.data;
+        }
+      }
+    } catch {
+      // fallback
+    }
+    return this.getById(id);
   },
 
   getById(id: string): TemplateItem | undefined {
     return this.getAll().find((t) => t.id === id);
   },
 
+  async createAsync(data: Omit<TemplateItem, "id"> & { workspaceId?: string }): Promise<TemplateItem> {
+    try {
+      const activeWs = AuthService.getActiveWorkspace();
+      const targetWs = data.workspaceId || activeWs?.id;
+      const headers = getAuthHeaders();
+      if (targetWs) {
+        headers["x-workspace-id"] = targetWs;
+      }
+
+      const res = await fetch(`${BACKEND_URL}/api/templates`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(data),
+      });
+      if (res.ok) {
+        const body = await res.json();
+        if (body.success && body.data) {
+          const newTemplate = body.data;
+          const wsKey = this.getWorkspaceKey(targetWs);
+          const currentList = this.cachedTemplatesByWs[wsKey] || this.getAll(targetWs);
+          const updatedList = [newTemplate, ...currentList.filter((t) => t.id !== newTemplate.id)];
+          this.cachedTemplatesByWs[wsKey] = updatedList;
+          const cacheKey = `${TEMPLATE_STORAGE_KEY}_${wsKey}`;
+          if (typeof window !== "undefined") {
+            localStorage.setItem(cacheKey, JSON.stringify(updatedList));
+          }
+          return newTemplate;
+        }
+      }
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.message || `Gagal menyimpan template ke server (Status ${res.status})`);
+    } catch (err) {
+      console.error("❌ [TemplateService.createAsync] Error:", err);
+      throw err;
+    }
+  },
+
   create(data: Omit<TemplateItem, "id">): TemplateItem {
+    // Background async backend sync
+    if (typeof window !== "undefined") {
+      fetch(`${BACKEND_URL}/api/templates`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data),
+      }).catch((e) => console.warn("Background template create error:", e));
+    }
+
+    const wsKey = this.getWorkspaceKey();
+    const cacheKey = `${TEMPLATE_STORAGE_KEY}_${wsKey}`;
     const list = this.getAll();
     const totalCategoryTasks = data.categories
       ? data.categories.reduce((acc, cat) => acc + cat.tasks.length, 0)
@@ -238,8 +277,12 @@ export const TemplateService = {
     const newTemplate: TemplateItem = {
       ...data,
       id: `tpl-${Date.now()}`,
-      lastRevision: data.lastRevision || new Date().toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" }),
-      createdAt: data.createdAt || new Date().toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" }),
+      lastRevision:
+        data.lastRevision ||
+        new Date().toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" }),
+      createdAt:
+        data.createdAt ||
+        new Date().toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" }),
       itemsCount: data.categories
         ? totalCategoryTasks
         : data.items
@@ -247,13 +290,58 @@ export const TemplateService = {
         : data.itemsCount || 5,
     };
     const updated = [newTemplate, ...list];
+    this.cachedTemplatesByWs[wsKey] = updated;
     if (typeof window !== "undefined") {
-      localStorage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(updated));
+      localStorage.setItem(cacheKey, JSON.stringify(updated));
     }
     return newTemplate;
   },
 
+  async updateAsync(id: string, data: Partial<TemplateItem>): Promise<TemplateItem | null> {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/templates/${id}`, {
+        method: "PUT",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data),
+      });
+      if (res.ok) {
+        const body = await res.json();
+        if (body.success && body.data) {
+          const updatedTemplate: TemplateItem = body.data;
+          const wsKey = this.getWorkspaceKey();
+          const cacheKey = `${TEMPLATE_STORAGE_KEY}_${wsKey}`;
+          const currentList = this.getAll();
+          const exists = currentList.some((t: TemplateItem) => t.id === id);
+          const updatedList = exists
+            ? currentList.map((t: TemplateItem) => (t.id === id ? updatedTemplate : t))
+            : [updatedTemplate, ...currentList];
+          this.cachedTemplatesByWs[wsKey] = updatedList;
+          if (typeof window !== "undefined") {
+            localStorage.setItem(cacheKey, JSON.stringify(updatedList));
+          }
+          return updatedTemplate;
+        }
+      }
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.message || `Gagal memperbarui template di server (Status ${res.status})`);
+    } catch (err) {
+      console.error("❌ [TemplateService.updateAsync] Error:", err);
+      throw err;
+    }
+  },
+
   update(id: string, data: Partial<TemplateItem>): TemplateItem | null {
+    // Background async backend sync
+    if (typeof window !== "undefined") {
+      fetch(`${BACKEND_URL}/api/templates/${id}`, {
+        method: "PUT",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data),
+      }).catch((e) => console.warn("Background template update error:", e));
+    }
+
+    const wsKey = this.getWorkspaceKey();
+    const cacheKey = `${TEMPLATE_STORAGE_KEY}_${wsKey}`;
     const list = this.getAll();
     const index = list.findIndex((t) => t.id === id);
     if (index === -1) return null;
@@ -261,28 +349,97 @@ export const TemplateService = {
     const updatedTemplate = {
       ...list[index],
       ...data,
-      lastRevision: data.lastRevision || new Date().toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" }),
+      lastRevision:
+        data.lastRevision ||
+        new Date().toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" }),
     };
 
     if (data.status === "Nonaktif" && !updatedTemplate.archivedDate) {
-      updatedTemplate.archivedDate = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+      updatedTemplate.archivedDate = new Date().toLocaleDateString("id-ID", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      });
     } else if (data.status === "Aktif") {
       updatedTemplate.archivedDate = undefined;
     }
 
     list[index] = updatedTemplate;
+    this.cachedTemplatesByWs[wsKey] = list;
     if (typeof window !== "undefined") {
-      localStorage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(list));
+      localStorage.setItem(cacheKey, JSON.stringify(list));
     }
     return updatedTemplate;
   },
 
+  async toggleStatusAsync(id: string, status?: TemplateStatus): Promise<TemplateItem | null> {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/templates/${id}/status`, {
+        method: "PATCH",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ status }),
+      });
+      if (res.ok) {
+        const body = await res.json();
+        if (body.success && body.data) {
+          const updated: TemplateItem = body.data;
+          const wsKey = this.getWorkspaceKey();
+          const cacheKey = `${TEMPLATE_STORAGE_KEY}_${wsKey}`;
+          const currentList = this.getAll();
+          const updatedList = currentList.map((t: TemplateItem) => (t.id === id ? updated : t));
+          this.cachedTemplatesByWs[wsKey] = updatedList;
+          if (typeof window !== "undefined") {
+            localStorage.setItem(cacheKey, JSON.stringify(updatedList));
+          }
+          return updated;
+        }
+      }
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.message || `Gagal mengubah status template (Status ${res.status})`);
+    } catch (err) {
+      console.error("❌ [TemplateService.toggleStatusAsync] Error:", err);
+      throw err;
+    }
+  },
+
+  async deleteAsync(id: string, permanent = false): Promise<boolean> {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/templates/${id}${permanent ? "?permanent=true" : ""}`, {
+        method: "DELETE",
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) {
+        const wsKey = this.getWorkspaceKey();
+        const cacheKey = `${TEMPLATE_STORAGE_KEY}_${wsKey}`;
+        const filtered = this.getAll().filter((t) => t.id !== id);
+        this.cachedTemplatesByWs[wsKey] = filtered;
+        if (typeof window !== "undefined") {
+          localStorage.setItem(cacheKey, JSON.stringify(filtered));
+        }
+        return true;
+      }
+    } catch (err) {
+      console.warn("⚠️ [TemplateService.deleteAsync] Gagal ke backend:", err);
+    }
+    return this.delete(id);
+  },
+
   delete(id: string): boolean {
+    if (typeof window !== "undefined") {
+      fetch(`${BACKEND_URL}/api/templates/${id}`, {
+        method: "DELETE",
+        headers: getAuthHeaders(),
+      }).catch((e) => console.warn("Background template delete error:", e));
+    }
+
+    const wsKey = this.getWorkspaceKey();
+    const cacheKey = `${TEMPLATE_STORAGE_KEY}_${wsKey}`;
     const list = this.getAll();
     const filtered = list.filter((t) => t.id !== id);
     if (filtered.length === list.length) return false;
+    this.cachedTemplatesByWs[wsKey] = filtered;
     if (typeof window !== "undefined") {
-      localStorage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(filtered));
+      localStorage.setItem(cacheKey, JSON.stringify(filtered));
     }
     return true;
   },

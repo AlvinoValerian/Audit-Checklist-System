@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Mail, Lock, Eye, EyeOff, Loader2 } from "lucide-react";
 import { Toaster, toast } from "sonner";
 
+import { ApiAuthService } from "@/services/auth.service";
 import { AuthService } from "@/lib/auth";
 
 export default function LoginPage() {
@@ -32,22 +33,24 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      // Mock login validation / simulated delay
-      await new Promise((resolve) => setTimeout(resolve, 600));
-
-      AuthService.setCurrentUser({
-        id: "adm-4",
+      const response = await ApiAuthService.login({
         email: email.trim(),
-        fullName: email.includes("admin") ? "Super Admin" : "Auditor User",
-        role: "Super Admin",
+        password,
       });
 
-      toast.success("Login berhasil! Mengalihkan ke dashboard...");
+      const user = response.data?.user;
+      toast.success(response.message || "Login berhasil! Mengalihkan ke dashboard...");
+
       setTimeout(() => {
-        router.push("/workspace");
-      }, 500);
-    } catch {
-      toast.error("Terjadi kesalahan saat mencoba login. Silakan coba lagi.");
+        if (user && user.role === "Admin") {
+          router.push("/dashboard-monitoring");
+        } else {
+          router.push("/workspace");
+        }
+      }, 600);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Terjadi kesalahan saat mencoba login.";
+      toast.error(msg);
     } finally {
       setIsLoading(false);
     }
@@ -62,7 +65,7 @@ export default function LoginPage() {
         {/* Top: Logo & App Name */}
         <div className="flex items-center gap-3.5 z-10">
           <span className="text-xl font-bold tracking-tight text-white">
-            StoreAudit
+            Audit Pro
           </span>
         </div>
 
@@ -95,6 +98,9 @@ export default function LoginPage() {
             <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
               Selamat Datang
             </h2>
+            <p className="text-xs sm:text-sm text-slate-500 mt-1">
+              Masuk dengan akun Super Admin atau Admin workspace Anda.
+            </p>
           </div>
 
           {/* Login Form */}

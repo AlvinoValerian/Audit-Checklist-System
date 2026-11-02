@@ -9,7 +9,15 @@ export interface StaffUser {
   position: string;
   status: StaffStatus;
   phone?: string;
+  password?: string;
   joinDate?: string;
+  storeId?: string;
+  workspaceId?: string;
+  rawId?: string;
+  photo?: string | null;
+  adminId?: string;
+  adminName?: string | null;
+  deletedAt?: string;
 }
 
 export interface StaffStats {

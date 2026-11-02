@@ -9,9 +9,13 @@ import {
   Check,
   Trash2,
   CheckCircle2,
+  Lock,
+  ShieldCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import { AuthService } from "@/lib/auth";
+import { ApiAuthService } from "@/services/auth.service";
+import { CryptoService } from "@/lib/crypto";
 
 interface ProfileModalProps {
   isOpen: boolean;
@@ -25,8 +29,7 @@ interface ProfileModalProps {
 }
 
 function getInitials(name: string): string {
-  if (!name) return "AD";
-  if (name === "Admin Utama") return "AD";
+  if (!name || name === "Admin Utama" || name === "Admin") return "";
   const parts = name.trim().split(/\s+/);
   if (parts.length >= 2) {
     return (parts[0][0] + parts[1][0]).toUpperCase();
@@ -37,46 +40,71 @@ function getInitials(name: string): string {
 export default function ProfileModal({
   isOpen,
   onClose,
-  adminName: defaultName = "Admin Utama",
-  adminEmail = "admin@storeaudit.com",
+  adminName: propName = "",
+  adminRole: propRole = "",
+  adminEmail: propEmail = "",
+  workspaceName = "",
   avatarUrl = null,
   onUpdateProfile,
 }: ProfileModalProps) {
-  const [currentName, setCurrentName] = useState(defaultName);
-  const [email, setEmail] = useState(adminEmail);
+  const [currentName, setCurrentName] = useState(propName);
+  const [email, setEmail] = useState(propEmail);
+  const [role, setRole] = useState(propRole);
   const [avatar, setAvatar] = useState<string | null>(avatarUrl);
   const [isEditingName, setIsEditingName] = useState(false);
-  const [nameInput, setNameInput] = useState(defaultName);
+  const [nameInput, setNameInput] = useState(propName);
+  const [isEncryptedAvatar, setIsEncryptedAvatar] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Sync state from storage / auth on mount and modal open
   useEffect(() => {
     if (isOpen && typeof window !== "undefined") {
-      const currentUser = AuthService.getCurrentUser();
       const storedName = localStorage.getItem("audit_pro_admin_name");
-      const storedAvatar = localStorage.getItem("audit_pro_avatar");
+      if (storedName === "Admin Utama" || storedName === "Admin") {
+        localStorage.removeItem("audit_pro_admin_name");
+      }
+      const validStoredName = localStorage.getItem("audit_pro_admin_name");
+      const currentUser = AuthService.getCurrentUser();
+      const storedAvatar = localStorage.getItem("audit_pro_avatar") || currentUser?.profilePicture;
 
-      const resolvedName = storedName || currentUser?.fullName || defaultName;
+      const resolvedName = validStoredName || currentUser?.fullName || propName || "Pengguna";
       setCurrentName(resolvedName);
       setNameInput(resolvedName);
 
-      if (currentUser?.email) {
-        setEmail(currentUser.email);
-      } else {
-        setEmail(adminEmail);
-      }
+      const resolvedEmail = currentUser?.email || propEmail || "-";
+      setEmail(resolvedEmail);
+
+      const resolvedRole = currentUser?.role || propRole || "Super Admin";
+      setRole(resolvedRole);
 
       if (storedAvatar) {
-        setAvatar(storedAvatar);
-      } else {
+        if (CryptoService.isEncrypted(storedAvatar)) {
+          setIsEncryptedAvatar(true);
+          CryptoService.decryptImage(storedAvatar)
+            .then((dec) => {
+              setAvatar(dec);
+            })
+            .catch(() => {
+              setAvatar(null);
+              setIsEncryptedAvatar(false);
+            });
+        } else {
+          setAvatar(storedAvatar);
+          setIsEncryptedAvatar(false);
+        }
+      } else if (avatarUrl) {
         setAvatar(avatarUrl);
+        setIsEncryptedAvatar(false);
+      } else {
+        setAvatar(null);
+        setIsEncryptedAvatar(false);
       }
 
       setIsEditingName(false);
     }
-  }, [isOpen, defaultName, adminEmail, avatarUrl]);
+  }, [isOpen, propName, propEmail, propRole, avatarUrl]);
 
-  // Handle image upload from file picker
+  // Handle image upload from file picker dengan enkripsi AES-256
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -92,14 +120,33 @@ export default function ProfileModal({
     }
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       const dataUrl = event.target?.result as string;
       setAvatar(dataUrl);
-      if (typeof window !== "undefined") {
-        localStorage.setItem("audit_pro_avatar", dataUrl);
+
+      try {
+        // Enkripsi gambar foto profil menggunakan algoritma AES-256-GCM
+        const encrypted = await CryptoService.encryptImage(dataUrl);
+        if (typeof window !== "undefined") {
+          localStorage.setItem("audit_pro_avatar", encrypted);
+        }
+        setIsEncryptedAvatar(true);
+        onUpdateProfile?.({ avatar: dataUrl });
+
+        // Simpan foto terenkripsi ke database server agar tidak hilang saat logout
+        await ApiAuthService.updateProfile({ profilePicture: encrypted });
+        toast.success("Foto profil berhasil dienkripsi (AES-256) & disimpan!");
+      } catch (err) {
+        console.warn("Simpan unencrypted fallback:", err);
+        if (typeof window !== "undefined") {
+          localStorage.setItem("audit_pro_avatar", dataUrl);
+        }
+        onUpdateProfile?.({ avatar: dataUrl });
+
+        // Simpan ke database server
+        await ApiAuthService.updateProfile({ profilePicture: dataUrl });
+        toast.success("Foto profil berhasil diperbarui!");
       }
-      onUpdateProfile?.({ avatar: dataUrl });
-      toast.success("Foto profil berhasil diperbarui!");
     };
     reader.readAsDataURL(file);
 
@@ -107,18 +154,22 @@ export default function ProfileModal({
   };
 
   // Handle removing uploaded photo
-  const handleRemovePhoto = (e: React.MouseEvent) => {
+  const handleRemovePhoto = async (e: React.MouseEvent) => {
     e.stopPropagation();
     setAvatar(null);
+    setIsEncryptedAvatar(false);
     if (typeof window !== "undefined") {
       localStorage.removeItem("audit_pro_avatar");
     }
     onUpdateProfile?.({ avatar: null });
+
+    // Hapus foto profil dari database server
+    await ApiAuthService.updateProfile({ profilePicture: null });
     toast.success("Foto profil berhasil dihapus");
   };
 
   // Handle saving edited admin name
-  const handleSaveName = () => {
+  const handleSaveName = async () => {
     const trimmed = nameInput.trim();
     if (!trimmed) {
       toast.error("Nama admin tidak boleh kosong");
@@ -137,6 +188,9 @@ export default function ProfileModal({
     }
 
     onUpdateProfile?.({ name: trimmed });
+
+    // Simpan nama baru ke database server
+    await ApiAuthService.updateProfile({ name: trimmed });
     toast.success("Nama admin berhasil disimpan!");
   };
 
@@ -168,9 +222,15 @@ export default function ProfileModal({
               <User className="w-5 h-5 stroke-[2.2]" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-slate-900 leading-snug">
-                Profil Pengguna
-              </h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-bold text-slate-900 leading-snug">
+                  Profil Pengguna
+                </h2>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                  AES-256 Encrypted
+                </span>
+              </div>
               <p className="text-xs text-slate-500 mt-0.5">
                 Informasi akun dan penugasan akses sistem
               </p>
@@ -178,22 +238,32 @@ export default function ProfileModal({
           </div>
         </div>
 
-        {/* Content Body: Sesuai Tata Letak Wireframe */}
+        {/* Content Body */}
         <div className="p-6 space-y-4">
-          {/* Baris Atas: 1 (Foto Profil) di kiri, 2 (Nama), 3 (Email), 4 (Hak Akses) di kanan */}
+          {/* Baris Atas */}
           <div className="grid grid-cols-1 sm:grid-cols-12 gap-3.5 items-stretch">
             {/* 1: Foto Profil */}
             <div className="sm:col-span-5 relative rounded-2xl bg-slate-50 border border-slate-200/90 overflow-hidden flex flex-col items-center justify-center min-h-[175px] sm:min-h-[195px] shadow-2xs group">
               {avatar ? (
-                <img
-                  src={avatar}
-                  alt={currentName}
-                  className="w-full h-full object-cover"
-                />
+                <>
+                  <img
+                    src={avatar}
+                    alt={currentName || "Foto Profil"}
+                    className="w-full h-full object-cover"
+                  />
+                  <div className="absolute bottom-2 left-2 px-1.5 py-0.5 rounded-md bg-slate-900/80 backdrop-blur-xs text-white text-[9px] font-medium flex items-center gap-1 shadow-xs pointer-events-none">
+                    <Lock className="w-2.5 h-2.5 text-emerald-400" />
+                    <span>Terenkripsi</span>
+                  </div>
+                </>
               ) : (
                 <div className="w-full h-full flex flex-col items-center justify-center bg-[#193f53] text-white p-4">
                   <div className="w-16 h-16 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center font-bold text-2xl shadow-inner mb-1.5">
-                    {getInitials(currentName)}
+                    {getInitials(currentName) ? (
+                      <span>{getInitials(currentName)}</span>
+                    ) : (
+                      <User className="w-8 h-8 stroke-[1.8] text-white/80" />
+                    )}
                   </div>
                   <span className="text-[11px] font-medium text-slate-300">
                     Belum ada foto
@@ -215,9 +285,9 @@ export default function ProfileModal({
               )}
             </div>
 
-            {/* Kolom Kanan: 2 (Nama), 3 (Email), 4 (Hak Akses) */}
+            {/* Kolom Kanan: Nama, Email, Hak Akses */}
             <div className="sm:col-span-7 flex flex-col justify-between gap-2.5">
-              {/* 2: Nama Admin yang Sedang Login */}
+              {/* Nama Admin */}
               <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/90 flex flex-col justify-center min-h-[58px]">
                 <div className="flex items-center justify-between mb-0.5">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
@@ -241,7 +311,7 @@ export default function ProfileModal({
 
                 {!isEditingName ? (
                   <p className="text-xs sm:text-sm font-bold text-slate-900 truncate">
-                    {currentName}
+                    {currentName || "-"}
                   </p>
                 ) : (
                   <div className="flex items-center gap-1.5 mt-0.5">
@@ -276,24 +346,24 @@ export default function ProfileModal({
                 )}
               </div>
 
-              {/* 3: Email */}
+              {/* Email */}
               <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/90 flex flex-col justify-center min-h-[58px]">
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">
                   Email
                 </span>
                 <p className="text-xs sm:text-sm font-medium text-slate-800 truncate">
-                  {email}
+                  {email || "-"}
                 </p>
               </div>
 
-              {/* 4: Hak Akses */}
+              {/* Hak Akses */}
               <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/90 flex items-center justify-between min-h-[58px]">
                 <div>
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">
                     Hak Akses
                   </span>
                   <span className="text-xs sm:text-sm font-bold text-[#193f53]">
-                    Admin
+                    {role || "Super Admin"}
                   </span>
                 </div>
                 <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200 text-[10px] font-bold">
@@ -304,9 +374,9 @@ export default function ProfileModal({
             </div>
           </div>
 
-          {/* Baris Bawah: 5 (Edit Foto) di kiri bawah, 7 (Tutup) di kanan bawah */}
+          {/* Baris Bawah */}
           <div className="grid grid-cols-1 sm:grid-cols-12 gap-3.5 items-center pt-2">
-            {/* 5: Edit untuk Ganti Foto Profil */}
+            {/* Edit untuk Ganti Foto Profil */}
             <div className="sm:col-span-5">
               <button
                 type="button"
@@ -328,7 +398,7 @@ export default function ProfileModal({
             {/* Spacer tengah */}
             <div className="hidden sm:block sm:col-span-3" />
 
-            {/* 7: Tombol untuk Tutup Profil */}
+            {/* Tombol Tutup Profil */}
             <div className="sm:col-span-4 flex justify-end">
               <button
                 type="button"

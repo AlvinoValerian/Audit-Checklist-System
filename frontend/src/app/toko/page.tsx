@@ -11,10 +11,16 @@ import {
   Filter,
   Plus,
   ChevronLeft,
+  ChevronRight,
   TrendingUp,
+  Loader2,
+  Building2,
 } from "lucide-react";
 import { TokoService } from "@/services/toko.service";
+import { WorkspaceService } from "@/services/workspace.service";
 import { StoreItem, StoreStats } from "@/types/toko";
+import { Workspace } from "@/types/workspace";
+import { AuthService } from "@/lib/auth";
 import { toast } from "sonner";
 import ActionButtons from "@/components/ui/ActionButtons";
 import CreateStoreModal from "./components/CreateStoreModal";
@@ -25,6 +31,12 @@ import RestoreStoreModal from "./components/RestoreStoreModal";
 
 export default function TokoPage() {
   const [stores, setStores] = useState<StoreItem[]>([]);
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>("");
+  const [currentWorkspaceName, setCurrentWorkspaceName] = useState<string>("Workspace");
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isSuperAdmin, setIsSuperAdmin] = useState<boolean>(false);
+
   const [stats, setStats] = useState<StoreStats>({
     total: 0,
     active: 0,
@@ -48,6 +60,7 @@ export default function TokoPage() {
   // Restore / Aktifkan Kembali Modal State
   const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false);
   const [storeToRestore, setStoreToRestore] = useState<StoreItem | null>(null);
+  const [isSubmittingModal, setIsSubmittingModal] = useState(false);
 
   // Search & Filter State
   const [searchTerm, setSearchTerm] = useState("");
@@ -58,50 +71,180 @@ export default function TokoPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 5;
 
-  const refreshData = () => {
-    const list = TokoService.getAll();
-    setStores(list);
-    setStats(TokoService.getStats(list));
+  const refreshData = async (customWsId?: string) => {
+    const wsId = customWsId !== undefined ? customWsId : selectedWorkspaceId;
+    try {
+      const list = await TokoService.fetchAll(wsId);
+      setStores(list);
+      setStats(TokoService.getStats(list));
+    } catch (err) {
+      console.error("Gagal merefresh toko:", err);
+    }
   };
 
   useEffect(() => {
-    refreshData();
+    const init = async () => {
+      setIsLoading(true);
+      const user = AuthService.getCurrentUser();
+      const activeWs = AuthService.getActiveWorkspace();
+      const isSA = user?.role === "Super Admin";
+      setIsSuperAdmin(isSA);
+
+      let targetWsId = activeWs?.id || user?.workspaceId || "";
+      let targetWsName = activeWs?.name || user?.workspaceName || "Workspace";
+
+      if (isSA) {
+        try {
+          const wsList = await WorkspaceService.fetchAll();
+          setWorkspaces(wsList);
+          if (wsList.length > 0) {
+            const matched = wsList.find((w) => w.id === targetWsId && w.status !== "Nonaktif");
+            if (matched) {
+              targetWsId = matched.id;
+              targetWsName = matched.companyName || matched.name;
+            } else {
+              const firstActive = wsList.find((w) => w.status !== "Nonaktif") || wsList[0];
+              targetWsId = firstActive.id;
+              targetWsName = firstActive.companyName || firstActive.name;
+              AuthService.setActiveWorkspace({
+                id: firstActive.id,
+                name: targetWsName,
+              });
+            }
+          }
+        } catch (err) {
+          console.warn("Gagal memuat daftar workspace:", err);
+        }
+      }
+
+      setSelectedWorkspaceId(targetWsId);
+      setCurrentWorkspaceName(targetWsName);
+
+      try {
+        const storeList = await TokoService.fetchAll(targetWsId);
+        setStores(storeList);
+        setStats(TokoService.getStats(storeList));
+      } catch (err) {
+        console.error("Gagal memuat toko:", err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    init();
   }, []);
 
-  const handleCreateStore = (newStoreData: Omit<StoreItem, "id">) => {
-    TokoService.create(newStoreData);
-    toast.success(`Toko "${newStoreData.name}" berhasil ditambahkan!`);
-    setIsCreateModalOpen(false);
-    refreshData();
+  const handleWorkspaceChange = async (newWsId: string) => {
+    const chosen = workspaces.find((w) => w.id === newWsId);
+    if (chosen?.status === "Nonaktif") {
+      toast.error(`Workspace "${chosen.companyName || chosen.name}" sedang nonaktif dan tidak dapat dipilih.`);
+      return;
+    }
+
+    setSelectedWorkspaceId(newWsId);
+    if (chosen) {
+      const name = chosen.companyName || chosen.name;
+      setCurrentWorkspaceName(name);
+      AuthService.setActiveWorkspace({ id: chosen.id, name });
+    }
+    setIsLoading(true);
+    setCurrentPage(1);
+    try {
+      const list = await TokoService.fetchAll(newWsId);
+      setStores(list);
+      setStats(TokoService.getStats(list));
+      toast.info(`Menampilkan toko untuk workspace "${chosen?.companyName || chosen?.name}"`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Gagal memuat data toko";
+      toast.error(msg);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleUpdateStore = (updatedData: Partial<StoreItem>) => {
-    if (storeToEdit) {
-      TokoService.update(storeToEdit.id, updatedData);
+  const handleCreateStore = async (newStoreData: Omit<StoreItem, "id">) => {
+    try {
+      const created = await TokoService.createAsync({
+        ...newStoreData,
+        workspaceId: selectedWorkspaceId,
+        workspace: currentWorkspaceName,
+      });
+      // Realtime State Update: tampil seketika di tabel
+      setStores((prev) => {
+        const next = [created, ...prev];
+        setStats(TokoService.getStats(next));
+        return next;
+      });
+      toast.success(`Toko "${newStoreData.name}" berhasil disimpan ke database!`);
+      setIsCreateModalOpen(false);
+      refreshData().catch(console.warn);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Gagal menambahkan toko ke server";
+      toast.error(msg);
+    }
+  };
+
+  const handleUpdateStore = async (updatedData: Partial<StoreItem>) => {
+    if (!storeToEdit) return;
+    try {
+      const updated = await TokoService.updateAsync(storeToEdit.id, updatedData);
+      // Realtime State Update: langsung berubah di tabel seketika tanpa delay
+      setStores((prev) => {
+        const next = prev.map((s) => (s.id === storeToEdit.id ? { ...s, ...updated } : s));
+        setStats(TokoService.getStats(next));
+        return next;
+      });
       toast.success(`Data toko "${updatedData.name || storeToEdit.name}" berhasil diperbarui!`);
       setIsEditModalOpen(false);
       setStoreToEdit(null);
-      refreshData();
+      refreshData().catch(console.warn);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Gagal memperbarui data toko";
+      toast.error(msg);
     }
   };
 
-  const handleConfirmDeactivate = () => {
-    if (storeToDeactivate) {
-      TokoService.update(storeToDeactivate.id, { status: "Nonaktif" });
+  const handleConfirmDeactivate = async () => {
+    if (!storeToDeactivate) return;
+    setIsSubmittingModal(true);
+    try {
+      const updated = await TokoService.updateAsync(storeToDeactivate.id, { status: "Nonaktif" });
+      setStores((prev) => {
+        const next = prev.map((s) => (s.id === storeToDeactivate.id ? { ...s, ...updated } : s));
+        setStats(TokoService.getStats(next));
+        return next;
+      });
       toast.success(`Toko "${storeToDeactivate.name}" berhasil dinonaktifkan.`);
       setIsDeactivateModalOpen(false);
       setStoreToDeactivate(null);
-      refreshData();
+      refreshData().catch(console.warn);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Gagal menonaktifkan toko";
+      toast.error(msg);
+    } finally {
+      setIsSubmittingModal(false);
     }
   };
 
-  const handleConfirmRestore = () => {
-    if (storeToRestore) {
-      TokoService.update(storeToRestore.id, { status: "Aktif" });
+  const handleConfirmRestore = async () => {
+    if (!storeToRestore) return;
+    setIsSubmittingModal(true);
+    try {
+      const updated = await TokoService.updateAsync(storeToRestore.id, { status: "Aktif" });
+      setStores((prev) => {
+        const next = prev.map((s) => (s.id === storeToRestore.id ? { ...s, ...updated } : s));
+        setStats(TokoService.getStats(next));
+        return next;
+      });
       toast.success(`Toko "${storeToRestore.name}" berhasil diaktifkan kembali.`);
       setIsRestoreModalOpen(false);
       setStoreToRestore(null);
-      refreshData();
+      refreshData().catch(console.warn);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Gagal mengaktifkan toko";
+      toast.error(msg);
+    } finally {
+      setIsSubmittingModal(false);
     }
   };
 
@@ -135,7 +278,34 @@ export default function TokoPage() {
     <DashboardLayout>
       <Header
         title="Data Toko"
-        subtitle="Daftar seluruh toko yang berada di Workspace A."
+        subtitle={`Daftar seluruh toko yang berada di ${currentWorkspaceName}.`}
+        action={
+          isSuperAdmin && workspaces.length > 1 ? (
+            <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs">
+              <Building2 className="w-4 h-4 text-sky-600 shrink-0" />
+              <span className="text-xs font-semibold text-slate-600 shrink-0">Workspace:</span>
+              <select
+                value={selectedWorkspaceId}
+                onChange={(e) => handleWorkspaceChange(e.target.value)}
+                className="bg-transparent text-slate-800 text-xs font-bold focus:outline-none cursor-pointer pr-1"
+              >
+                {workspaces.map((w) => {
+                  const isInactive = w.status === "Nonaktif";
+                  return (
+                    <option
+                      key={w.id}
+                      value={w.id}
+                      disabled={isInactive}
+                      className={isInactive ? "text-slate-400 bg-slate-100 italic" : "text-slate-800"}
+                    >
+                      {w.companyName || w.name} {isInactive ? "(Nonaktif)" : `(${w.storeCount} Toko)`}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+          ) : undefined
+        }
       />
 
       {/* 3 Metric Summary Cards */}
@@ -288,13 +458,29 @@ export default function TokoPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
-              {paginatedStores.length === 0 ? (
+              {isLoading ? (
+                <tr>
+                  <td colSpan={6} className="py-16 text-center text-slate-400">
+                    <div className="flex flex-col items-center justify-center gap-2">
+                      <Loader2 className="w-6 h-6 text-[#193f53] animate-spin" />
+                      <span className="text-xs font-semibold text-slate-700">
+                        Memuat data toko...
+                      </span>
+                      <span className="text-[11px] text-slate-400">
+                        Menghubungkan ke ({currentWorkspaceName})
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+              ) : paginatedStores.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-12 text-center text-slate-400">
                     <Store className="w-8 h-8 mx-auto mb-2 text-slate-300 stroke-[1.5]" />
-                    <p className="font-semibold text-slate-600 text-sm">Tidak ada toko ditemukan</p>
+                    <p className="font-semibold text-slate-600 text-sm">
+                      Tidak ada toko ditemukan di {currentWorkspaceName}
+                    </p>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      Coba sesuaikan kata kunci pencarian atau filter status.
+                      Belum ada toko yang terdaftar atau coba sesuaikan kata kunci pencarian.
                     </p>
                   </td>
                 </tr>
@@ -312,8 +498,21 @@ export default function TokoPage() {
                       {/* NAMA TOKO */}
                       <td className={`py-3.5 px-4 font-semibold text-slate-900 whitespace-nowrap ${isInactive ? "opacity-40 grayscale" : ""}`}>
                         <div className="flex items-center gap-3">
-                          <div className="w-7 h-7 rounded-md bg-slate-100 border border-slate-200/80 text-slate-700 font-bold text-xs flex items-center justify-center shrink-0">
-                            {initialLetter.toUpperCase()}
+                          <div className="w-8 h-8 rounded-lg bg-slate-100 border border-slate-200/80 text-slate-700 font-bold text-xs flex items-center justify-center shrink-0 overflow-hidden shadow-2xs relative">
+                            {store.storePicture ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={store.storePicture}
+                                alt={store.name}
+                                className="w-full h-full object-cover"
+                                referrerPolicy="no-referrer"
+                                onError={(e) => {
+                                  (e.currentTarget as HTMLElement).style.display = "none";
+                                }}
+                              />
+                            ) : (
+                              initialLetter.toUpperCase()
+                            )}
                           </div>
                           <div>
                             <span>{store.name}</span>
@@ -353,36 +552,27 @@ export default function TokoPage() {
                         )}
                       </td>
 
-                      {/* STATUS (kecuali status, tidak diberi opacity-40 grayscale) */}
+                      {/* STATUS */}
                       <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                        {store.status === "Aktif" && (
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-600 border border-emerald-200">
+                        {store.status === "Aktif" ? (
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-600 border border-emerald-200">
                             Aktif
                           </span>
-                        )}
-                        {store.status === "Maintenance" && (
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
-                            Maintenance
-                          </span>
-                        )}
-                        {store.status === "Nonaktif" && (
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-rose-50 text-rose-600 border border-rose-200">
+                        ) : (
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-600 border border-rose-200">
                             Nonaktif
                           </span>
                         )}
                       </td>
 
-                      {/* ACTION */}
-                      <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                      {/* ACTION BUTTONS */}
+                      <td className="py-3.5 px-4 text-center whitespace-nowrap">
                         <ActionButtons
-                          onView={
-                            isInactive
-                              ? undefined
-                              : () => {
-                                  setSelectedStoreToView(store);
-                                  setIsDetailModalOpen(true);
-                                }
-                          }
+                          alignRestoreWithDelete={false}
+                          onView={() => {
+                            setSelectedStoreToView(store);
+                            setIsDetailModalOpen(true);
+                          }}
                           onEdit={
                             isInactive
                               ? undefined
@@ -421,50 +611,59 @@ export default function TokoPage() {
           </table>
         </div>
 
-        {/* Table Footer & Pagination */}
-        <div className="p-3.5 sm:p-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-500">
-          <div>
-            Menampilkan <span className="font-semibold text-slate-700">{startIndex}-{endIndex}</span> dari{" "}
-            <span className="font-semibold text-slate-700">{filteredStores.length}</span> toko
+        {/* Pagination Controls */}
+        <div className="p-3.5 sm:p-4 border-t border-slate-100 flex flex-wrap gap-4 items-center justify-between">
+          <p className="text-[11px] text-slate-500">
+            Menampilkan{" "}
+            <span className="font-bold text-slate-900">
+              {filteredStores.length === 0 ? 0 : startIndex}-{endIndex}
+            </span>{" "}
+            dari{" "}
+            <span className="font-bold text-slate-900">
+              {filteredStores.length}
+            </span>{" "}
+            toko
+          </p>
+
+          <div className="flex gap-1 text-[11px] ml-auto">
+            {/* Prev Button */}
+            <button
+              type="button"
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="w-7 h-7 flex items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              title="Halaman Sebelumnya"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+            </button>
+
+            {/* Page Numbers */}
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
+              <button
+                key={pageNum}
+                type="button"
+                onClick={() => setCurrentPage(pageNum)}
+                className={`w-7 h-7 flex items-center justify-center rounded-md text-xs font-bold transition-colors cursor-pointer ${
+                  currentPage === pageNum
+                    ? "bg-[#193f53] text-white shadow-2xs"
+                    : "border border-slate-200 text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                {pageNum}
+              </button>
+            ))}
+
+            {/* Next Button */}
+            <button
+              type="button"
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="px-3 h-7 flex items-center gap-1 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors font-bold ml-1 cursor-pointer"
+            >
+              <span>Selanjutnya</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
           </div>
-
-          {totalPages > 1 && (
-            <div className="flex items-center gap-1.5 self-center sm:self-auto">
-              <button
-                type="button"
-                onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
-                disabled={currentPage === 1}
-                className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
-                title="Halaman Sebelumnya"
-              >
-                <ChevronLeft className="w-3.5 h-3.5" />
-              </button>
-
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
-                <button
-                  key={pageNum}
-                  type="button"
-                  onClick={() => setCurrentPage(pageNum)}
-                  className={`w-7 h-7 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    currentPage === pageNum
-                      ? "bg-[#193f53] text-white shadow-2xs"
-                      : "text-slate-600 hover:bg-slate-100"
-                  }`}
-                >
-                  {pageNum}
-                </button>
-              ))}
-
-              <button
-                type="button"
-                onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
-                disabled={currentPage === totalPages}
-                className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer text-xs font-medium"
-              >
-                Selanjutnya
-              </button>
-            </div>
-          )}
         </div>
       </div>
 
@@ -473,6 +672,8 @@ export default function TokoPage() {
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
         onSubmit={handleCreateStore}
+        workspaceName={currentWorkspaceName}
+        workspaceId={selectedWorkspaceId}
       />
 
       {/* Edit Store Modal */}
@@ -512,6 +713,7 @@ export default function TokoPage() {
         }}
         onConfirm={handleConfirmDeactivate}
         store={storeToDeactivate}
+        isSubmitting={isSubmittingModal}
       />
 
       {/* Restore (Aktifkan Kembali) Modal */}
@@ -523,6 +725,7 @@ export default function TokoPage() {
         }}
         onConfirm={handleConfirmRestore}
         store={storeToRestore}
+        isSubmitting={isSubmittingModal}
       />
     </DashboardLayout>
   );

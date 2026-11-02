@@ -367,30 +367,30 @@ export default function DetailTemplate({
 
                               <div className="shrink-0 flex items-center gap-1 mt-0.5">
                                 {task.requirePhoto ? (
-                                  <>
-                                    <span
-                                      title="Wajib melampirkan foto hasil audit"
-                                      className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[9.5px] font-semibold bg-amber-50 text-amber-700 border border-amber-200"
-                                    >
-                                      <Camera className="w-2.5 h-2.5 text-amber-600" />
-                                      <span>Wajib Foto</span>
-                                    </span>
-                                    <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[8.5px] font-bold uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-200">
-                                      Priority High
-                                    </span>
-                                  </>
+                                  <span
+                                    title="Wajib melampirkan foto hasil audit"
+                                    className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[9.5px] font-semibold bg-amber-50 text-amber-700 border border-amber-200"
+                                  >
+                                    <Camera className="w-2.5 h-2.5 text-amber-600" />
+                                    <span>Wajib Foto</span>
+                                  </span>
                                 ) : (
-                                  <>
-                                    <span
-                                      title="Tidak memerlukan lampiran foto"
-                                      className="inline-flex items-center px-1.5 py-0.2 rounded text-[9.5px] font-medium bg-slate-100 text-slate-500"
-                                    >
-                                      Opsional Foto
-                                    </span>
-                                    <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[8.5px] font-semibold uppercase tracking-wider bg-slate-100 text-slate-600 border border-slate-200">
-                                      Priority Low
-                                    </span>
-                                  </>
+                                  <span
+                                    title="Tidak memerlukan lampiran foto"
+                                    className="inline-flex items-center px-1.5 py-0.2 rounded text-[9.5px] font-medium bg-slate-100 text-slate-500"
+                                  >
+                                    Opsional Foto
+                                  </span>
+                                )}
+
+                                {(task.priority || (task.requirePhoto ? "High" : "Low")) === "High" ? (
+                                  <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[8.5px] font-bold uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-200">
+                                    Priority High
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[8.5px] font-semibold uppercase tracking-wider bg-slate-100 text-slate-600 border border-slate-200">
+                                    Priority Low
+                                  </span>
                                 )}
                               </div>
                             </div>

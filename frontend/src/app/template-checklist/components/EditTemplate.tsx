@@ -13,6 +13,7 @@ import {
   Camera,
   ChevronsUpDown,
   BookmarkCheck,
+  Loader2,
 } from "lucide-react";
 import { TemplateService } from "@/services/template.service";
 import { TemplateItem, TemplateCategoryGroup, ChecklistTask } from "@/types/template";
@@ -48,6 +49,7 @@ export default function EditTemplate({
 
   // Template Title
   const [templateName, setTemplateName] = useState(template.title || "");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Initialize Categories & Tasks from template
   const initialCategories: TemplateCategoryGroup[] = useMemo(() => {
@@ -259,9 +261,38 @@ export default function EditTemplate({
         if (cat.id === catId) {
           return {
             ...cat,
-            tasks: cat.tasks.map((t) =>
-              t.id === taskId ? { ...t, requirePhoto: !t.requirePhoto } : t
-            ),
+            tasks: cat.tasks.map((t) => {
+              if (t.id === taskId) {
+                const nextPhoto = !t.requirePhoto;
+                return {
+                  ...t,
+                  requirePhoto: nextPhoto,
+                  priority: nextPhoto ? "High" : "Low",
+                };
+              }
+              return t;
+            }),
+          };
+        }
+        return cat;
+      })
+    );
+  };
+
+  const handleToggleTaskPriority = (catId: string, taskId: string) => {
+    setCategories((prev) =>
+      prev.map((cat) => {
+        if (cat.id === catId) {
+          return {
+            ...cat,
+            tasks: cat.tasks.map((t) => {
+              if (t.id === taskId) {
+                const currentPri = t.priority || (t.requirePhoto ? "High" : "Low");
+                const nextPri = currentPri === "High" ? "Low" : "High";
+                return { ...t, priority: nextPri };
+              }
+              return t;
+            }),
           };
         }
         return cat;
@@ -296,7 +327,7 @@ export default function EditTemplate({
   };
 
   // Save Changes Handler with Strict Validation
-  const handleSaveTemplate = () => {
+  const handleSaveTemplate = async () => {
     // 1. Validate template name
     if (!templateName.trim()) {
       toast.error("Nama template wajib diisi dan tidak boleh kosong");
@@ -346,6 +377,7 @@ export default function EditTemplate({
         category: cat.name.trim(),
         required: true,
         requirePhoto: t.requirePhoto,
+        priority: t.priority || (t.requirePhoto ? "High" : "Low"),
       }))
     );
 
@@ -355,7 +387,9 @@ export default function EditTemplate({
       year: "numeric",
     });
 
-    TemplateService.update(template.id, {
+    setIsSubmitting(true);
+    try {
+      await TemplateService.updateAsync(template.id, {
       title: templateName.trim(),
       category: categories[0]?.name.trim() || template.category || "Operasional Harian",
       description: `Template audit dengan ${categories.length} kategori dan ${flatItems.length} tugas periksa.`,
@@ -371,6 +405,13 @@ export default function EditTemplate({
     } else {
       router.push("/template-checklist");
     }
+
+    } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "Gagal menyimpan perubahan";
+    toast.error(msg);
+  } finally {
+    setIsSubmitting(false);
+  }
   };
 
   return (
@@ -381,6 +422,7 @@ export default function EditTemplate({
           <button
             type="button"
             onClick={handleBack}
+          disabled={isSubmitting}
             className="hover:text-[#193f53] transition-colors cursor-pointer"
           >
             TEMPLATE CHECKLIST
@@ -392,6 +434,7 @@ export default function EditTemplate({
         <button
           type="button"
           onClick={handleBack}
+          disabled={isSubmitting}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
@@ -606,26 +649,33 @@ export default function EditTemplate({
                           </button>
 
                           {/* Status Badge & Priority Label */}
-                          {task.requirePhoto ? (
-                            <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-1">
+                            {task.requirePhoto ? (
                               <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
                                 <Camera className="w-2.5 h-2.5 text-emerald-600" />
                                 <span>Wajib Foto</span>
                               </span>
-                              <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[8.5px] font-bold uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-200">
-                                Priority High
-                              </span>
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-1">
+                            ) : (
                               <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-medium bg-slate-100 text-slate-500 border border-slate-200">
                                 Opsional
                               </span>
-                              <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[8.5px] font-semibold uppercase tracking-wider bg-slate-100 text-slate-600 border border-slate-200">
-                                Priority Low
-                              </span>
-                            </div>
-                          )}
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() => handleToggleTaskPriority(category.id, task.id)}
+                              className={`inline-flex items-center px-1.5 py-0.2 rounded text-[8.5px] font-bold uppercase tracking-wider cursor-pointer transition-all hover:opacity-80 ${
+                                (task.priority || (task.requirePhoto ? "High" : "Low")) === "High"
+                                  ? "bg-rose-50 text-rose-700 border border-rose-200"
+                                  : "bg-slate-100 text-slate-600 border border-slate-200"
+                              }`}
+                              title="Klik untuk mengubah prioritas (High / Low)"
+                            >
+                              {(task.priority || (task.requirePhoto ? "High" : "Low")) === "High"
+                                ? "Priority High"
+                                : "Priority Low"}
+                            </button>
+                          </div>
 
                           {/* Delete Task Button */}
                           <button
@@ -676,6 +726,7 @@ export default function EditTemplate({
         <button
           type="button"
           onClick={handleBack}
+          disabled={isSubmitting}
           className="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer shadow-2xs"
         >
           Batal
@@ -683,10 +734,15 @@ export default function EditTemplate({
         <button
           type="button"
           onClick={handleSaveTemplate}
-          className="inline-flex items-center gap-2 px-5 py-2 bg-[#193f53] hover:bg-[#123040] text-white rounded-xl text-xs font-semibold transition-all shadow-md cursor-pointer"
+          disabled={isSubmitting}
+          className="inline-flex items-center gap-2 px-5 py-2 bg-[#193f53] hover:bg-[#123040] text-white rounded-xl text-xs font-semibold transition-all shadow-md cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          <BookmarkCheck className="w-4 h-4" />
-          <span>Simpan Perubahan</span>
+          {isSubmitting ? (
+            <Loader2 className="w-4 h-4 animate-spin text-white" />
+          ) : (
+            <BookmarkCheck className="w-4 h-4" />
+          )}
+          <span>{isSubmitting ? "Menyimpan Perubahan..." : "Simpan Perubahan"}</span>
         </button>
       </div>
     </div>

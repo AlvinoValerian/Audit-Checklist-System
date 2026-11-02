@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { X, RotateCcw, CheckCircle2 } from "lucide-react";
+import { X, RotateCcw, CheckCircle2, Loader2 } from "lucide-react";
 import { TemplateItem } from "@/types/template";
 
 interface RestoreTemplateModalProps {
@@ -9,6 +9,7 @@ interface RestoreTemplateModalProps {
   template: TemplateItem | null;
   onClose: () => void;
   onConfirm: () => void;
+  isSubmitting?: boolean;
 }
 
 export default function RestoreTemplateModal({
@@ -16,6 +17,7 @@ export default function RestoreTemplateModal({
   template,
   onClose,
   onConfirm,
+  isSubmitting = false,
 }: RestoreTemplateModalProps) {
   if (!isOpen || !template) return null;
 
@@ -24,7 +26,7 @@ export default function RestoreTemplateModal({
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-slate-900/40 backdrop-blur-xs transition-opacity"
-        onClick={onClose}
+        onClick={isSubmitting ? undefined : onClose}
       />
 
       {/* Modal Card */}
@@ -33,8 +35,9 @@ export default function RestoreTemplateModal({
         <div className="p-6 pb-3 relative">
           <button
             onClick={onClose}
+            disabled={isSubmitting}
             type="button"
-            className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 transition-colors p-1 rounded-lg hover:bg-slate-100 cursor-pointer"
+            className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors p-1 rounded-lg hover:bg-slate-100 cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -95,16 +98,28 @@ export default function RestoreTemplateModal({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200/60 rounded-lg transition-colors cursor-pointer"
+            disabled={isSubmitting}
+            className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200/60 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors cursor-pointer"
           >
             Batal
           </button>
           <button
             type="button"
             onClick={onConfirm}
-            className="px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors shadow-2xs cursor-pointer"
+            disabled={isSubmitting}
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors shadow-2xs cursor-pointer"
           >
-            Ya, Aktifkan Kembali
+            {isSubmitting ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Mengaktifkan...</span>
+              </>
+            ) : (
+              <>
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Ya, Aktifkan Kembali</span>
+              </>
+            )}
           </button>
         </div>
       </div>

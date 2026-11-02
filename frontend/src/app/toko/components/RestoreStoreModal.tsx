@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { X, RotateCcw, Info, Store } from "lucide-react";
+import { X, RotateCcw, Info, Loader2 } from "lucide-react";
 import { StoreItem } from "@/types/toko";
 
 interface RestoreStoreModalProps {
@@ -9,6 +9,7 @@ interface RestoreStoreModalProps {
   store: StoreItem | null;
   onClose: () => void;
   onConfirm: () => void;
+  isSubmitting?: boolean;
 }
 
 export default function RestoreStoreModal({
@@ -16,6 +17,7 @@ export default function RestoreStoreModal({
   store,
   onClose,
   onConfirm,
+  isSubmitting = false,
 }: RestoreStoreModalProps) {
   if (!isOpen || !store) return null;
 
@@ -24,7 +26,7 @@ export default function RestoreStoreModal({
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-slate-900/40 backdrop-blur-xs transition-opacity"
-        onClick={onClose}
+        onClick={isSubmitting ? undefined : onClose}
       />
 
       {/* Modal Card */}
@@ -33,8 +35,9 @@ export default function RestoreStoreModal({
         <div className="p-6 pb-3 relative">
           <button
             onClick={onClose}
+            disabled={isSubmitting}
             type="button"
-            className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 transition-colors p-1 rounded-lg hover:bg-slate-100 cursor-pointer"
+            className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors p-1 rounded-lg hover:bg-slate-100 cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -125,17 +128,28 @@ export default function RestoreStoreModal({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 bg-white border border-slate-200 text-slate-700 font-semibold text-xs rounded-lg hover:bg-slate-50 transition-colors cursor-pointer"
+            disabled={isSubmitting}
+            className="px-4 py-2 bg-white border border-slate-200 text-slate-700 font-semibold text-xs rounded-lg hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
           >
             Batal
           </button>
           <button
             type="button"
             onClick={onConfirm}
-            className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs rounded-lg transition-colors shadow-2xs cursor-pointer"
+            disabled={isSubmitting}
+            className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold text-xs rounded-lg transition-colors shadow-2xs cursor-pointer"
           >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span>Ya, Aktifkan Kembali Toko</span>
+            {isSubmitting ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Mengaktifkan...</span>
+              </>
+            ) : (
+              <>
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Ya, Aktifkan Kembali Toko</span>
+              </>
+            )}
           </button>
         </div>
       </div>

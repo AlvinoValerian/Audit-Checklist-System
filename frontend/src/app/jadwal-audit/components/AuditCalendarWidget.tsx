@@ -120,8 +120,8 @@ export default function AuditCalendarWidget({
     const hasCompleted = daySchedules.some((s) => s.status === "Selesai");
     const hasCancelled = daySchedules.some((s) => s.status === "Dibatalkan");
 
-    if (hasScheduled && !hasCompleted) dots.push("bg-purple-500");
     if (hasCompleted) dots.push("bg-emerald-500");
+    if (hasScheduled) dots.push("bg-purple-500");
     if (hasCancelled) dots.push("bg-rose-500");
     return dots;
   };
@@ -159,7 +159,10 @@ export default function AuditCalendarWidget({
         }`}
       >
         <CalendarIcon className="w-5 h-5" />
-        <div className="absolute top-3 right-3 w-2 h-2 rounded-full bg-emerald-500 border border-white"></div>
+        <div className="absolute top-2.5 right-2.5 flex items-center gap-0.5">
+          {totalCompleted > 0 && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 border border-white" />}
+          {totalScheduled > 0 && <span className="w-1.5 h-1.5 rounded-full bg-purple-500 border border-white" />}
+        </div>
       </div>
 
       {/* Full Calendar State (Visible only when expanded) */}
@@ -235,20 +238,18 @@ export default function AuditCalendarWidget({
                 }}
                 className={`h-7 w-7 mx-auto text-[11px] font-medium relative flex flex-col items-center justify-center cursor-pointer transition-colors rounded-lg ${
                   isSelected
-                    ? "text-[#193f53] font-bold bg-sky-100/60"
+                    ? "text-[#193f53] font-bold bg-sky-100/70 ring-1.5 ring-[#193f53]/30"
                     : "text-slate-800 hover:text-blue-600 hover:bg-slate-50"
                 }`}
               >
                 <span>{day}</span>
-                {isSelected ? (
-                  <div className="absolute -bottom-1 w-3 h-0.5 bg-[#193f53] rounded-full"></div>
-                ) : dots.length > 0 ? (
+                {dots.length > 0 && (
                   <div className="absolute -bottom-1 flex items-center justify-center gap-0.5">
                     {dots.map((colorClass, idx) => (
                       <div key={idx} className={`w-1 h-1 rounded-full ${colorClass}`} />
                     ))}
                   </div>
-                ) : null}
+                )}
               </div>
             );
           })}

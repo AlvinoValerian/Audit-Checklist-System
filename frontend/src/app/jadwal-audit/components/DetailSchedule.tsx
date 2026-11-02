@@ -12,6 +12,7 @@ import {
   Pencil,
 } from "lucide-react";
 import { AuditSchedule } from "@/types/schedule";
+import { isScheduleInProgress } from "@/services/schedule.service";
 
 interface DetailScheduleProps {
   schedule: AuditSchedule;
@@ -123,6 +124,14 @@ export default function DetailSchedule({
 
         {/* Content Body */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5 bg-white">
+          {isScheduleInProgress(schedule) && (
+            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs flex items-center gap-2.5">
+              <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping shrink-0" />
+              <span className="font-medium">
+                <strong>Audit Sedang Berlangsung:</strong> Jadwal audit ini sedang berjalan pada jam dan hari ini ({schedule.timeRange || ""}). Jadwal tidak dapat diedit selama audit berlangsung demi integritas data.
+              </span>
+            </div>
+          )}
           {/* 1. NAMA JADWAL */}
           <div>
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 block">
@@ -183,9 +192,7 @@ export default function DetailSchedule({
               </div>
               <div className="min-w-0">
                 <p className="text-xs font-bold text-slate-900 leading-snug">
-                  {schedule.scheduleName.includes("Checklist")
-                    ? `${schedule.scheduleName} (18 Butir)`
-                    : `Checklist Operasional Harian (18 Butir)`}
+                  {schedule.templateName || schedule.scheduleName}
                 </p>
                 <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
                   Kebersihan, display produk, kepatuhan kasir, dan standar keamanan.
@@ -307,11 +314,17 @@ export default function DetailSchedule({
           {onEdit && (
             <button
               type="button"
-              onClick={onEdit}
-              className="px-5 py-2.5 rounded-xl bg-[#193f53] hover:bg-[#123040] text-xs font-semibold text-white flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer"
+              onClick={isScheduleInProgress(schedule) ? undefined : onEdit}
+              disabled={isScheduleInProgress(schedule)}
+              title={isScheduleInProgress(schedule) ? "Jadwal sedang berlangsung saat ini. Tidak dapat diedit selama audit berlangsung." : "Edit Jadwal"}
+              className={`px-5 py-2.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-all ${
+                isScheduleInProgress(schedule)
+                  ? "bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed"
+                  : "bg-[#193f53] hover:bg-[#123040] text-white cursor-pointer"
+              }`}
             >
               <Pencil className="w-3.5 h-3.5" />
-              <span>Edit Jadwal</span>
+              <span>{isScheduleInProgress(schedule) ? "Sedang Berlangsung (Terkunci)" : "Edit Jadwal"}</span>
             </button>
           )}
         </footer>

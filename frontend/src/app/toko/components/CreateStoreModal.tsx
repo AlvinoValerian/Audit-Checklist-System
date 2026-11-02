@@ -31,6 +31,8 @@ const AuditPointPickerMap = dynamic(
 );
 
 interface CreateStoreModalProps {
+  workspaceName?: string;
+  workspaceId?: string;
   isOpen: boolean;
   onClose: () => void;
   onSubmit: (storeData: Omit<StoreItem, "id">) => void;
@@ -45,6 +47,8 @@ const TIMEZONE_OPTIONS = [
 const RADIUS_PRESETS = [100, 150, 200];
 
 export default function CreateStoreModal({
+  workspaceName = "Workspace",
+  workspaceId,
   isOpen,
   onClose,
   onSubmit,
@@ -64,6 +68,7 @@ export default function CreateStoreModal({
 
   // Photo Upload State
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   // Locating State
   const [isLocating, setIsLocating] = useState<boolean>(false);
@@ -185,7 +190,7 @@ export default function CreateStoreModal({
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!name.trim()) {
@@ -205,21 +210,28 @@ export default function CreateStoreModal({
 
     const matchedTz = TIMEZONE_OPTIONS.find((t) => t.value === timezone);
 
-    onSubmit({
-      name: name.trim(),
-      city: city.trim(),
-      address: address.trim(),
-      timezone,
-      timezoneLabel: matchedTz?.label || `${timezone} - Asia/Jakarta`,
-      geofenceRadius,
-      latitude,
-      longitude,
-      operationalHours: "Setiap hari • 10:00 - 22:00 WIB",
-      description: description.trim() || undefined,
-      findingsCount: 0,
-      status: isActive ? "Aktif" : "Nonaktif",
-      workspace: "Workspace A",
-    });
+    setIsSubmitting(true);
+    try {
+      await onSubmit({
+        name: name.trim(),
+        city: city.trim(),
+        address: address.trim(),
+        timezone,
+        timezoneLabel: matchedTz?.label || `${timezone} - Asia/Jakarta`,
+        geofenceRadius,
+        latitude,
+        longitude,
+        operationalHours: "Setiap hari • 10:00 - 22:00 WIB",
+        description: description.trim() || undefined,
+        findingsCount: 0,
+        status: isActive ? "Aktif" : "Nonaktif",
+        workspace: workspaceName,
+        workspaceId: workspaceId,
+        storePicture: photoPreview || undefined,
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -232,7 +244,7 @@ export default function CreateStoreModal({
               Tambah Data Toko
             </h3>
             <p className="text-xs text-slate-400 mt-1 font-normal">
-              Tambahkan toko baru ke dalam Workspace A beserta titik koordinat audit presisi.
+              Tambahkan toko baru ke dalam {workspaceName} beserta titik koordinat audit presisi.
             </p>
           </div>
           <button
@@ -360,11 +372,10 @@ export default function CreateStoreModal({
                             key={preset}
                             type="button"
                             onClick={() => setGeofenceRadius(preset)}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                              isSelected
+                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${isSelected
                                 ? "bg-[#eef6ff] text-[#1d4ed8] border border-[#bfdbfe] shadow-2xs"
                                 : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
-                            }`}
+                              }`}
                           >
                             {preset}m
                           </button>
@@ -454,14 +465,12 @@ export default function CreateStoreModal({
                     role="switch"
                     aria-checked={isActive}
                     onClick={() => setIsActive(!isActive)}
-                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      isActive ? "bg-[#1d4ed8]" : "bg-slate-300"
-                    }`}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${isActive ? "bg-[#1d4ed8]" : "bg-slate-300"
+                      }`}
                   >
                     <span
-                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                        isActive ? "translate-x-5" : "translate-x-0"
-                      }`}
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${isActive ? "translate-x-5" : "translate-x-0"
+                        }`}
                     />
                   </button>
                 </div>
@@ -567,9 +576,14 @@ export default function CreateStoreModal({
             <button
               type="submit"
               form="create-store-form"
-              className="flex items-center gap-1.5 px-6 py-2 text-xs sm:text-sm font-semibold text-white bg-[#193f53] hover:bg-[#123040] rounded-xl transition-all shadow-sm cursor-pointer"
+              disabled={isSubmitting}
+              className="flex items-center gap-1.5 px-6 py-2 text-xs sm:text-sm font-semibold text-white bg-[#193f53] hover:bg-[#123040] rounded-xl transition-all shadow-sm cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              <Check className="w-4 h-4" />
+              {isSubmitting ? (
+                <Loader2 className="w-4 h-4 animate-spin text-white" />
+              ) : (
+                <Check className="w-4 h-4" />
+              )}
               <span>Simpan Toko</span>
             </button>
           </div>

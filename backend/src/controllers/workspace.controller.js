@@ -1,10 +1,11 @@
 const prisma = require('../config/prisma');
+const { extractUser } = require('../middlewares/auth.middleware');
 
 // Helper to format workspace data for frontend
 const formatWorkspace = (ws) => {
   return {
     id: ws.workspace_id.toString(),
-    workspace_id: ws.workspace_id,
+    workspace_id: ws.workspace_id.toString(),
     name: ws.company_name,
     companyName: ws.company_name,
     category: ws.category || 'Retail',
@@ -30,9 +31,29 @@ const formatWorkspace = (ws) => {
 };
 
 // GET /api/workspaces
+// HANYA menampilkan workspace yang berelasi dengan user (Super Admin) yang sedang login
 exports.getAllWorkspaces = async (req, res) => {
   try {
+    const user = await extractUser(req);
+    const where = {};
+
+    if (user && user.role === 'Super Admin' && user.rawId) {
+      where.super_admin_id = BigInt(user.rawId);
+    } else if (user && user.role === 'Admin' && user.workspaceId) {
+      where.workspace_id = BigInt(user.workspaceId);
+    } else if (req.query.superAdminId) {
+      const sId = req.query.superAdminId.toString().replace(/^sa-/, '');
+      where.super_admin_id = BigInt(sId);
+    } else {
+      // Jika belum terotentikasi, tidak boleh menampilkan data milik Super Admin lain
+      return res.status(200).json({
+        status: 'success',
+        data: [],
+      });
+    }
+
     const workspaces = await prisma.workspace.findMany({
+      where,
       include: {
         store: true,
         admin: {
@@ -71,10 +92,17 @@ exports.getAllWorkspaces = async (req, res) => {
 exports.getWorkspaceById = async (req, res) => {
   try {
     const { id } = req.params;
-    const workspace = await prisma.workspace.findUnique({
-      where: {
-        workspace_id: BigInt(id),
-      },
+    const user = await extractUser(req);
+    const where = { workspace_id: BigInt(id) };
+
+    if (user && user.role === 'Super Admin' && user.rawId) {
+      where.super_admin_id = BigInt(user.rawId);
+    } else if (user && user.role === 'Admin' && user.workspaceId) {
+      where.workspace_id = BigInt(user.workspaceId);
+    }
+
+    const workspace = await prisma.workspace.findFirst({
+      where,
       include: {
         store: true,
         admin: true,
@@ -84,7 +112,7 @@ exports.getWorkspaceById = async (req, res) => {
     if (!workspace) {
       return res.status(404).json({
         status: 'error',
-        message: 'Workspace tidak ditemukan',
+        message: 'Workspace tidak ditemukan atau Anda tidak memiliki akses.',
       });
     }
 
@@ -105,6 +133,7 @@ exports.getWorkspaceById = async (req, res) => {
 // POST /api/workspaces
 exports.createWorkspace = async (req, res) => {
   try {
+    console.log('📥 [POST /api/workspaces] Menerima data baru:', req.body);
     const {
       companyName,
       name,
@@ -117,6 +146,16 @@ exports.createWorkspace = async (req, res) => {
       superAdminId,
     } = req.body;
 
+    const user = await extractUser(req);
+    const targetSuperAdminId = user?.rawId || superAdminId || req.query.superAdminId;
+
+    if (!targetSuperAdminId) {
+      return res.status(401).json({
+        status: 'error',
+        message: 'Otentikasi diperlukan. Akun Super Admin tidak teridentifikasi.',
+      });
+    }
+
     const finalCompanyName = companyName || name;
     if (!finalCompanyName || !finalCompanyName.trim()) {
       return res.status(400).json({
@@ -125,27 +164,16 @@ exports.createWorkspace = async (req, res) => {
       });
     }
 
-    // Ensure valid super_admin_id exists
-    let superAdmin = null;
-    if (superAdminId) {
-      superAdmin = await prisma.super_admin.findUnique({
-        where: { super_admin_id: BigInt(superAdminId) },
-      });
-    }
+    const cleanSaId = BigInt(targetSuperAdminId.toString().replace(/^sa-/, ''));
+    const superAdmin = await prisma.super_admin.findUnique({
+      where: { super_admin_id: cleanSaId },
+    });
 
     if (!superAdmin) {
-      superAdmin = await prisma.super_admin.findFirst();
-      if (!superAdmin) {
-        // Create a default super_admin if table is empty
-        superAdmin = await prisma.super_admin.create({
-          data: {
-            email: 'superadmin@auditpro.com',
-            name: 'Super Admin',
-            password: 'hashedpassword',
-            company_name: 'Audit Pro System',
-          },
-        });
-      }
+      return res.status(404).json({
+        status: 'error',
+        message: 'Akun Super Admin tidak ditemukan di database.',
+      });
     }
 
     const newWorkspace = await prisma.workspace.create({
@@ -165,16 +193,18 @@ exports.createWorkspace = async (req, res) => {
       },
     });
 
+    console.log('✅ [POST /api/workspaces] Berhasil membuat workspace:', newWorkspace.company_name);
+
     return res.status(201).json({
       status: 'success',
       message: 'Workspace berhasil ditambahkan',
       data: formatWorkspace(newWorkspace),
     });
   } catch (error) {
-    console.error('Error creating workspace:', error);
+    console.error('❌ Error creating workspace:', error);
     return res.status(500).json({
       status: 'error',
-      message: 'Gagal membuat workspace',
+      message: error.message || 'Gagal membuat workspace',
       error: error.message,
     });
   }
@@ -184,6 +214,25 @@ exports.createWorkspace = async (req, res) => {
 exports.updateWorkspace = async (req, res) => {
   try {
     const { id } = req.params;
+    const user = await extractUser(req);
+    const workspaceId = BigInt(id);
+
+    // Cek kepemilikan workspace jika diakses oleh Super Admin
+    if (user && user.role === 'Super Admin' && user.rawId) {
+      const existing = await prisma.workspace.findFirst({
+        where: {
+          workspace_id: workspaceId,
+          super_admin_id: BigInt(user.rawId),
+        },
+      });
+      if (!existing) {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Anda tidak memiliki hak akses untuk mengubah workspace ini.',
+        });
+      }
+    }
+
     const {
       companyName,
       name,
@@ -210,7 +259,7 @@ exports.updateWorkspace = async (req, res) => {
     }
 
     const updated = await prisma.workspace.update({
-      where: { workspace_id: BigInt(id) },
+      where: { workspace_id: workspaceId },
       data: updateData,
       include: {
         store: true,
@@ -237,8 +286,27 @@ exports.updateWorkspace = async (req, res) => {
 exports.deleteWorkspace = async (req, res) => {
   try {
     const { id } = req.params;
+    const user = await extractUser(req);
+    const workspaceId = BigInt(id);
+
+    // Cek kepemilikan workspace
+    if (user && user.role === 'Super Admin' && user.rawId) {
+      const existing = await prisma.workspace.findFirst({
+        where: {
+          workspace_id: workspaceId,
+          super_admin_id: BigInt(user.rawId),
+        },
+      });
+      if (!existing) {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Anda tidak memiliki hak akses untuk menghapus workspace ini.',
+        });
+      }
+    }
+
     await prisma.workspace.delete({
-      where: { workspace_id: BigInt(id) },
+      where: { workspace_id: workspaceId },
     });
 
     return res.status(200).json({

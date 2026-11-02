@@ -1,20 +1,22 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Settings, User } from "lucide-react";
 import { usePathname } from "next/navigation";
 import ProfileModal from "./ProfileModal";
 import { AuthService } from "@/lib/auth";
+import { CryptoService } from "@/lib/crypto";
+import { WorkspaceService } from "@/services/workspace.service";
 
 interface TopBarProps {
   workspaceName?: string;
   adminName?: string;
   adminRole?: string;
+  adminEmail?: string;
 }
 
 function getInitials(name: string): string {
-  if (!name) return "AD";
-  if (name === "Admin Utama") return "AD";
+  if (!name || name === "Admin Utama" || name === "Admin") return "";
   const parts = name.trim().split(/\s+/);
   if (parts.length >= 2) {
     return (parts[0][0] + parts[1][0]).toUpperCase();
@@ -23,37 +25,128 @@ function getInitials(name: string): string {
 }
 
 export default function TopBar({
-  workspaceName = "WORKSPACE A",
-  adminName: defaultAdminName = "Admin Utama",
-  adminRole = "Head Auditor",
+  workspaceName: propWorkspaceName,
+  adminName: propAdminName,
+  adminRole: propAdminRole,
+  adminEmail: propAdminEmail,
 }: TopBarProps) {
   const pathname = usePathname();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
-  const [currentAdminName, setCurrentAdminName] = useState(defaultAdminName);
+
+  // Dynamic user data states (start empty to prevent flashing static/dummy values)
+  const [currentAdminName, setCurrentAdminName] = useState("");
+  const [currentAdminRole, setCurrentAdminRole] = useState("");
+  const [currentAdminEmail, setCurrentAdminEmail] = useState("");
+  const [currentWorkspaceName, setCurrentWorkspaceName] = useState("");
   const [avatar, setAvatar] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Sync logged in admin name and avatar
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const currentUser = AuthService.getCurrentUser();
-      const storedName = localStorage.getItem("audit_pro_admin_name");
-      const storedAvatar = localStorage.getItem("audit_pro_avatar");
+  // Sync logged in user data, active workspace, and profile avatar
+  const syncUserData = useCallback(() => {
+    if (typeof window === "undefined") return;
 
-      if (storedName) {
-        setCurrentAdminName(storedName);
-      } else if (currentUser?.fullName) {
-        setCurrentAdminName(currentUser.fullName);
+    // 1. Sanitize stale mock data in localStorage from previous sessions
+    const storedName = localStorage.getItem("audit_pro_admin_name");
+    if (storedName === "Admin Utama" || storedName === "Admin") {
+      localStorage.removeItem("audit_pro_admin_name");
+    }
+
+    const activeWs = AuthService.getActiveWorkspace();
+    if (activeWs?.name === "WORKSPACE A" || activeWs?.name === "Workspace A") {
+      localStorage.removeItem("audit_pro_active_workspace");
+    }
+
+    const currentUser = AuthService.getCurrentUser();
+    const validStoredName = localStorage.getItem("audit_pro_admin_name");
+    const storedAvatar = localStorage.getItem("audit_pro_avatar") || currentUser?.profilePicture;
+
+    // Profile Name
+    const resolvedName =
+      validStoredName ||
+      currentUser?.fullName ||
+      propAdminName ||
+      "";
+    setCurrentAdminName(resolvedName);
+
+    // Profile Role
+    const resolvedRole =
+      currentUser?.role ||
+      propAdminRole ||
+      "";
+    setCurrentAdminRole(resolvedRole);
+
+    // Profile Email
+    const resolvedEmail =
+      currentUser?.email ||
+      propAdminEmail ||
+      "";
+    setCurrentAdminEmail(resolvedEmail);
+
+    // Active Workspace Name
+    const currentActiveWs = AuthService.getActiveWorkspace();
+    if (currentActiveWs?.name && currentActiveWs.name !== "WORKSPACE A" && currentActiveWs.name !== "Workspace A") {
+      setCurrentWorkspaceName(currentActiveWs.name);
+    } else if (currentUser?.workspaceName && currentUser.workspaceName !== "WORKSPACE A" && currentUser.workspaceName !== "Workspace A") {
+      setCurrentWorkspaceName(currentUser.workspaceName);
+    } else if (propWorkspaceName && propWorkspaceName !== "WORKSPACE A" && propWorkspaceName !== "Workspace A") {
+      setCurrentWorkspaceName(propWorkspaceName);
+    } else if (currentUser?.role === "Super Admin") {
+      // Auto-fetch real workspace for Super Admin if none active yet
+      WorkspaceService.fetchAll().then((wsList) => {
+        if (Array.isArray(wsList) && wsList.length > 0) {
+          const firstWs = wsList[0];
+          const wsName = firstWs.companyName || firstWs.name;
+          setCurrentWorkspaceName(wsName);
+          AuthService.setActiveWorkspace({
+            id: firstWs.id,
+            name: wsName,
+          });
+        } else if (currentUser?.companyName) {
+          setCurrentWorkspaceName(currentUser.companyName);
+        } else {
+          setCurrentWorkspaceName("");
+        }
+      }).catch(() => {
+        if (currentUser?.companyName) {
+          setCurrentWorkspaceName(currentUser.companyName);
+        } else {
+          setCurrentWorkspaceName("");
+        }
+      });
+    } else if (currentUser?.companyName) {
+      setCurrentWorkspaceName(currentUser.companyName);
+    } else {
+      setCurrentWorkspaceName("");
+    }
+
+    // Avatar
+    if (storedAvatar) {
+      if (CryptoService.isEncrypted(storedAvatar)) {
+        CryptoService.decryptImage(storedAvatar)
+          .then((dec) => setAvatar(dec))
+          .catch(() => setAvatar(null));
       } else {
-        setCurrentAdminName(defaultAdminName);
-      }
-
-      if (storedAvatar) {
         setAvatar(storedAvatar);
       }
+    } else {
+      setAvatar(null);
     }
-  }, [defaultAdminName]);
+  }, [propAdminName, propAdminRole, propAdminEmail, propWorkspaceName]);
+
+  useEffect(() => {
+    syncUserData();
+
+    window.addEventListener("workspace-changed", syncUserData);
+    window.addEventListener("auth-changed", syncUserData);
+    window.addEventListener("storage", syncUserData);
+
+    return () => {
+      window.removeEventListener("workspace-changed", syncUserData);
+      window.removeEventListener("auth-changed", syncUserData);
+      window.removeEventListener("storage", syncUserData);
+    };
+  }, [syncUserData]);
 
   // Close dropdown on outside click or Escape key
   useEffect(() => {
@@ -93,10 +186,10 @@ export default function TopBar({
   return (
     <>
       <div className="w-full bg-white border-b border-slate-200 px-4 sm:px-6 lg:px-8 py-3 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-30 hidden md:flex">
-        {/* Workspace Pill (Sembunyikan pada halaman superadmin seperti workspace dan kelola admin) */}
-        {!isSuperAdminPage ? (
+        {/* Workspace Pill (Hanya tampil jika ada workspace terpilih dan bukan pada halaman konfigurasi superadmin) */}
+        {!isSuperAdminPage && currentWorkspaceName ? (
           <div className="inline-flex items-center px-2.5 py-1 rounded-full bg-[#f0f5ff] border border-[#d6e4ff] text-[#1e4ed8] text-[10px] font-bold tracking-wider uppercase">
-            {workspaceName}
+            {currentWorkspaceName}
           </div>
         ) : (
           <div />
@@ -161,20 +254,24 @@ export default function TopBar({
               {avatar ? (
                 <img
                   src={avatar}
-                  alt={currentAdminName}
+                  alt={currentAdminName || "Avatar"}
                   className="w-full h-full object-cover"
                 />
-              ) : (
+              ) : getInitials(currentAdminName) ? (
                 <span>{getInitials(currentAdminName)}</span>
+              ) : (
+                <User className="w-4 h-4 text-[#1d4ed8]" />
               )}
             </div>
             <div className="text-left">
               <p className="text-xs font-bold text-slate-900 group-hover:text-[#193f53] leading-tight transition-colors">
-                {currentAdminName}
+                {currentAdminName || "Pengguna"}
               </p>
-              <p className="text-[10px] text-slate-400 group-hover:text-slate-500 font-normal mt-0.5 transition-colors">
-                {adminRole}
-              </p>
+              {currentAdminRole ? (
+                <p className="text-[10px] text-slate-400 group-hover:text-slate-500 font-normal mt-0.5 transition-colors">
+                  {currentAdminRole}
+                </p>
+              ) : null}
             </div>
           </button>
         </div>
@@ -185,12 +282,22 @@ export default function TopBar({
         isOpen={isProfileModalOpen}
         onClose={() => setIsProfileModalOpen(false)}
         adminName={currentAdminName}
-        adminRole={adminRole}
-        workspaceName={workspaceName}
+        adminRole={currentAdminRole}
+        adminEmail={currentAdminEmail}
+        workspaceName={currentWorkspaceName}
         avatarUrl={avatar}
         onUpdateProfile={({ name, avatar: newAvatar }) => {
-          if (name) setCurrentAdminName(name);
-          if (newAvatar !== undefined) setAvatar(newAvatar);
+          if (name) {
+            setCurrentAdminName(name);
+            localStorage.setItem("audit_pro_admin_name", name);
+            const user = AuthService.getCurrentUser();
+            if (user) {
+              AuthService.setCurrentUser({ ...user, fullName: name });
+            }
+          }
+          if (newAvatar !== undefined) {
+            setAvatar(newAvatar);
+          }
         }}
       />
     </>

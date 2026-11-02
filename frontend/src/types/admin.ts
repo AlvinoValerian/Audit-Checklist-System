@@ -4,7 +4,7 @@ export interface AdminUser {
   id: string;
   fullName: string;
   email: string;
-  phone: string;
+  phone?: string;
   role: AdminRole;
   workspaceName: string;
   status: "Aktif" | "Nonaktif";

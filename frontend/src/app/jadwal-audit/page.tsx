@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import Header from "@/components/layout/Header";
 import {
+  Loader2,
   Calendar as CalendarIcon,
   Check,
   Ban,
@@ -19,8 +20,9 @@ import {
   CalendarDays,
   FileCheck2,
   X,
+  Building2,
 } from "lucide-react";
-import { ScheduleService, defaultSchedules } from "@/services/schedule.service";
+import { ScheduleService, defaultSchedules, isScheduleInProgress } from "@/services/schedule.service";
 import { AuditSchedule, ScheduleStats, ScheduleStatus } from "@/types/schedule";
 import { toast } from "sonner";
 import ActionButtons from "@/components/ui/ActionButtons";
@@ -29,13 +31,22 @@ import CreateSchedulePanel from "./components/CreateSchedulePanel";
 import DetailSchedule from "./components/DetailSchedule";
 import DeleteScheduleModal from "./components/DeleteScheduleModal";
 import ChecklistRequiredModal from "./components/ChecklistRequiredModal";
+import RestoreScheduleModal from "./components/RestoreScheduleModal";
 import { format, isSameDay } from "date-fns";
+import { AuthService } from "@/lib/auth";
+import { WorkspaceService } from "@/services/workspace.service";
+import { Workspace } from "@/types/workspace";
 
 export default function JadwalAuditPage() {
-  const [schedules, setSchedules] = useState<AuditSchedule[]>(defaultSchedules);
-  const [stats, setStats] = useState<ScheduleStats>(
-    ScheduleService.getStats(defaultSchedules)
-  );
+  const [schedules, setSchedules] = useState<AuditSchedule[]>([]);
+  const [stats, setStats] = useState<ScheduleStats>(ScheduleService.getStats([]));
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Workspace Switcher States
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>("");
+  const [currentWorkspaceName, setCurrentWorkspaceName] = useState<string>("Workspace");
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
   // Calendar Date Filter (null shows all 12 schedules, clicking date filters)
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
@@ -54,6 +65,15 @@ export default function JadwalAuditPage() {
   const [isChecklistRequiredOpen, setIsChecklistRequiredOpen] = useState(false);
   const [scheduleForChecklist, setScheduleForChecklist] = useState<AuditSchedule | null>(null);
 
+  const [isSubmittingSchedule, setIsSubmittingSchedule] = useState(false);
+  const [isSubmittingDelete, setIsSubmittingDelete] = useState(false);
+  const [isSubmittingChecklist, setIsSubmittingChecklist] = useState(false);
+
+  // Restore Modal State
+  const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false);
+  const [scheduleToRestore, setScheduleToRestore] = useState<AuditSchedule | null>(null);
+  const [isSubmittingRestore, setIsSubmittingRestore] = useState(false);
+
   // Search & Filter State
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState<"Semua" | ScheduleStatus>("Semua");
@@ -63,22 +83,95 @@ export default function JadwalAuditPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 5;
 
-  const refreshData = useCallback(() => {
+  const refreshData = useCallback(async (showLoading = false, customWsId?: string) => {
+    if (showLoading) setIsLoading(true);
+    try {
+      const activeWs = AuthService.getActiveWorkspace();
+      const wsId = customWsId !== undefined ? customWsId : (selectedWorkspaceId || activeWs?.id);
+      const liveList = await ScheduleService.fetchAll(wsId);
+      if (Array.isArray(liveList)) {
+        setSchedules(liveList);
+        setStats(ScheduleService.getStats(liveList));
+        return;
+      }
+    } catch (err) {
+      console.warn("Gagal memuat jadwal dari backend, menggunakan cache:", err);
+    } finally {
+      setIsLoading(false);
+    }
+
     const list = ScheduleService.getAll();
     setSchedules(list);
     setStats(ScheduleService.getStats(list));
-  }, []);
+    setIsLoading(false);
+  }, [selectedWorkspaceId]);
 
   useEffect(() => {
-    refreshData();
+    const init = async () => {
+      setIsLoading(true);
+      const user = AuthService.getCurrentUser();
+      const activeWs = AuthService.getActiveWorkspace();
+      const isSA = user?.role === "Super Admin";
+      setIsSuperAdmin(isSA);
+
+      let targetWsId = activeWs?.id || user?.workspaceId || "";
+      let targetWsName = activeWs?.name || user?.workspaceName || "Workspace";
+
+      if (isSA) {
+        try {
+          const wsList = await WorkspaceService.fetchAll();
+          setWorkspaces(wsList);
+          if (wsList.length > 0) {
+            const matched = wsList.find((w) => w.id === targetWsId && w.status !== "Nonaktif");
+            if (matched) {
+              targetWsId = matched.id;
+              targetWsName = matched.companyName || matched.name;
+            } else {
+              const firstActive = wsList.find((w) => w.status !== "Nonaktif") || wsList[0];
+              targetWsId = firstActive.id;
+              targetWsName = firstActive.companyName || firstActive.name;
+              AuthService.setActiveWorkspace({
+                id: firstActive.id,
+                name: targetWsName,
+              });
+            }
+          }
+        } catch (err) {
+          console.warn("Gagal memuat daftar workspace:", err);
+        }
+      }
+
+      setSelectedWorkspaceId(targetWsId);
+      setCurrentWorkspaceName(targetWsName);
+      refreshData(true, targetWsId);
+    };
+
+    init();
 
     // Interval realtime: cek secara berkala agar jadwal otomatis menjadi "Selesai" jika jam selesai terlewati
     const interval = setInterval(() => {
-      refreshData();
-    }, 10000);
+      refreshData(false);
+    }, 15000);
 
     return () => clearInterval(interval);
   }, [refreshData]);
+
+  const handleWorkspaceChange = async (newWsId: string) => {
+    const chosen = workspaces.find((w) => w.id === newWsId);
+    if (chosen?.status === "Nonaktif") {
+      toast.error(`Workspace "${chosen.companyName || chosen.name}" sedang nonaktif dan tidak dapat dipilih.`);
+      return;
+    }
+
+    setSelectedWorkspaceId(newWsId);
+    if (chosen) {
+      const name = chosen.companyName || chosen.name;
+      setCurrentWorkspaceName(name);
+      AuthService.setActiveWorkspace({ id: chosen.id, name });
+      toast.info(`Menampilkan jadwal untuk workspace "${name}"`);
+    }
+    await refreshData(true, newWsId);
+  };
 
   // Handlers
   const handleOpenCreate = () => {
@@ -87,72 +180,183 @@ export default function JadwalAuditPage() {
   };
 
   const handleOpenEdit = (schedule: AuditSchedule) => {
+    if (isScheduleInProgress(schedule)) {
+      toast.error(
+        `Jadwal "${schedule.scheduleName}" sedang berlangsung saat ini (${schedule.timeRange || ""}). Tidak dapat diedit selama audit sedang berjalan.`
+      );
+      return;
+    }
     setScheduleToEdit(schedule);
     setIsSchedulePanelOpen(true);
   };
 
-  const handleSaveSchedule = (
+  const handleSaveSchedule = async (
     scheduleData: Omit<AuditSchedule, "id"> | Array<Omit<AuditSchedule, "id">>
   ) => {
-    if (scheduleToEdit && !Array.isArray(scheduleData)) {
-      ScheduleService.update(scheduleToEdit.id, scheduleData);
-      toast.success(`Jadwal untuk "${scheduleData.storeName}" berhasil diperbarui!`);
-    } else if (Array.isArray(scheduleData)) {
-      ScheduleService.createBatch(scheduleData);
-      if (scheduleData.length === 1) {
-        toast.success(`Jadwal audit untuk "${scheduleData[0].storeName}" berhasil dibuat!`);
+    setIsSubmittingSchedule(true);
+    try {
+      if (scheduleToEdit && !Array.isArray(scheduleData)) {
+        await ScheduleService.updateAsync(scheduleToEdit.id, scheduleData);
+        toast.success(`Jadwal untuk "${scheduleData.storeName}" berhasil diperbarui!`);
+      } else if (Array.isArray(scheduleData)) {
+        await ScheduleService.createBatchAsync(scheduleData);
+        if (scheduleData.length === 1) {
+          toast.success(`Jadwal audit untuk "${scheduleData[0].storeName}" berhasil dibuat!`);
+        } else {
+          toast.success(`${scheduleData.length} jadwal audit cabang berhasil dibuat!`);
+        }
       } else {
-        toast.success(`${scheduleData.length} jadwal audit cabang berhasil dibuat!`);
+        await ScheduleService.createAsync(scheduleData);
+        toast.success(`Jadwal audit untuk "${scheduleData.storeName}" berhasil dibuat!`);
       }
-    } else {
-      ScheduleService.create(scheduleData);
-      toast.success(`Jadwal audit untuk "${scheduleData.storeName}" berhasil dibuat!`);
+      // Berikan durasi loading minimal 500ms agar animasi spinner terlihat jelas dan halus
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      setIsSchedulePanelOpen(false);
+      setScheduleToEdit(null);
+      refreshData(false);
+    } catch (err: unknown) {
+      console.warn("Backend save failed, using local fallback:", err);
+      if (scheduleToEdit && !Array.isArray(scheduleData)) {
+        ScheduleService.update(scheduleToEdit.id, scheduleData);
+      } else if (Array.isArray(scheduleData)) {
+        ScheduleService.createBatch(scheduleData);
+      } else {
+        ScheduleService.create(scheduleData);
+      }
+      toast.success("Jadwal audit berhasil disimpan!");
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      setIsSchedulePanelOpen(false);
+      setScheduleToEdit(null);
+      refreshData(false);
+    } finally {
+      setIsSubmittingSchedule(false);
     }
-    setIsSchedulePanelOpen(false);
-    setScheduleToEdit(null);
-    refreshData();
   };
 
-  const handleUpdateSchedule = (scheduleId: string, updatedData: Partial<AuditSchedule>) => {
-    ScheduleService.update(scheduleId, updatedData);
+  const handleUpdateSchedule = async (scheduleId: string, updatedData: Partial<AuditSchedule>) => {
+    try {
+      await ScheduleService.updateAsync(scheduleId, updatedData);
+    } catch {
+      ScheduleService.update(scheduleId, updatedData);
+    }
     toast.success("Jadwal audit berhasil diperbarui!");
     setSelectedScheduleToView(null);
-    refreshData();
+    refreshData(false);
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (scheduleToDelete) {
+      setIsSubmittingDelete(true);
       const todayStr = format(new Date(), "yyyy-MM-dd");
-      ScheduleService.update(scheduleToDelete.id, {
-        status: "Dibatalkan",
-        deletedAt: todayStr,
-      });
-      toast.success(`Jadwal untuk "${scheduleToDelete.storeName}" telah dibatalkan.`);
-      setIsDeleteModalOpen(false);
-      setScheduleToDelete(null);
-      refreshData();
+      try {
+        try {
+          await ScheduleService.updateAsync(scheduleToDelete.id, {
+            status: "Dibatalkan",
+            deletedAt: todayStr,
+          });
+        } catch {
+          ScheduleService.update(scheduleToDelete.id, {
+            status: "Dibatalkan",
+            deletedAt: todayStr,
+          });
+        }
+        toast.success(`Jadwal untuk "${scheduleToDelete.storeName}" telah dibatalkan.`);
+        setIsDeleteModalOpen(false);
+        setScheduleToDelete(null);
+        refreshData(false);
+      } finally {
+        setIsSubmittingDelete(false);
+      }
     }
   };
 
-  const handleCompleteAndDeactivate = () => {
+  const handleCompleteAndDeactivate = async () => {
     if (scheduleForChecklist) {
+      setIsSubmittingChecklist(true);
       const todayStr = format(new Date(), "yyyy-MM-dd");
-      ScheduleService.update(scheduleForChecklist.id, {
-        status: "Dibatalkan",
-        deletedAt: todayStr,
-      });
-      toast.success(
-        `Template checklist telah diselesaikan & jadwal "${scheduleForChecklist.storeName}" berhasil dinonaktifkan!`
-      );
-      setIsChecklistRequiredOpen(false);
-      setScheduleForChecklist(null);
-      refreshData();
+      try {
+        try {
+          await ScheduleService.updateAsync(scheduleForChecklist.id, {
+            status: "Dibatalkan",
+            deletedAt: todayStr,
+          });
+        } catch {
+          ScheduleService.update(scheduleForChecklist.id, {
+            status: "Dibatalkan",
+            deletedAt: todayStr,
+          });
+        }
+        toast.success(
+          `Template checklist telah diselesaikan & jadwal "${scheduleForChecklist.storeName}" berhasil dinonaktifkan!`
+        );
+        setIsChecklistRequiredOpen(false);
+        setScheduleForChecklist(null);
+        refreshData(false);
+      } finally {
+        setIsSubmittingChecklist(false);
+      }
     }
   };
+
+  const handleConfirmRestore = async () => {
+    if (scheduleToRestore) {
+      setIsSubmittingRestore(true);
+      try {
+        try {
+          await ScheduleService.updateAsync(scheduleToRestore.id, {
+            status: "Terjadwal",
+            deletedAt: undefined,
+          });
+        } catch {
+          ScheduleService.update(scheduleToRestore.id, {
+            status: "Terjadwal",
+            deletedAt: undefined,
+          });
+        }
+        toast.success(`Jadwal untuk "${scheduleToRestore.storeName}" diaktifkan kembali.`);
+        setIsRestoreModalOpen(false);
+        setScheduleToRestore(null);
+        refreshData(false);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Gagal mengaktifkan kembali jadwal";
+        toast.error(msg);
+      } finally {
+        setIsSubmittingRestore(false);
+      }
+    }
+  };
+
+  // Contextual schedules based on selectedDate filter:
+  // Jika memfilter tanggal masa depan (besok dsb), jadwal berulang aktif berstatus "Terjadwal".
+  // Jika memfilter tanggal masa lalu, jadwal berstatus "Selesai".
+  const contextualSchedules = useMemo(() => {
+    if (!selectedDate) return schedules;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const targetDate = new Date(selectedDate);
+    targetDate.setHours(0, 0, 0, 0);
+
+    const diffDays = Math.round((targetDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+    return schedules.map((s) => {
+      if (s.status === "Dibatalkan") return s;
+
+      if (diffDays > 0) {
+        // Masa Depan (Besok s/d 7 hari ke depan): status otomatis "Terjadwal"
+        return { ...s, status: "Terjadwal" as const };
+      } else if (diffDays < 0) {
+        // Masa Lalu: status otomatis "Selesai"
+        return { ...s, status: "Selesai" as const };
+      }
+      return s; // Hari ini: gunakan status realtime hari ini
+    });
+  }, [schedules, selectedDate]);
 
   // Filter Logic
   const filteredSchedules = useMemo(() => {
-    return schedules.filter((schedule) => {
+    return contextualSchedules.filter((schedule) => {
       const matchesSearch =
         schedule.storeName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         schedule.storeLocation.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -201,7 +405,7 @@ export default function JadwalAuditPage() {
 
       return matchesSearch && matchesStatus && matchesDate;
     });
-  }, [schedules, searchTerm, filterStatus, selectedDate]);
+  }, [contextualSchedules, searchTerm, filterStatus, selectedDate]);
 
   // Pagination Logic
   const totalPages = Math.ceil(filteredSchedules.length / itemsPerPage) || 1;
@@ -213,11 +417,56 @@ export default function JadwalAuditPage() {
   const startIndex = filteredSchedules.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0;
   const endIndex = Math.min(currentPage * itemsPerPage, filteredSchedules.length);
 
+  // Helper: Cek apakah jadwal terjadwal pada hari ini (tanggal tersebut)
+  const isScheduleRunningToday = (schedule: AuditSchedule) => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, "0");
+    const d = String(now.getDate()).padStart(2, "0");
+    const todayStr = `${y}-${m}-${d}`;
+    const dayOfWeekShort = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"][now.getDay()];
+
+    if (schedule.recurrence === "Setiap Hari") {
+      return (schedule.date || todayStr) <= todayStr;
+    }
+    if (schedule.recurrence === "Hari Tertentu" && Array.isArray(schedule.selectedDays)) {
+      return (schedule.date || todayStr) <= todayStr && schedule.selectedDays.includes(dayOfWeekShort);
+    }
+    return schedule.date === todayStr;
+  };
+
   return (
     <DashboardLayout>
       <Header
         title="Jadwal Audit"
-        subtitle="Kelola dan pantau jadwal audit untuk semua cabang."
+        subtitle={`Kelola dan pantau jadwal audit untuk cabang di ${currentWorkspaceName}.`}
+        action={
+          isSuperAdmin && workspaces.length > 1 ? (
+            <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs">
+              <Building2 className="w-4 h-4 text-sky-600 shrink-0" />
+              <span className="text-xs font-semibold text-slate-600 shrink-0">Workspace:</span>
+              <select
+                value={selectedWorkspaceId}
+                onChange={(e) => handleWorkspaceChange(e.target.value)}
+                className="bg-transparent text-slate-800 text-xs font-bold focus:outline-none cursor-pointer pr-1"
+              >
+                {workspaces.map((w) => {
+                  const isInactive = w.status === "Nonaktif";
+                  return (
+                    <option
+                      key={w.id}
+                      value={w.id}
+                      disabled={isInactive}
+                      className={isInactive ? "text-slate-400 bg-slate-100 italic" : "text-slate-800"}
+                    >
+                      {w.companyName || w.name} {isInactive ? "(Nonaktif)" : `(${w.storeCount} Toko)`}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+          ) : undefined
+        }
       />
 
       {/* Stats and Calendar Section */}
@@ -332,7 +581,9 @@ export default function JadwalAuditPage() {
                 type="button"
                 onClick={() => setIsFilterOpen(!isFilterOpen)}
                 className={`flex items-center gap-1.5 px-3 py-2 bg-white border ${
-                  filterStatus !== "Semua" || selectedDate
+                  filterStatus === "Terjadwal"
+                    ? "border-purple-400 text-purple-700 bg-purple-50/30"
+                    : filterStatus !== "Semua" || selectedDate
                     ? "border-sky-500 text-sky-600"
                     : "border-slate-200 text-slate-700"
                 } rounded-lg text-xs font-semibold hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer`}
@@ -368,7 +619,9 @@ export default function JadwalAuditPage() {
                         }}
                         className={`w-full text-left px-3.5 py-1.5 text-xs font-medium transition-colors ${
                           filterStatus === status
-                            ? "bg-sky-50 text-sky-600 font-semibold"
+                            ? status === "Terjadwal"
+                              ? "bg-purple-50 text-purple-700 font-semibold"
+                              : "bg-sky-50 text-sky-600 font-semibold"
                             : "text-slate-600 hover:bg-slate-50"
                         }`}
                       >
@@ -435,20 +688,34 @@ export default function JadwalAuditPage() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/70 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                <th className="py-3 px-4 sm:px-6">NAMA TOKO</th>
-                <th className="py-3 px-4">NAMA JADWAL</th>
-                <th className="py-3 px-4">WAKTU</th>
-                <th className="py-3 px-4">PENGULANGAN</th>
-                <th className="py-3 px-4 text-center">STATUS</th>
-                <th className="py-3 px-4 sm:px-6 text-center">ACTION</th>
+                <th className="py-3 px-4 sm:px-6 w-[28%] min-w-[190px]">NAMA TOKO</th>
+                <th className="py-3 px-4 w-[28%] min-w-[190px]">NAMA JADWAL</th>
+                <th className="py-3 px-4 w-[14%] whitespace-nowrap">WAKTU</th>
+                <th className="py-3 px-4 w-[14%] whitespace-nowrap">PENGULANGAN</th>
+                <th className="py-3 px-4 text-center w-[10%] whitespace-nowrap">STATUS</th>
+                <th className="py-3 px-4 sm:px-6 text-center w-[6%] whitespace-nowrap">ACTION</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
-              {paginatedSchedules.length === 0 ? (
+              {isLoading ? (
+                <tr>
+                  <td colSpan={6} className="py-16 text-center text-slate-400">
+                    <div className="flex flex-col items-center justify-center gap-2">
+                      <Loader2 className="w-6 h-6 text-[#193f53] animate-spin" />
+                      <span className="text-xs font-semibold text-slate-700">
+                        Memuat data jadwal audit...
+                      </span>
+                      <span className="text-[11px] text-slate-400">
+                        Menghubungkan ke database
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+              ) : paginatedSchedules.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-12 text-center text-slate-400">
                     <CalendarIcon className="w-8 h-8 mx-auto mb-2 text-slate-300 stroke-[1.5]" />
-                    <p className="font-semibold text-slate-600 text-sm">Tidak ada jadwal ditemukan</p>
+                    <p className="font-semibold text-slate-600 text-sm">Tidak ada jadwal ditemukan di {currentWorkspaceName}</p>
                     <p className="text-xs text-slate-400 mt-0.5">
                       Coba sesuaikan kata kunci pencarian, filter status, atau tanggal terpilih.
                     </p>
@@ -469,11 +736,11 @@ export default function JadwalAuditPage() {
                           <div className="w-8 h-8 rounded-lg bg-sky-50 text-sky-600 border border-sky-100 flex items-center justify-center shrink-0">
                             <Store className="w-4 h-4" />
                           </div>
-                          <div>
-                            <div className="font-semibold text-slate-900">
+                          <div className="min-w-0">
+                            <div className="font-semibold text-slate-900 leading-snug">
                               {schedule.storeName}
                             </div>
-                            <div className="text-[11px] text-slate-400 font-normal">
+                            <div className="text-[11px] text-slate-400 font-normal leading-snug mt-0.5">
                               {schedule.storeLocation}
                             </div>
                           </div>
@@ -482,10 +749,10 @@ export default function JadwalAuditPage() {
 
                       {/* NAMA JADWAL */}
                       <td className={`py-3.5 px-4 ${isCancelled ? "opacity-60" : ""}`}>
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-sky-50/60 text-sky-700 border border-sky-100 text-xs font-medium">
-                          <FileCheck2 className="w-3.5 h-3.5 text-sky-500 shrink-0" />
-                          <span className="truncate max-w-[200px] sm:max-w-xs">{schedule.scheduleName}</span>
-                        </span>
+                        <div className="inline-flex items-start gap-1.5 px-2.5 py-1.5 rounded-lg bg-sky-50/60 text-sky-700 border border-sky-100 text-xs font-medium max-w-[260px] sm:max-w-[300px]">
+                          <FileCheck2 className="w-3.5 h-3.5 text-sky-500 shrink-0 mt-0.5" />
+                          <span className="line-clamp-2 leading-relaxed break-words font-semibold">{schedule.scheduleName}</span>
+                        </div>
                       </td>
 
                       {/* WAKTU */}
@@ -514,10 +781,17 @@ export default function JadwalAuditPage() {
                       {/* STATUS */}
                       <td className="py-3.5 px-4 text-center whitespace-nowrap">
                         {schedule.status === "Terjadwal" && (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-sky-50 text-sky-600 border border-sky-200">
-                            <span className="w-1.5 h-1.5 rounded-full bg-sky-500" />
-                            Terjadwal
-                          </span>
+                          isScheduleInProgress(schedule) ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 animate-pulse" title="Audit sedang berlangsung di jam & hari ini">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                              Sedang Berjalan
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-purple-50 text-purple-700 border border-purple-200">
+                              <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+                              Terjadwal
+                            </span>
+                          )
                         )}
                         {schedule.status === "Selesai" && (
                           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-600 border border-emerald-200">
@@ -557,8 +831,19 @@ export default function JadwalAuditPage() {
                             isCancelled
                               ? undefined
                               : () => {
-                                  // Relasi: Ketika ingin menonaktifkan jadwal, template checklist harus diselesaikan dulu
-                                  if (schedule.status === "Terjadwal") {
+                                  if (isScheduleInProgress(schedule)) {
+                                    toast.error(
+                                      `Jadwal "${schedule.scheduleName}" sedang berlangsung saat ini (${schedule.timeRange || ""}). Tidak dapat dibatalkan atau dinonaktifkan selama audit sedang berjalan.`
+                                    );
+                                    return;
+                                  }
+                                  // Aturan Soft Delete:
+                                  // Jadwal status "Terjadwal" yang jatuh pada hari ini (tanggal tersebut)
+                                  // dan belum selesai wajib diselesaikan terlebih dahulu (ChecklistRequiredModal).
+                                  // Namun jika di luar tanggal tersebut (misal jadwal masa depan atau bukan hari ini),
+                                  // maka diperbolehkan langsung di-soft delete (DeleteScheduleModal).
+                                  const runningToday = isScheduleRunningToday(schedule);
+                                  if (schedule.status === "Terjadwal" && runningToday) {
                                     setScheduleForChecklist(schedule);
                                     setIsChecklistRequiredOpen(true);
                                   } else {
@@ -570,12 +855,8 @@ export default function JadwalAuditPage() {
                           onRestore={
                             isCancelled
                               ? () => {
-                                  ScheduleService.update(schedule.id, {
-                                    status: "Terjadwal",
-                                    deletedAt: undefined,
-                                  });
-                                  toast.success(`Jadwal untuk "${schedule.storeName}" diaktifkan kembali.`);
-                                  refreshData();
+                                  setScheduleToRestore(schedule);
+                                  setIsRestoreModalOpen(true);
                                 }
                               : undefined
                           }
@@ -583,6 +864,10 @@ export default function JadwalAuditPage() {
                           editTitle="Edit Jadwal"
                           deleteTitle="Batalkan Jadwal"
                           restoreTitle="Aktifkan Kembali Jadwal"
+                          editDisabled={!isCancelled && isScheduleInProgress(schedule)}
+                          editDisabledTitle="Jadwal sedang berlangsung saat ini. Tidak dapat diedit selama audit berjalan."
+                          deleteDisabled={!isCancelled && isScheduleInProgress(schedule)}
+                          deleteDisabledTitle="Jadwal sedang berlangsung saat ini. Tidak dapat dibatalkan atau dinonaktifkan selama audit berjalan."
                         />
                       </td>
                     </tr>
@@ -641,13 +926,17 @@ export default function JadwalAuditPage() {
 
       {/* Side Panels & Modals */}
       <CreateSchedulePanel
+        key={`${selectedWorkspaceId}-${scheduleToEdit?.id || "create"}`}
         isOpen={isSchedulePanelOpen}
         schedule={scheduleToEdit}
+        workspaceId={selectedWorkspaceId}
+        workspaceName={currentWorkspaceName}
         onClose={() => {
           setIsSchedulePanelOpen(false);
           setScheduleToEdit(null);
         }}
         onSubmit={handleSaveSchedule}
+        isSubmitting={isSubmittingSchedule}
       />
 
       <DeleteScheduleModal
@@ -658,6 +947,7 @@ export default function JadwalAuditPage() {
           setScheduleToDelete(null);
         }}
         onConfirm={handleConfirmDelete}
+        isSubmitting={isSubmittingDelete}
       />
 
       {/* Pop up Relasi: Template Checklist Wajib Selesai Sebelum Nonaktifkan Jadwal */}
@@ -669,6 +959,19 @@ export default function JadwalAuditPage() {
           setScheduleForChecklist(null);
         }}
         onCompleteAndDeactivate={handleCompleteAndDeactivate}
+        isSubmitting={isSubmittingChecklist}
+      />
+
+      {/* Restore Schedule Modal */}
+      <RestoreScheduleModal
+        isOpen={isRestoreModalOpen}
+        schedule={scheduleToRestore}
+        onClose={() => {
+          setIsRestoreModalOpen(false);
+          setScheduleToRestore(null);
+        }}
+        onConfirm={handleConfirmRestore}
+        isSubmitting={isSubmittingRestore}
       />
 
       {selectedScheduleToView && (
