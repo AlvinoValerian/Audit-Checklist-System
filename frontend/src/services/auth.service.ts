@@ -91,6 +91,12 @@ export const ApiAuthService = {
         LocalAuthService.setToken(json.data.token);
       }
       LocalAuthService.setCurrentUser(json.data.user);
+      if (json.data.user.workspaceId) {
+        LocalAuthService.setActiveWorkspace({
+          id: json.data.user.workspaceId,
+          name: json.data.user.workspaceName || "Divisi Teknis - Sandbox Testing",
+        });
+      }
     }
 
     return json;
@@ -140,6 +146,12 @@ export const ApiAuthService = {
         LocalAuthService.setToken(json.data.token);
       }
       LocalAuthService.setCurrentUser(json.data.user);
+      if (json.data.user.workspaceId) {
+        LocalAuthService.setActiveWorkspace({
+          id: json.data.user.workspaceId,
+          name: json.data.user.workspaceName || "Divisi Teknis - Sandbox Testing",
+        });
+      }
     }
 
     return json;

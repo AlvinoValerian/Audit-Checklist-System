@@ -108,7 +108,10 @@ exports.getAllStores = async (req, res) => {
     const where = {};
 
     // 1. Logika penentuan workspace:
-    if (requestedWsId && requestedWsId !== 'all') {
+    if (user && (user.role === 'Divisi Teknis' || user.role === 'Teknis') && user.workspaceId) {
+      // Divisi Teknis: Terisolasi mutlak ke sandbox internal untuk testing
+      where.workspace_id = BigInt(user.workspaceId);
+    } else if (requestedWsId && requestedWsId !== 'all') {
       const cleanWs = BigInt(requestedWsId.toString().replace(/^ws-/, ''));
       where.workspace_id = cleanWs;
     } else if (user && user.role === 'Admin' && user.workspaceId) {
@@ -262,9 +265,11 @@ exports.createStore = async (req, res) => {
 
     // Tentukan Workspace ID tujuan
     let targetWsId =
-      workspaceId ||
-      (user && user.workspaceId ? user.workspaceId : null) ||
-      req.headers['x-workspace-id'];
+      (user && (user.role === 'Divisi Teknis' || user.role === 'Teknis') && user.workspaceId)
+        ? user.workspaceId
+        : (workspaceId ||
+           (user && user.workspaceId ? user.workspaceId : null) ||
+           req.headers['x-workspace-id']);
 
     if (!targetWsId && workspace) {
       const foundWs = await prisma.workspace.findFirst({

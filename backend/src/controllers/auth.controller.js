@@ -308,12 +308,23 @@ exports.login = async (req, res) => {
         });
       }
 
+      // Ambil role sebenarnya dari database (mendukung Divisi Teknis)
+      let userRole = 'Admin';
+      try {
+        const roleRes = await prisma.$queryRaw`SELECT role FROM admin WHERE admin_id = ${admin.admin_id} LIMIT 1`;
+        if (roleRes && roleRes[0]?.role) {
+          userRole = roleRes[0].role;
+        }
+      } catch (e) {
+        userRole = admin.role || 'Admin';
+      }
+
       const token = jwt.sign(
         {
           id: admin.admin_id.toString(),
           rawId: admin.admin_id.toString(),
           email: admin.email,
-          role: 'Admin',
+          role: userRole,
           workspaceId: admin.workspace_id.toString(),
         },
         JWT_SECRET,
@@ -322,7 +333,7 @@ exports.login = async (req, res) => {
 
       return res.status(200).json({
         status: 'success',
-        message: 'Login berhasil sebagai Admin.',
+        message: `Login berhasil sebagai ${userRole || 'Admin'}.`,
         data: {
           token,
           user: {
@@ -330,7 +341,7 @@ exports.login = async (req, res) => {
             rawId: admin.admin_id.toString(),
             fullName: admin.name,
             email: admin.email,
-            role: 'Admin',
+            role: userRole,
             workspaceId: admin.workspace_id.toString(),
             workspaceName: admin.workspace ? admin.workspace.company_name : 'Workspace',
             status: 'Aktif',
@@ -392,6 +403,14 @@ exports.getMe = async (req, res) => {
       return res.status(404).json({ status: 'error', message: 'User tidak ditemukan' });
     }
 
+    let userRole = decoded.role || 'Admin';
+    try {
+      const roleRes = await prisma.$queryRaw`SELECT role FROM admin WHERE admin_id = ${adm.admin_id} LIMIT 1`;
+      if (roleRes && roleRes[0]?.role) {
+        userRole = roleRes[0].role;
+      }
+    } catch (e) {}
+
     return res.status(200).json({
       status: 'success',
       data: {
@@ -401,7 +420,7 @@ exports.getMe = async (req, res) => {
           rawId: adm.admin_id.toString(),
           fullName: adm.name,
           email: adm.email,
-          role: 'Admin',
+          role: userRole,
           workspaceId: adm.workspace_id.toString(),
           workspaceName: adm.workspace ? adm.workspace.company_name : 'Workspace',
           status: adm.status === 'inactive' ? 'Nonaktif' : 'Aktif',

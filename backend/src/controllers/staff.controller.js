@@ -70,9 +70,12 @@ exports.getAllStaff = async (req, res) => {
   try {
     await ensureStaffColumns();
 
+    const user = await extractUser(req);
     const { workspaceId, storeId, status, search } = req.query;
     const headerWsId = req.headers['x-workspace-id'];
-    const activeWsId = workspaceId || headerWsId;
+    const activeWsId = (user && (user.role === 'Divisi Teknis' || user.role === 'Teknis') && user.workspaceId)
+      ? user.workspaceId
+      : (workspaceId || headerWsId);
 
     let query = `
       SELECT 

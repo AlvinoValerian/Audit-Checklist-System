@@ -64,11 +64,19 @@ const extractUser = async (req) => {
           where: { email: cleanEmail },
         });
         if (adm) {
+          let admRole = user?.role || 'Admin';
+          try {
+            const roleRes = await prisma.$queryRaw`SELECT role FROM admin WHERE admin_id = ${adm.admin_id} LIMIT 1`;
+            if (roleRes && roleRes[0]?.role) {
+              admRole = roleRes[0].role;
+            }
+          } catch (e) {}
+
           user = {
             ...(user || {}),
             rawId: adm.admin_id.toString(),
             id: `adm-${adm.admin_id.toString()}`,
-            role: 'Admin',
+            role: admRole,
             email: adm.email,
             fullName: adm.name,
             workspaceId: adm.workspace_id.toString(),
