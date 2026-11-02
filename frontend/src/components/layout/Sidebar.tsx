@@ -20,6 +20,8 @@ import {
   FileText,
   Sparkles,
   ArrowLeft,
+  Wrench,
+  Settings,
 } from "lucide-react";
 import { toast } from "sonner";
 import { AuthService } from "@/lib/auth";
@@ -28,16 +30,19 @@ export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [userRole, setUserRole] = useState<string>("");
 
   useEffect(() => {
     if (typeof window !== "undefined") {
       const user = AuthService.getCurrentUser();
-      if (user?.role === "Super Admin") {
-        setIsSuperAdmin(true);
+      if (user?.role) {
+        setUserRole(user.role);
       }
     }
   }, []);
+
+  const isSuperAdmin = userRole === "Super Admin";
+  const isDivisiTeknis = userRole === "Divisi Teknis";
 
   const handleLogout = () => {
     AuthService.logout();
@@ -55,14 +60,25 @@ export default function Sidebar() {
     pathname.startsWith("/staff") ||
     pathname.startsWith("/galeri") ||
     pathname.startsWith("/laporan") ||
-    pathname.startsWith("/tanya-ai");
+    pathname.startsWith("/tanya-ai") ||
+    pathname.startsWith("/divisi-teknis") ||
+    pathname.startsWith("/pengaturan");
 
-  const isWorkspacesActive = pathname.startsWith("/workspace");
-  const isAdminsActive =
-    pathname.startsWith("/kelola-admin") ||
-    pathname.startsWith("/superadmin") ||
-    pathname.startsWith("/admins");
+  // 1. Fitur Super Admin
+  const superAdminNavItems = [
+    {
+      name: "Workspaces",
+      href: "/workspace",
+      icon: BookOpen,
+    },
+    {
+      name: "Kelola Admin",
+      href: "/kelola-admin",
+      icon: UserPlus,
+    },
+  ];
 
+  // 2. Fitur Admin
   const adminNavItems = [
     {
       name: "Dashboard",
@@ -112,12 +128,77 @@ export default function Sidebar() {
     },
   ];
 
+  // 3. Fitur Teknis
+  const teknisNavItems = [
+    {
+      name: "Teknis",
+      href: "/divisi-teknis",
+      icon: Wrench,
+    },
+    {
+      name: "Pengaturan",
+      href: "/pengaturan",
+      icon: Settings,
+    },
+  ];
+
+  // Helper untuk merender tautan navigasi
+  const renderNavLink = (
+    item: {
+      name: string;
+      href: string;
+      icon: React.ComponentType<{ className?: string }>;
+      badge?: string;
+    },
+    isMobile = false
+  ) => {
+    const Icon = item.icon;
+    const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+
+    return (
+      <Link
+        key={item.name}
+        href={item.href}
+        onClick={isMobile ? () => setIsMobileMenuOpen(false) : undefined}
+        className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs sm:text-[13px] transition-all ${
+          isActive
+            ? "border border-sky-400 bg-sky-50/70 text-sky-600 font-semibold shadow-2xs"
+            : "text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium"
+        }`}
+      >
+        <Icon
+          className={`w-4 h-4 shrink-0 ${
+            isActive ? "text-sky-600" : "text-slate-400"
+          }`}
+        />
+        <span className="truncate">{item.name}</span>
+        {item.badge && (
+          <span
+            className={`ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded tracking-wider ${
+              isActive
+                ? "bg-[#102d3c] text-white"
+                : "text-slate-400 bg-slate-100 border border-slate-200"
+            }`}
+          >
+            {item.badge}
+          </span>
+        )}
+      </Link>
+    );
+  };
+
   return (
     <>
       {/* Mobile Top Header Bar (Shown only on < md) */}
       <div className="md:hidden w-full bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between sticky top-0 z-40">
         <Link
-          href={isAdminPortal ? "/dashboard-monitoring" : "/workspace"}
+          href={
+            isDivisiTeknis
+              ? "/divisi-teknis"
+              : isAdminPortal
+              ? "/dashboard-monitoring"
+              : "/workspace"
+          }
           className="flex items-center gap-2.5"
         >
           <div className="w-8 h-8 rounded-lg bg-[#193f53] text-white flex items-center justify-center font-bold text-sm shadow-xs">
@@ -128,7 +209,11 @@ export default function Sidebar() {
               Audit Pro
             </h1>
             <p className="text-[10px] text-slate-400">
-              {isAdminPortal ? "Enterprise Monitor" : "Super Admin"}
+              {isDivisiTeknis
+                ? "Divisi Teknis"
+                : isAdminPortal
+                ? "Enterprise Monitor"
+                : "Super Admin"}
             </p>
           </div>
         </Link>
@@ -151,7 +236,34 @@ export default function Sidebar() {
       {isMobileMenuOpen && (
         <div className="md:hidden fixed inset-0 top-[53px] bg-slate-900/40 backdrop-blur-xs z-30 animate-in fade-in duration-150">
           <div className="bg-white border-b border-slate-200 p-4 space-y-3 shadow-xl max-h-[calc(100vh-60px)] overflow-y-auto">
-            {isAdminPortal ? (
+            {isDivisiTeknis ? (
+              /* Navigasi Khusus Divisi Teknis: 3 Bagian Terpisah */
+              <div className="space-y-3">
+                {/* 1. Fitur Super Admin */}
+                <div className="space-y-1">
+                  <p className="px-3 pb-1 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 select-none">
+                    Fitur Super Admin
+                  </p>
+                  {superAdminNavItems.map((item) => renderNavLink(item, true))}
+                </div>
+
+                {/* Spasi / 2. Fitur Admin */}
+                <div className="pt-2 space-y-1">
+                  <p className="px-3 pb-1 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 select-none">
+                    Fitur Admin
+                  </p>
+                  {adminNavItems.map((item) => renderNavLink(item, true))}
+                </div>
+
+                {/* Spasi / 3. Fitur Teknis */}
+                <div className="pt-2 space-y-1">
+                  <p className="px-3 pb-1 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 select-none">
+                    Fitur Teknis
+                  </p>
+                  {teknisNavItems.map((item) => renderNavLink(item, true))}
+                </div>
+              </div>
+            ) : isAdminPortal ? (
               <div className="space-y-2">
                 {isSuperAdmin && (
                   <Link
@@ -164,78 +276,12 @@ export default function Sidebar() {
                   </Link>
                 )}
                 <nav className="space-y-1">
-                  {adminNavItems.map((item) => {
-                    const Icon = item.icon;
-                    const isActive =
-                      pathname === item.href || pathname.startsWith(item.href + "/");
-                    return (
-                      <Link
-                        key={item.name}
-                        href={item.href}
-                        onClick={() => setIsMobileMenuOpen(false)}
-                        className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm transition-all ${
-                          isActive
-                            ? "border border-sky-400 bg-sky-50/70 text-sky-600 font-semibold shadow-2xs"
-                            : "text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium"
-                        }`}
-                      >
-                        <Icon
-                          className={`w-4 h-4 shrink-0 ${
-                            isActive ? "text-sky-600" : "text-slate-400"
-                          }`}
-                        />
-                        <span className="truncate">{item.name}</span>
-                        {item.badge && (
-                          <span
-                            className={`ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded tracking-wider ${
-                              isActive
-                                ? "bg-[#102d3c] text-white"
-                                : "text-slate-400 bg-slate-100 border border-slate-200"
-                            }`}
-                          >
-                            {item.badge}
-                          </span>
-                        )}
-                      </Link>
-                    );
-                  })}
+                  {adminNavItems.map((item) => renderNavLink(item, true))}
                 </nav>
               </div>
             ) : (
               <nav className="space-y-1">
-                <Link
-                  href="/workspace"
-                  onClick={() => setIsMobileMenuOpen(false)}
-                  className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm transition-all ${
-                    isWorkspacesActive
-                      ? "border border-sky-400 bg-sky-50/70 text-sky-600 font-semibold shadow-2xs"
-                      : "text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium"
-                  }`}
-                >
-                  <BookOpen
-                    className={`w-4 h-4 shrink-0 ${
-                      isWorkspacesActive ? "text-sky-600" : "text-slate-400"
-                    }`}
-                  />
-                  <span>Workspaces</span>
-                </Link>
-
-                <Link
-                  href="/kelola-admin"
-                  onClick={() => setIsMobileMenuOpen(false)}
-                  className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm transition-all ${
-                    isAdminsActive
-                      ? "border border-sky-400 bg-sky-50/70 text-sky-600 font-semibold shadow-2xs"
-                      : "text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium"
-                  }`}
-                >
-                  <UserPlus
-                    className={`w-4 h-4 shrink-0 ${
-                      isAdminsActive ? "text-sky-600" : "text-slate-400"
-                    }`}
-                  />
-                  <span>Kelola Admin</span>
-                </Link>
+                {superAdminNavItems.map((item) => renderNavLink(item, true))}
               </nav>
             )}
 
@@ -264,19 +310,31 @@ export default function Sidebar() {
               <Monitor className="w-5 h-5 stroke-[2.2]" />
             </div>
             <div>
-              <Link href={isAdminPortal ? "/dashboard-monitoring" : "/workspace"}>
+              <Link
+                href={
+                  isDivisiTeknis
+                    ? "/divisi-teknis"
+                    : isAdminPortal
+                    ? "/dashboard-monitoring"
+                    : "/workspace"
+                }
+              >
                 <h1 className="text-base font-bold text-slate-900 tracking-tight hover:opacity-90 transition-opacity">
                   Audit Pro
                 </h1>
               </Link>
               <p className="text-[11px] text-slate-400">
-                {isAdminPortal ? "Enterprise Monitor" : "Super Admin"}
+                {isDivisiTeknis
+                  ? "Divisi Teknis"
+                  : isAdminPortal
+                  ? "Enterprise Monitor"
+                  : "Super Admin"}
               </p>
             </div>
           </div>
 
-          {/* Quick Back to Super Admin Portal if Super Admin */}
-          {isSuperAdmin && isAdminPortal && (
+          {/* Quick Back to Super Admin Portal if Super Admin in Admin Portal */}
+          {!isDivisiTeknis && isSuperAdmin && isAdminPortal && (
             <div className="mb-4">
               <Link
                 href="/workspace"
@@ -290,76 +348,42 @@ export default function Sidebar() {
           )}
 
           {/* Navigation Items */}
-          {isAdminPortal ? (
+          {isDivisiTeknis ? (
+            /* Sidebar Khusus Divisi Teknis dengan Judul Kecil Pembagi & Spasi */
+            <div className="space-y-4">
+              {/* 1. Fitur Super Admin */}
+              <div className="space-y-1">
+                <p className="px-3 pb-1 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 select-none">
+                  Fitur Super Admin
+                </p>
+                {superAdminNavItems.map((item) => renderNavLink(item))}
+              </div>
+
+              {/* Spasi / 2. Fitur Admin */}
+              <div className="pt-2 space-y-1">
+                <p className="px-3 pb-1 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 select-none">
+                  Fitur Admin
+                </p>
+                {adminNavItems.map((item) => renderNavLink(item))}
+              </div>
+
+              {/* Spasi / 3. Fitur Teknis */}
+              <div className="pt-2 space-y-1">
+                <p className="px-3 pb-1 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 select-none">
+                  Fitur Teknis
+                </p>
+                {teknisNavItems.map((item) => renderNavLink(item))}
+              </div>
+            </div>
+          ) : isAdminPortal ? (
+            /* Portal Admin Biasa (Tanpa Divisi Teknis) */
             <nav className="space-y-1">
-              {adminNavItems.map((item) => {
-                const Icon = item.icon;
-                const isActive =
-                  pathname === item.href || pathname.startsWith(item.href + "/");
-                return (
-                  <Link
-                    key={item.name}
-                    href={item.href}
-                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs sm:text-[13px] transition-all ${
-                      isActive
-                        ? "border border-sky-400 bg-sky-50/60 text-sky-600 font-semibold shadow-2xs"
-                        : "text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium"
-                    }`}
-                  >
-                    <Icon
-                      className={`w-4 h-4 shrink-0 ${
-                        isActive ? "text-sky-600" : "text-slate-400"
-                      }`}
-                    />
-                    <span className="truncate">{item.name}</span>
-                    {item.badge && (
-                      <span
-                        className={`ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded tracking-wider ${
-                          isActive
-                            ? "bg-[#102d3c] text-white"
-                            : "text-slate-400 bg-slate-100 border border-slate-200"
-                        }`}
-                      >
-                        {item.badge}
-                      </span>
-                    )}
-                  </Link>
-                );
-              })}
+              {adminNavItems.map((item) => renderNavLink(item))}
             </nav>
           ) : (
+            /* Portal Super Admin (Workspaces & Kelola Admin Saja - Tanpa Divisi Teknis) */
             <nav className="space-y-1">
-              <Link
-                href="/workspace"
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs sm:text-[13px] transition-all ${
-                  isWorkspacesActive
-                    ? "border border-sky-400 bg-sky-50/60 text-sky-600 font-semibold shadow-2xs"
-                    : "text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium"
-                }`}
-              >
-                <BookOpen
-                  className={`w-4 h-4 shrink-0 ${
-                    isWorkspacesActive ? "text-sky-600" : "text-slate-400"
-                  }`}
-                />
-                <span className="truncate">Workspaces</span>
-              </Link>
-
-              <Link
-                href="/kelola-admin"
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs sm:text-[13px] transition-all ${
-                  isAdminsActive
-                    ? "border border-sky-400 bg-sky-50/60 text-sky-600 font-semibold shadow-2xs"
-                    : "text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium"
-                }`}
-              >
-                <UserPlus
-                  className={`w-4 h-4 shrink-0 ${
-                    isAdminsActive ? "text-sky-600" : "text-slate-400"
-                  }`}
-                />
-                <span className="truncate">Kelola Admin</span>
-              </Link>
+              {superAdminNavItems.map((item) => renderNavLink(item))}
             </nav>
           )}
         </div>

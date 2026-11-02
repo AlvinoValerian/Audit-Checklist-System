@@ -44,6 +44,8 @@ export default function LoginPage() {
       setTimeout(() => {
         if (user && user.role === "Admin") {
           router.push("/dashboard-monitoring");
+        } else if (user && user.role === "Divisi Teknis") {
+          router.push("/divisi-teknis");
         } else {
           router.push("/workspace");
         }

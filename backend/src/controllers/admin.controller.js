@@ -83,6 +83,9 @@ exports.getAllAdmins = async (req, res) => {
           workspace: {
             super_admin_id: cleanSaId,
           },
+          NOT: {
+            role: 'Divisi Teknis',
+          },
         },
         include: {
           workspace: true,

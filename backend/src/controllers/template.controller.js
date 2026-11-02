@@ -95,7 +95,12 @@ exports.getAllTemplates = async (req, res) => {
     }
 
     // Filter Store / Workspace (Strict Workspace Isolation)
-    if (storeId) {
+    if (user && (user.role === 'Divisi Teknis' || user.role === 'Teknis') && user.workspaceId) {
+      try {
+        const cleanWs = BigInt(user.workspaceId.toString().replace(/^ws-/, ''));
+        where.store = { workspace_id: cleanWs };
+      } catch (e) {}
+    } else if (storeId) {
       try {
         where.store_id = BigInt(storeId.toString().replace(/^st-/, ''));
       } catch (e) {}
