@@ -1,10 +1,10 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import Modal from "@/components/ui/Modal";
 import { AdminUser, AdminRole } from "@/types/admin";
 import { Workspace } from "@/types/workspace";
-import { Pencil, Eye, EyeOff, Info, ChevronDown, Lock } from "lucide-react";
+import { Pencil, Eye, EyeOff, Info, ChevronDown, Lock, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 interface EditAdminModalProps {
@@ -12,10 +12,10 @@ interface EditAdminModalProps {
   onClose: () => void;
   admin: AdminUser | null;
   workspaces: Workspace[];
+  isSubmitting?: boolean;
   onSubmit: (formData: {
     fullName: string;
     email: string;
-    phone?: string;
     role: AdminRole;
     workspaceName: string;
     status: "Aktif" | "Nonaktif";
@@ -28,18 +28,30 @@ export default function EditAdminModal({
   onClose,
   admin,
   workspaces,
+  isSubmitting = false,
   onSubmit,
 }: EditAdminModalProps) {
+  const isSuperAdmin = admin?.role === "Super Admin";
+
   const [formData, setFormData] = useState({
     fullName: "",
     email: "",
-    phone: "",
     role: "Admin" as AdminRole,
     workspaceName: "",
     status: "Aktif" as "Aktif" | "Nonaktif",
     newPassword: "",
     confirmNewPassword: "",
   });
+
+  // Pisahkan workspace aktif di atas, nonaktif di bawah sendiri
+  const activeWorkspaces = useMemo(
+    () => workspaces.filter((ws) => ws.status === "Aktif"),
+    [workspaces]
+  );
+  const inactiveWorkspaces = useMemo(
+    () => workspaces.filter((ws) => ws.status !== "Aktif"),
+    [workspaces]
+  );
 
   const [showPasswordSection, setShowPasswordSection] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
@@ -50,7 +62,6 @@ export default function EditAdminModal({
       setFormData({
         fullName: admin.fullName || "",
         email: admin.email || "",
-        phone: admin.phone && admin.phone !== "-" ? admin.phone : "",
         role: admin.role || "Admin",
         workspaceName: admin.workspaceName || "",
         status: admin.status || "Aktif",
@@ -67,6 +78,7 @@ export default function EditAdminModal({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
 
     if (!formData.fullName.trim()) {
       toast.error("Nama lengkap wajib diisi!");
@@ -78,8 +90,26 @@ export default function EditAdminModal({
       return;
     }
 
+    if (isSuperAdmin) {
+      onSubmit({
+        fullName: formData.fullName.trim(),
+        email: formData.email.trim(),
+        role: "Super Admin", // Role Super Admin tidak bisa berubah
+        workspaceName: admin.workspaceName || "All Workspaces (Central)", // Workspace Super Admin tidak bisa berubah
+        status: formData.status,
+        password: showPasswordSection && formData.newPassword ? formData.newPassword : undefined,
+      });
+      return;
+    }
+
     if (!formData.workspaceName) {
       toast.error("Silakan pilih workspace penugasan!");
+      return;
+    }
+
+    const chosenWs = workspaces.find((w) => w.name === formData.workspaceName);
+    if (chosenWs && chosenWs.status === "Nonaktif" && chosenWs.name !== admin.workspaceName) {
+      toast.error("Workspace yang dipilih berstatus Nonaktif dan tidak dapat dipilih!");
       return;
     }
 
@@ -97,8 +127,7 @@ export default function EditAdminModal({
     onSubmit({
       fullName: formData.fullName.trim(),
       email: formData.email.trim(),
-      phone: formData.phone.trim() || "-",
-      role: formData.role,
+      role: admin.role,
       workspaceName: formData.workspaceName,
       status: formData.status,
       password: showPasswordSection && formData.newPassword ? formData.newPassword : undefined,
@@ -108,7 +137,7 @@ export default function EditAdminModal({
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={isSubmitting ? () => {} : onClose}
       title="Edit Admin"
       subtitle="Perbarui profil, hak akses, dan status akun admin"
       icon={<Pencil className="w-5 h-5 text-sky-600" />}
@@ -123,106 +152,109 @@ export default function EditAdminModal({
           <input
             type="text"
             required
+            disabled={isSubmitting}
             placeholder="Masukkan nama lengkap admin"
             value={formData.fullName}
             onChange={(e) =>
               setFormData({ ...formData, fullName: e.target.value })
             }
-            className="w-full px-3.5 py-2.5 text-xs sm:text-sm bg-white border border-slate-200 rounded-lg outline-none focus:border-[#193f53] focus:ring-1 focus:ring-[#193f53]/20 transition-all placeholder:text-slate-400 text-slate-800"
+            className="w-full px-3.5 py-2.5 text-xs sm:text-sm bg-white border border-slate-200 rounded-lg outline-none focus:border-[#193f53] focus:ring-1 focus:ring-[#193f53]/20 disabled:bg-slate-50 disabled:opacity-70 transition-all placeholder:text-slate-400 text-slate-800"
           />
         </div>
 
-        {/* Email & No Telepon */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-          <div>
-            <label className="block text-xs font-semibold text-slate-800 mb-1.5">
-              Email <span className="text-rose-500 font-bold">*</span>
-            </label>
-            <input
-              type="email"
-              required
-              placeholder="contoh@perusahaan.com"
-              value={formData.email}
-              onChange={(e) =>
-                setFormData({ ...formData, email: e.target.value })
-              }
-              className="w-full px-3.5 py-2.5 text-xs sm:text-sm bg-white border border-slate-200 rounded-lg outline-none focus:border-[#193f53] focus:ring-1 focus:ring-[#193f53]/20 transition-all placeholder:text-slate-400 text-slate-800"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-800 mb-1.5">
-              No. Telepon / WhatsApp
-            </label>
-            <input
-              type="text"
-              placeholder="0812-xxxx-xxxx"
-              value={formData.phone}
-              onChange={(e) =>
-                setFormData({ ...formData, phone: e.target.value })
-              }
-              className="w-full px-3.5 py-2.5 text-xs sm:text-sm bg-white border border-slate-200 rounded-lg outline-none focus:border-[#193f53] focus:ring-1 focus:ring-[#193f53]/20 transition-all placeholder:text-slate-400 text-slate-800"
-            />
-          </div>
+        {/* Email */}
+        <div>
+          <label className="block text-xs font-semibold text-slate-800 mb-1.5">
+            Email <span className="text-rose-500 font-bold">*</span>
+          </label>
+          <input
+            type="email"
+            required
+            disabled={isSubmitting}
+            placeholder="contoh@perusahaan.com"
+            value={formData.email}
+            onChange={(e) =>
+              setFormData({ ...formData, email: e.target.value })
+            }
+            className="w-full px-3.5 py-2.5 text-xs sm:text-sm bg-white border border-slate-200 rounded-lg outline-none focus:border-[#193f53] focus:ring-1 focus:ring-[#193f53]/20 disabled:bg-slate-50 disabled:opacity-70 transition-all placeholder:text-slate-400 text-slate-800"
+          />
         </div>
 
         {/* Workspace Penugasan & Role */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+          {/* Workspace Penugasan */}
           <div>
             <label className="block text-xs font-semibold text-slate-800 mb-1.5">
               Workspace Penugasan <span className="text-rose-500 font-bold">*</span>
             </label>
             <div className="relative">
-              <select
-                required
-                value={formData.workspaceName}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    workspaceName: e.target.value,
-                  })
-                }
-                className="w-full appearance-none px-3.5 py-2.5 pr-10 text-xs sm:text-sm bg-white border border-slate-200 rounded-lg outline-none focus:border-[#193f53] focus:ring-1 focus:ring-[#193f53]/20 transition-all text-slate-800 cursor-pointer"
-              >
-                <option value="" disabled>
-                  Pilih workspace
-                </option>
-                {workspaces.map((ws) => (
-                  <option key={ws.id} value={ws.name}>
-                    {ws.name}
-                  </option>
-                ))}
-                <option value="Semua Workspace (Pusat)">
-                  Semua Workspace (Pusat)
-                </option>
-              </select>
-              <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              {isSuperAdmin ? (
+                <input
+                  type="text"
+                  value={admin.workspaceName || "All Workspaces (Central)"}
+                  readOnly
+                  disabled
+                  title="Workspace Super Admin mencakup seluruh sistem dan tidak dapat diubah"
+                  className="w-full px-3.5 py-2.5 text-xs sm:text-sm bg-slate-100 border border-slate-200 rounded-lg text-slate-500 font-medium cursor-not-allowed select-none"
+                />
+              ) : (
+                <>
+                  <select
+                    required
+                    disabled={isSubmitting}
+                    value={formData.workspaceName}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        workspaceName: e.target.value,
+                      })
+                    }
+                    className="w-full appearance-none px-3.5 py-2.5 pr-10 text-xs sm:text-sm bg-white border border-slate-200 rounded-lg outline-none focus:border-[#193f53] focus:ring-1 focus:ring-[#193f53]/20 disabled:bg-slate-50 disabled:opacity-70 transition-all text-slate-800 cursor-pointer"
+                  >
+                    <option value="" disabled>
+                      Pilih workspace
+                    </option>
+                    {/* Workspace Aktif di Bagian Atas */}
+                    {activeWorkspaces.map((ws) => (
+                      <option key={ws.id} value={ws.name}>
+                        {ws.name}
+                      </option>
+                    ))}
+
+                    {/* Workspace Nonaktif di Bagian Bawah Sendiri */}
+                    {inactiveWorkspaces.map((ws) => {
+                      const isCurrentWs = ws.name === admin.workspaceName;
+                      return (
+                        <option
+                          key={ws.id}
+                          value={ws.name}
+                          disabled={!isCurrentWs}
+                          className={!isCurrentWs ? "text-slate-400 bg-slate-50" : ""}
+                        >
+                          {ws.name} (Nonaktif - Tidak dapat dipilih)
+                        </option>
+                      );
+                    })}
+                  </select>
+                  <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                </>
+              )}
             </div>
           </div>
 
+          {/* Role Akun (Permanen, Tanpa Dropdown) */}
           <div>
             <label className="block text-xs font-semibold text-slate-800 mb-1.5">
               Role Akun
             </label>
-            <div className="relative">
-              <select
-                value={formData.role}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    role: e.target.value as AdminRole,
-                  })
-                }
-                className="w-full appearance-none px-3.5 py-2.5 pr-10 text-xs sm:text-sm bg-white border border-slate-200 rounded-lg outline-none focus:border-[#193f53] focus:ring-1 focus:ring-[#193f53]/20 transition-all text-slate-800 cursor-pointer"
-              >
-                <option value="Admin">Admin</option>
-                <option value="Staff">Staff</option>
-                {admin.role === "Super Admin" && (
-                  <option value="Super Admin">Super Admin</option>
-                )}
-              </select>
-              <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-            </div>
+            <input
+              type="text"
+              value={admin.role}
+              readOnly
+              disabled
+              title={`Role ${admin.role} bersifat permanen dan tidak dapat diubah`}
+              className="w-full px-3.5 py-2.5 text-xs sm:text-sm bg-slate-100 border border-slate-200 rounded-lg text-slate-600 font-semibold cursor-not-allowed select-none"
+            />
           </div>
         </div>
 
@@ -233,6 +265,7 @@ export default function EditAdminModal({
           </label>
           <div className="relative">
             <select
+              disabled={isSubmitting}
               value={formData.status}
               onChange={(e) =>
                 setFormData({
@@ -240,7 +273,7 @@ export default function EditAdminModal({
                   status: e.target.value as "Aktif" | "Nonaktif",
                 })
               }
-              className="w-full appearance-none px-3.5 py-2.5 pr-10 text-xs sm:text-sm bg-white border border-slate-200 rounded-lg outline-none focus:border-[#193f53] focus:ring-1 focus:ring-[#193f53]/20 transition-all text-slate-800 cursor-pointer"
+              className="w-full appearance-none px-3.5 py-2.5 pr-10 text-xs sm:text-sm bg-white border border-slate-200 rounded-lg outline-none focus:border-[#193f53] focus:ring-1 focus:ring-[#193f53]/20 disabled:bg-slate-50 disabled:opacity-70 transition-all text-slate-800 cursor-pointer"
             >
               <option value="Aktif">Aktif</option>
               <option value="Nonaktif">Nonaktif</option>
@@ -253,8 +286,9 @@ export default function EditAdminModal({
         <div className="pt-1">
           <button
             type="button"
+            disabled={isSubmitting}
             onClick={() => setShowPasswordSection(!showPasswordSection)}
-            className="flex items-center gap-1.5 text-xs font-medium text-sky-600 hover:text-sky-700 transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 text-xs font-medium text-sky-600 hover:text-sky-700 disabled:opacity-50 transition-colors cursor-pointer"
           >
             <Lock className="w-3.5 h-3.5" />
             <span>
@@ -279,12 +313,13 @@ export default function EditAdminModal({
                 <div className="relative">
                   <input
                     type={showNewPassword ? "text" : "password"}
+                    disabled={isSubmitting}
                     placeholder="Minimal 8 karakter"
                     value={formData.newPassword}
                     onChange={(e) =>
                       setFormData({ ...formData, newPassword: e.target.value })
                     }
-                    className="w-full pl-3 pr-9 py-2 text-xs sm:text-sm bg-white border border-slate-200 rounded-lg outline-none focus:border-[#193f53] transition-all text-slate-800"
+                    className="w-full pl-3 pr-9 py-2 text-xs sm:text-sm bg-white border border-slate-200 rounded-lg outline-none focus:border-[#193f53] disabled:bg-slate-50 disabled:opacity-70 transition-all text-slate-800"
                   />
                   <button
                     type="button"
@@ -307,6 +342,7 @@ export default function EditAdminModal({
                 <div className="relative">
                   <input
                     type={showConfirmPassword ? "text" : "password"}
+                    disabled={isSubmitting}
                     placeholder="Ulangi password baru"
                     value={formData.confirmNewPassword}
                     onChange={(e) =>
@@ -315,7 +351,7 @@ export default function EditAdminModal({
                         confirmNewPassword: e.target.value,
                       })
                     }
-                    className="w-full pl-3 pr-9 py-2 text-xs sm:text-sm bg-white border border-slate-200 rounded-lg outline-none focus:border-[#193f53] transition-all text-slate-800"
+                    className="w-full pl-3 pr-9 py-2 text-xs sm:text-sm bg-white border border-slate-200 rounded-lg outline-none focus:border-[#193f53] disabled:bg-slate-50 disabled:opacity-70 transition-all text-slate-800"
                   />
                   <button
                     type="button"
@@ -347,15 +383,24 @@ export default function EditAdminModal({
           <button
             type="button"
             onClick={onClose}
-            className="w-full sm:w-auto px-5 py-2 text-xs sm:text-sm font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer text-center"
+            disabled={isSubmitting}
+            className="w-full sm:w-auto px-5 py-2 text-xs sm:text-sm font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 disabled:opacity-40 rounded-lg transition-colors cursor-pointer text-center"
           >
             Batal
           </button>
           <button
             type="submit"
-            className="w-full sm:w-auto px-5 py-2 text-xs sm:text-sm font-semibold text-white bg-[#193f53] hover:bg-[#143343] rounded-lg transition-colors shadow-2xs cursor-pointer text-center"
+            disabled={isSubmitting}
+            className="w-full sm:w-auto px-5 py-2 text-xs sm:text-sm font-semibold text-white bg-[#193f53] hover:bg-[#143343] disabled:opacity-70 rounded-lg transition-colors shadow-2xs cursor-pointer text-center flex items-center justify-center gap-2 min-w-[160px]"
           >
-            Simpan Perubahan
+            {isSubmitting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Menyimpan...</span>
+              </>
+            ) : (
+              <span>Simpan Perubahan</span>
+            )}
           </button>
         </div>
       </form>

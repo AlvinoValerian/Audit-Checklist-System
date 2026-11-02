@@ -34,7 +34,7 @@ interface EditStoreModalProps {
   isOpen: boolean;
   store: StoreItem | null;
   onClose: () => void;
-  onSubmit: (updatedData: Partial<StoreItem>) => void;
+  onSubmit: (updatedData: Partial<StoreItem>) => Promise<void> | void;
 }
 
 const TIMEZONE_OPTIONS = [
@@ -70,6 +70,10 @@ export default function EditStoreModal({
     fileSize: string;
     previewUrl: string;
   } | null>(null);
+  const [isPhotoDeleted, setIsPhotoDeleted] = useState<boolean>(false);
+
+  // Submitting state for loading animation
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   // Locating State
   const [isLocating, setIsLocating] = useState<boolean>(false);
@@ -89,14 +93,19 @@ export default function EditStoreModal({
       setIsActive(store.status === "Aktif");
       setLatitude(store.latitude ?? -6.183418);
       setLongitude(store.longitude ?? 106.823456);
+      setIsSubmitting(false);
+      setIsPhotoDeleted(false);
 
-      const cleanName = store.name.toLowerCase().replace(/\s+/g, "_");
-      setPhotoInfo({
-        fileName: `foto_depan_${cleanName}.jpg`,
-        fileSize: "2.4 MB • Terunggah",
-        previewUrl:
-          "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=200&auto=format&fit=crop&q=80",
-      });
+      if (store.storePicture) {
+        const cleanName = store.name.toLowerCase().replace(/\s+/g, "_");
+        setPhotoInfo({
+          fileName: `foto_outlet_${cleanName}.jpg`,
+          fileSize: "Foto Gerai Aktif",
+          previewUrl: store.storePicture,
+        });
+      } else {
+        setPhotoInfo(null);
+      }
     }
   }, [store, isOpen]);
 
@@ -150,38 +159,50 @@ export default function EditStoreModal({
   const handleLocationChange = (lat: number, lng: number) => {
     setLatitude(lat);
     setLongitude(lng);
-    reverseGeocode(lat, lng, true);
+    reverseGeocode(lat, lng, false);
   };
 
+  // HTML5 Browser Geolocation GPS Checkin
   const handleUseCurrentLocation = () => {
     if (!navigator.geolocation) {
-      toast.error("Geolocation tidak didukung oleh browser Anda.");
+      toast.error("Browser Anda tidak mendukung deteksi lokasi otomatis (Geolocation).");
       return;
     }
 
     setIsLocating(true);
-    toast.info("Mengambil titik lokasi GPS saat ini...");
+    const toastId = toast.loading("Mendeteksi koordinat GPS perangkat Anda...");
 
     navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const { latitude: lat, longitude: lng } = pos.coords;
-        setLatitude(lat);
-        setLongitude(lng);
+      (position) => {
+        const userLat = parseFloat(position.coords.latitude.toFixed(6));
+        const userLng = parseFloat(position.coords.longitude.toFixed(6));
 
-        try {
-          await reverseGeocode(lat, lng, false);
-          toast.success("Titik GPS dan alamat lengkap toko berhasil diperbarui!");
-        } catch {
-          toast.success("Titik lokasi GPS berhasil disesuaikan dengan posisi Anda!");
-        } finally {
-          setIsLocating(false);
-        }
-      },
-      (err) => {
+        setLatitude(userLat);
+        setLongitude(userLng);
         setIsLocating(false);
-        toast.error(`Gagal mendapatkan lokasi: ${err.message}`);
+        toast.dismiss(toastId);
+        toast.success(`Lokasi GPS berhasil dikunci: ${userLat}, ${userLng}`);
+
+        reverseGeocode(userLat, userLng, true);
       },
-      { enableHighAccuracy: true, timeout: 10000 }
+      (error) => {
+        setIsLocating(false);
+        toast.dismiss(toastId);
+        let errorMsg = "Gagal mengambil lokasi GPS saat ini.";
+        if (error.code === error.PERMISSION_DENIED) {
+          errorMsg = "Izin akses lokasi ditolak oleh pengguna/browser.";
+        } else if (error.code === error.POSITION_UNAVAILABLE) {
+          errorMsg = "Sinyal GPS / informasi lokasi tidak tersedia.";
+        } else if (error.code === error.TIMEOUT) {
+          errorMsg = "Waktu permintaan lokasi GPS habis (timeout).";
+        }
+        toast.error(errorMsg);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0,
+      }
     );
   };
 
@@ -200,7 +221,8 @@ export default function EditStoreModal({
           fileSize: `${sizeMb} MB • Terunggah`,
           previewUrl: reader.result as string,
         });
-        toast.success(`Foto ${file.name} berhasil diperbarui.`);
+        setIsPhotoDeleted(false);
+        toast.success(`Foto ${file.name} berhasil diunggah.`);
       };
       reader.readAsDataURL(file);
     }
@@ -208,10 +230,11 @@ export default function EditStoreModal({
 
   const handleRemovePhoto = () => {
     setPhotoInfo(null);
-    toast.info("Foto toko telah dihapus.");
+    setIsPhotoDeleted(true);
+    toast.info("Foto toko telah dihapus. Klik 'Simpan Perubahan' untuk mengonfirmasi.");
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!name.trim()) {
@@ -231,18 +254,34 @@ export default function EditStoreModal({
 
     const matchedTz = TIMEZONE_OPTIONS.find((t) => t.value === timezone);
 
-    onSubmit({
-      name: name.trim(),
-      city: city.trim(),
-      address: address.trim(),
-      timezone,
-      timezoneLabel: matchedTz?.label || `${timezone} - Waktu Indonesia Barat`,
-      geofenceRadius,
-      latitude,
-      longitude,
-      description: description.trim() || undefined,
-      status: isActive ? "Aktif" : "Nonaktif",
-    });
+    // Jika user menghapus foto: kirim explicit null. Jika ada foto baru/lama: kirim previewUrl.
+    const finalStorePicture = isPhotoDeleted
+      ? null
+      : photoInfo
+      ? photoInfo.previewUrl
+      : undefined;
+
+    setIsSubmitting(true);
+    try {
+      await onSubmit({
+        name: name.trim(),
+        city: city.trim(),
+        address: address.trim(),
+        timezone,
+        timezoneLabel: matchedTz?.label || `${timezone} - Waktu Indonesia Barat`,
+        geofenceRadius,
+        latitude,
+        longitude,
+        description: description.trim() || undefined,
+        status: isActive ? "Aktif" : "Nonaktif",
+        storePicture: finalStorePicture,
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Gagal menyimpan perubahan";
+      toast.error(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -255,26 +294,25 @@ export default function EditStoreModal({
               <h3 className="font-bold text-slate-900 text-lg leading-tight">
                 Edit Data Toko
               </h3>
-              {isActive ? (
-                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-600 border border-emerald-200">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                  Aktif
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-50 text-rose-600 border border-rose-200">
-                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                  Nonaktif
-                </span>
-              )}
+              <span
+                className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                  isActive
+                    ? "bg-emerald-50 text-emerald-600 border border-emerald-200"
+                    : "bg-rose-50 text-rose-600 border border-rose-200"
+                }`}
+              >
+                {isActive ? "Aktif" : "Nonaktif"}
+              </span>
             </div>
-            <p className="text-xs text-slate-400 mt-1 font-normal">
-              Perbarui informasi toko di dalam Workspace A beserta titik koordinat audit presisi.
+            <p className="text-xs text-slate-400 mt-0.5">
+              Perbarui rincian outlet, koordinat geofence, dan foto profil toko.
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer shrink-0"
+            disabled={isSubmitting}
+            className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer shrink-0 disabled:opacity-50"
           >
             <X className="w-5 h-5" />
           </button>
@@ -292,7 +330,7 @@ export default function EditStoreModal({
                     Informasi Utama Toko
                   </h4>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    Lengkapi data identitas dan pengaturan operasional toko.
+                    Perbarui identitas dan parameter operasional toko.
                   </p>
                 </div>
 
@@ -303,18 +341,18 @@ export default function EditStoreModal({
                   </label>
                   <input
                     type="text"
+                    required
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="Contoh: Toko A - Thamrin"
+                    placeholder="Contoh: Toko Sudirman"
                     className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#193f53]/15 focus:border-[#193f53] transition-all"
-                    required
                   />
                 </div>
 
-                {/* Timezone Toko */}
+                {/* Zona Waktu (Timezone) */}
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Timezone Toko <span className="text-rose-500">*</span>
+                    Zona Waktu (Timezone) <span className="text-rose-500">*</span>
                   </label>
                   <div className="relative">
                     <select
@@ -322,9 +360,9 @@ export default function EditStoreModal({
                       onChange={(e) => setTimezone(e.target.value as StoreTimezone)}
                       className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#193f53]/15 focus:border-[#193f53] transition-all appearance-none cursor-pointer pr-10"
                     >
-                      {TIMEZONE_OPTIONS.map((tz) => (
-                        <option key={tz.value} value={tz.value}>
-                          {tz.label}
+                      {TIMEZONE_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
                         </option>
                       ))}
                     </select>
@@ -334,18 +372,23 @@ export default function EditStoreModal({
 
                 {/* Alamat Lengkap */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Alamat Lengkap <span className="text-rose-500">*</span>
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-bold text-slate-700">
+                      Alamat Lengkap <span className="text-rose-500">*</span>
+                    </label>
+                    <span className="text-[11px] text-slate-400">
+                      Terhubung otomatis via pin peta
+                    </span>
+                  </div>
                   <div className="relative">
-                    <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3 pointer-events-none" />
                     <textarea
+                      required
                       value={address}
                       onChange={(e) => setAddress(e.target.value)}
-                      placeholder="Jl. M.H. Thamrin No. 28, Gondangdia, Menteng, Jakarta Pusat, DKI Jakarta"
+                      placeholder="Masukkan alamat lengkap toko beserta nomor, jalan, kelurahan, dan kecamatan..."
                       rows={2}
-                      className="w-full pl-10 pr-3.5 py-2 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#193f53]/15 focus:border-[#193f53] transition-all resize-none"
-                      required
+                      className="w-full pl-10 pr-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#193f53]/15 focus:border-[#193f53] transition-all resize-none"
                     />
                   </div>
                 </div>
@@ -353,19 +396,19 @@ export default function EditStoreModal({
                 {/* Kota / Kabupaten */}
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Kota / Kabupaten <span className="text-rose-500">*</span>
+                    Kota / Wilayah Operasional <span className="text-rose-500">*</span>
                   </label>
                   <input
                     type="text"
+                    required
                     value={city}
                     onChange={(e) => setCity(e.target.value)}
-                    placeholder="Contoh: Jakarta Pusat"
+                    placeholder="Contoh: Kota Malang atau Jakarta Pusat"
                     className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#193f53]/15 focus:border-[#193f53] transition-all"
-                    required
                   />
                 </div>
 
-                {/* Radius Toleransi GPS Geofence */}
+                {/* Radius Toleransi GPS Geofence (Sama persis dengan CreateStoreModal) */}
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1.5">
                     Radius Toleransi GPS Geofence <span className="text-rose-500">*</span>
@@ -463,7 +506,7 @@ export default function EditStoreModal({
                           <span>Ganti Foto</span>
                           <input
                             type="file"
-                            accept="image/png,image/jpeg,image/jpg"
+                            accept="image/png,image/jpeg,image/jpg,image/webp"
                             onChange={handlePhotoUpload}
                             className="hidden"
                           />
@@ -482,69 +525,62 @@ export default function EditStoreModal({
                     <label className="relative border-2 border-dashed border-[#bfdbfe] hover:border-[#60a5fa] rounded-2xl p-4 bg-[#f8fbff] flex flex-col items-center justify-center text-center transition-colors cursor-pointer block">
                       <input
                         type="file"
-                        accept="image/png,image/jpeg,image/jpg"
+                        accept="image/png,image/jpeg,image/jpg,image/webp"
                         onChange={handlePhotoUpload}
                         className="hidden"
                       />
-                      <div className="w-9 h-9 rounded-full bg-[#dbeafe] text-[#1d4ed8] flex items-center justify-center mb-1.5">
-                        <UploadCloud className="w-4 h-4" />
+                      <div className="w-10 h-10 rounded-full bg-[#eff6ff] text-[#2563eb] flex items-center justify-center mb-2 shadow-2xs">
+                        <UploadCloud className="w-5 h-5" />
                       </div>
-                      <p className="text-xs text-slate-700 font-medium">
-                        <span className="text-[#1d4ed8] font-bold underline">
-                          Klik untuk unggah file
-                        </span>{" "}
-                        atau seret foto ke sini
+                      <p className="text-xs font-semibold text-slate-800">
+                        Unggah Foto Toko (Tampak Depan)
                       </p>
                       <p className="text-[11px] text-slate-400 mt-0.5">
-                        Mendukung format PNG, JPG, JPEG hingga 5MB
+                        PNG, JPG atau WEBP hingga 5MB
                       </p>
                     </label>
                   )}
                 </div>
 
-                {/* Status Operasional Toko (Toggle Switch) */}
-                <div className="pt-1 flex items-center justify-between">
+                {/* Status Toggle Card */}
+                <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3.5 flex items-center justify-between">
                   <div>
-                    <h5 className="font-bold text-xs sm:text-sm text-slate-900 leading-tight">
+                    <h5 className="text-xs font-bold text-slate-800">
                       Status Operasional Toko
                     </h5>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      Toko langsung aktif dan siap dijadwalkan jadwal checklist audit.
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      {isActive
+                        ? "Toko dapat ditugaskan untuk audit & inspeksi rutin"
+                        : "Toko nonaktif sementara tidak dapat menerima penugasan baru"}
                     </p>
                   </div>
-
-                  {/* Toggle Switch */}
                   <button
                     type="button"
-                    role="switch"
-                    aria-checked={isActive}
                     onClick={() => setIsActive(!isActive)}
-                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      isActive ? "bg-[#1d4ed8]" : "bg-slate-300"
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer ${
+                      isActive ? "bg-emerald-500" : "bg-slate-300"
                     }`}
                   >
                     <span
-                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                        isActive ? "translate-x-5" : "translate-x-0"
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        isActive ? "translate-x-6" : "translate-x-1"
                       }`}
                     />
                   </button>
                 </div>
               </div>
 
-              {/* RIGHT COLUMN: Penetapan Titik Audit */}
-              <div className="lg:col-span-5 bg-[#fbfcfd] rounded-2xl border border-slate-200/80 p-5 shadow-2xs space-y-4">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
+              {/* RIGHT COLUMN: Peta Lokasi & Geofence Interaktif */}
+              <div className="lg:col-span-5 bg-[#fbfcfd] border border-slate-200/80 rounded-2xl p-5 shadow-2xs space-y-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <Compass className="w-4 h-4 text-[#193f53]" />
                     <h4 className="font-bold text-slate-900 text-sm sm:text-base leading-tight">
-                      Penetapan Titik Audit
+                      Titik Fisik Audit Toko
                     </h4>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      Koordinat akurat lokasi toko fisik
-                    </p>
                   </div>
 
-                  {/* Gunakan Lokasi Saya Button */}
+                  {/* HTML5 Geolocation Button */}
                   <button
                     type="button"
                     onClick={handleUseCurrentLocation}
@@ -625,17 +661,28 @@ export default function EditStoreModal({
             <button
               type="button"
               onClick={onClose}
-              className="px-5 py-2 text-xs sm:text-sm font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl transition-colors cursor-pointer"
+              disabled={isSubmitting}
+              className="px-5 py-2 text-xs sm:text-sm font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
             >
               Batal
             </button>
             <button
               type="submit"
               form="edit-store-form"
-              className="flex items-center gap-1.5 px-6 py-2 text-xs sm:text-sm font-semibold text-white bg-[#193f53] hover:bg-[#123040] rounded-xl transition-all shadow-sm cursor-pointer"
+              disabled={isSubmitting}
+              className="flex items-center gap-1.5 px-6 py-2 text-xs sm:text-sm font-semibold text-white bg-[#193f53] hover:bg-[#123040] rounded-xl transition-all shadow-sm cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              <Check className="w-4 h-4" />
-              <span>Simpan Perubahan</span>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-white" />
+                  <span>Menyimpan...</span>
+                </>
+              ) : (
+                <>
+                  <Check className="w-4 h-4" />
+                  <span>Simpan Perubahan</span>
+                </>
+              )}
             </button>
           </div>
         </div>

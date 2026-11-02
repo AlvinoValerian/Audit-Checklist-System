@@ -12,6 +12,8 @@ import {
   Pencil,
   AlertCircle,
   CheckCircle2,
+  Lock,
+  ShieldCheck,
 } from "lucide-react";
 import { StoreItem } from "@/types/toko";
 
@@ -91,15 +93,36 @@ export default function DetailStoreModal({
           {/* Store Info Banner Card */}
           <div className="bg-slate-50/70 border border-slate-200/80 rounded-xl p-3.5 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-[#e2ecf3] text-[#193f53] font-bold text-base flex items-center justify-center shrink-0 border border-slate-200">
-                {initialLetter.toUpperCase()}
+              <div className="w-11 h-11 rounded-xl bg-[#e2ecf3] text-[#193f53] font-bold text-base flex items-center justify-center shrink-0 border border-slate-200 overflow-hidden shadow-2xs relative">
+                {store.storePicture ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={store.storePicture}
+                    alt={store.name}
+                    className="w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLElement).style.display = "none";
+                    }}
+                  />
+                ) : (
+                  initialLetter.toUpperCase()
+                )}
               </div>
               <div>
-                <h4 className="font-bold text-slate-900 text-sm sm:text-base leading-tight">
-                  {store.name}
-                </h4>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <h4 className="font-semibold text-slate-900 text-sm sm:text-base leading-tight">
+                    {store.name}
+                  </h4>
+                  {store.isImageEncrypted && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9.5px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      <Lock className="w-2.5 h-2.5 text-emerald-600" />
+                      AES-256
+                    </span>
+                  )}
+                </div>
                 <p className="text-xs text-slate-500 font-normal mt-0.5">
-                  {store.city || "Jakarta Pusat"}
+                  {store.city || "Kota Malang"}
                 </p>
               </div>
             </div>
@@ -126,12 +149,40 @@ export default function DetailStoreModal({
             </div>
           </div>
 
+          {/* DOKUMENTASI FOTO GERAI TOKO */}
+          {store.storePicture && (
+            <div className="bg-white border border-slate-200/90 rounded-xl p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-[10px] sm:text-[11px] font-bold text-slate-400 tracking-wider uppercase flex items-center gap-1.5">
+                  <Store className="w-3.5 h-3.5 text-slate-400" />
+                  <span>DOKUMENTASI FOTO GERAI TOKO</span>
+                </div>
+                <div className="flex items-center gap-1 text-[10px] font-normal text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                  <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                  <span>Foto Terenkripsi AES-256</span>
+                </div>
+              </div>
+              <div className="relative w-full h-40 sm:h-48 rounded-xl overflow-hidden bg-slate-900 border border-slate-200 shadow-2xs group">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={store.storePicture}
+                  alt={store.name}
+                  className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-102"
+                  referrerPolicy="no-referrer"
+                />
+                <div className="absolute bottom-2 left-2 px-2.5 py-1 rounded-md bg-slate-900/80 backdrop-blur-xs text-white text-[11px] font-normal flex items-center gap-1.5 shadow-xs">
+                  <span>Outlet: {store.name}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* ALAMAT LENGKAP */}
           <div className="bg-white border border-slate-200/90 rounded-xl p-3">
             <div className="text-[10px] sm:text-[11px] font-bold text-slate-400 tracking-wider uppercase mb-1">
               ALAMAT LENGKAP
             </div>
-            <p className="text-xs sm:text-sm font-medium text-slate-800 leading-relaxed">
+            <p className="text-xs sm:text-sm font-normal text-slate-700 leading-relaxed">
               {store.address}
             </p>
           </div>
@@ -143,7 +194,7 @@ export default function DetailStoreModal({
               <div className="text-[10px] sm:text-[11px] font-bold text-slate-400 tracking-wider uppercase mb-1">
                 ZONA WAKTU (TIMEZONE)
               </div>
-              <p className="text-xs sm:text-sm font-medium text-slate-800">
+              <p className="text-xs sm:text-sm font-normal text-slate-700">
                 {timezoneText}
               </p>
             </div>
@@ -153,8 +204,8 @@ export default function DetailStoreModal({
               <div className="text-[10px] sm:text-[11px] font-bold text-slate-400 tracking-wider uppercase mb-1">
                 RADIUS GEOFENCE
               </div>
-              <p className="text-xs sm:text-sm font-medium text-slate-800">
-                <span className="font-bold text-slate-900">{geofenceRadius} meter</span>{" "}
+              <p className="text-xs sm:text-sm font-normal text-slate-700">
+                <span>{geofenceRadius} meter</span>{" "}
                 <span className="text-slate-400 text-xs font-normal">
                   (Auto-checkin radius)
                 </span>
@@ -172,15 +223,14 @@ export default function DetailStoreModal({
                 href={googleMapsUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-xs font-semibold text-slate-700 hover:text-sky-600 flex items-center gap-1 transition-colors cursor-pointer"
+                className="text-xs font-medium text-sky-600 hover:text-sky-700 flex items-center gap-1 transition-colors cursor-pointer"
               >
                 <span>Lihat di Google Maps</span>
-                <ExternalLink className="w-3 h-3 text-slate-500" />
+                <ExternalLink className="w-3 h-3 text-sky-600" />
               </a>
             </div>
-            <p className="text-xs sm:text-sm font-medium text-slate-800">
-              Lat: <span className="font-semibold">{latitude}</span>, Long:{" "}
-              <span className="font-semibold">{longitude}</span>
+            <p className="text-xs sm:text-sm font-normal text-slate-700">
+              Lat: {latitude}, Long: {longitude}
             </p>
           </div>
 
@@ -194,24 +244,24 @@ export default function DetailStoreModal({
               <div className="flex items-center gap-2">
                 {store.findingsCount === 0 ? (
                   <>
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-slate-100 text-slate-600">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-normal bg-slate-100 text-slate-600">
                       0 Temuan
                     </span>
-                    <span className="text-xs text-slate-400">Kondisi optimal</span>
+                    <span className="text-xs text-slate-400 font-normal">Kondisi optimal</span>
                   </>
                 ) : store.findingsCount <= 5 ? (
                   <>
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-orange-50 text-orange-700 border border-orange-200">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-normal bg-orange-50 text-orange-700 border border-orange-200">
                       {store.findingsCount} Temuan
                     </span>
-                    <span className="text-xs text-slate-400">Perlu tindak lanjut</span>
+                    <span className="text-xs text-slate-400 font-normal">Perlu tindak lanjut</span>
                   </>
                 ) : (
                   <>
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-normal bg-rose-50 text-rose-700 border border-rose-200">
                       {store.findingsCount} Temuan
                     </span>
-                    <span className="text-xs text-slate-400">Prioritas tinggi</span>
+                    <span className="text-xs text-slate-400 font-normal">Prioritas tinggi</span>
                   </>
                 )}
               </div>
@@ -222,7 +272,7 @@ export default function DetailStoreModal({
               <div className="text-[10px] sm:text-[11px] font-bold text-slate-400 tracking-wider uppercase mb-1">
                 JADWAL OPERASIONAL
               </div>
-              <p className="text-xs sm:text-sm font-medium text-slate-800">
+              <p className="text-xs sm:text-sm font-normal text-slate-700">
                 {operationalHours}
               </p>
             </div>
@@ -233,7 +283,7 @@ export default function DetailStoreModal({
             <div className="text-[10px] sm:text-[11px] font-bold text-slate-400 tracking-wider uppercase mb-1">
               CATATAN / DESKRIPSI
             </div>
-            <p className="text-xs text-slate-600 leading-relaxed">
+            <p className="text-xs font-normal text-slate-600 leading-relaxed">
               {description}
             </p>
           </div>
@@ -245,7 +295,7 @@ export default function DetailStoreModal({
                 <Compass className="w-3.5 h-3.5 text-slate-400" />
                 <span>GEOFENCE VISUALIZER</span>
               </div>
-              <span className="text-[10px] sm:text-[11px] font-medium text-slate-400">
+              <span className="text-[10px] sm:text-[11px] font-normal text-slate-400">
                 Radius: {geofenceRadius}M
               </span>
             </div>

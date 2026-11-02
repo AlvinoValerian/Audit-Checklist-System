@@ -3,11 +3,14 @@ export type RecurrenceType = "Setiap Hari" | "Hari Tertentu";
 
 export interface AuditSchedule {
   id: string;
+  workspaceId?: string;
+  storeId?: string;
   storeName: string;
   storeLocation: string;
   selectedStores?: string[];
   scheduleName: string;
   templateId?: string;
+  templateName?: string;
   auditorName?: string;
   timeRange: string;
   startTime?: string;

@@ -3,13 +3,14 @@
 import React from "react";
 import Modal from "@/components/ui/Modal";
 import { AdminUser } from "@/types/admin";
-import { Trash2, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Trash2, AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 
 interface DeleteAdminModalProps {
   isOpen: boolean;
   admin: AdminUser | null;
   onClose: () => void;
   onConfirm: () => void;
+  isSubmitting?: boolean;
 }
 
 export default function DeleteAdminModal({
@@ -17,6 +18,7 @@ export default function DeleteAdminModal({
   admin,
   onClose,
   onConfirm,
+  isSubmitting = false,
 }: DeleteAdminModalProps) {
   if (!admin) return null;
 
@@ -25,7 +27,7 @@ export default function DeleteAdminModal({
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={isSubmitting ? () => {} : onClose}
       title={isDeactivating ? "Konfirmasi Nonaktifkan Admin" : "Konfirmasi Aktifkan Admin"}
       subtitle={isDeactivating ? "Nonaktifkan Akun Pengguna (Soft Delete)" : "Aktifkan Kembali Akun Pengguna"}
       icon={
@@ -89,20 +91,29 @@ export default function DeleteAdminModal({
           <button
             type="button"
             onClick={onClose}
-            className="w-full sm:w-auto px-5 py-2.5 text-xs sm:text-sm font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer text-center"
+            disabled={isSubmitting}
+            className="w-full sm:w-auto px-5 py-2.5 text-xs sm:text-sm font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 disabled:opacity-40 rounded-lg transition-colors cursor-pointer text-center"
           >
             Batal
           </button>
           <button
             type="button"
             onClick={onConfirm}
-            className={`w-full sm:w-auto px-5 py-2.5 text-xs sm:text-sm font-semibold text-white rounded-lg transition-colors shadow-2xs cursor-pointer text-center ${
+            disabled={isSubmitting}
+            className={`w-full sm:w-auto px-5 py-2.5 text-xs sm:text-sm font-semibold text-white rounded-lg transition-colors shadow-2xs cursor-pointer text-center flex items-center justify-center gap-2 min-w-[190px] ${
               isDeactivating
-                ? "bg-[#cc0000] hover:bg-[#b30000]"
-                : "bg-emerald-600 hover:bg-emerald-700"
+                ? "bg-[#cc0000] hover:bg-[#b30000] disabled:opacity-70"
+                : "bg-emerald-600 hover:bg-emerald-700 disabled:opacity-70"
             }`}
           >
-            {isDeactivating ? "Ya, Nonaktifkan Admin" : "Ya, Aktifkan Admin"}
+            {isSubmitting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>{isDeactivating ? "Menonaktifkan..." : "Mengaktifkan..."}</span>
+              </>
+            ) : (
+              <span>{isDeactivating ? "Ya, Nonaktifkan Admin" : "Ya, Aktifkan Admin"}</span>
+            )}
           </button>
         </div>
       </div>

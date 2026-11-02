@@ -15,16 +15,25 @@ import {
   ChevronRight,
   TrendingUp,
   FileCheck2,
+  Loader2,
+  Building2,
 } from "lucide-react";
 import { TemplateService } from "@/services/template.service";
+import { WorkspaceService } from "@/services/workspace.service";
+import { AuthService } from "@/lib/auth";
+import { Workspace } from "@/types/workspace";
 import { TemplateItem, TemplateStats, TemplateStatus } from "@/types/template";
 import { toast } from "sonner";
+import { format } from "date-fns";
 import ActionButtons from "@/components/ui/ActionButtons";
 import CreateTemplate from "./components/CreateTemplate";
 import EditTemplate from "./components/EditTemplate";
 import DetailTemplate from "./components/DetailTemplate";
 import SoftDeleteModal from "./components/SoftDeleteModal";
 import RestoreTemplateModal from "./components/RestoreTemplateModal";
+import { ScheduleService, isScheduleInProgress } from "@/services/schedule.service";
+import { AuditSchedule } from "@/types/schedule";
+import ChecklistRequiredModal from "@/app/jadwal-audit/components/ChecklistRequiredModal";
 
 export default function TemplateChecklistPage() {
   const [templates, setTemplates] = useState<TemplateItem[]>([]);
@@ -34,6 +43,13 @@ export default function TemplateChecklistPage() {
     inactive: 0,
     activePercentage: 0,
   });
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Workspace Scoping States
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>("");
+  const [currentWorkspaceName, setCurrentWorkspaceName] = useState<string>("Workspace");
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
   // Modal & View States
   const [isCreating, setIsCreating] = useState(false);
@@ -45,9 +61,17 @@ export default function TemplateChecklistPage() {
   const [isDeactivateModalOpen, setIsDeactivateModalOpen] = useState(false);
   const [templateToDeactivate, setTemplateToDeactivate] = useState<TemplateItem | null>(null);
 
+  // Relasi Jadwal Audit Aktif yang Terhubung
+  const [connectedSchedules, setConnectedSchedules] = useState<AuditSchedule[]>([]);
+  const [deactivatingScheduleId, setDeactivatingScheduleId] = useState<string | null>(null);
+  const [scheduleForChecklist, setScheduleForChecklist] = useState<AuditSchedule | null>(null);
+  const [isChecklistRequiredOpen, setIsChecklistRequiredOpen] = useState(false);
+  const [isSubmittingChecklist, setIsSubmittingChecklist] = useState(false);
+
   // Restore / Aktifkan Kembali Modal State
   const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false);
   const [templateToRestore, setTemplateToRestore] = useState<TemplateItem | null>(null);
+  const [isSubmittingModal, setIsSubmittingModal] = useState(false);
 
   // Search & Filter State
   const [searchTerm, setSearchTerm] = useState("");
@@ -58,34 +82,233 @@ export default function TemplateChecklistPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 5;
 
-  const refreshData = useCallback(() => {
-    const list = TemplateService.getAll();
+  const refreshData = useCallback(async (targetWs?: string, showLoading = false) => {
+    if (showLoading) setIsLoading(true);
+    const activeWs = AuthService.getActiveWorkspace();
+    const wsId = targetWs || selectedWorkspaceId || activeWs?.id;
+    try {
+      const liveList = await TemplateService.fetchAll(wsId);
+      if (Array.isArray(liveList)) {
+        setTemplates(liveList);
+        setStats(TemplateService.getStats(liveList));
+        return;
+      }
+    } catch (err) {
+      console.warn("Gagal memuat template dari backend, menggunakan cache:", err);
+    } finally {
+      setIsLoading(false);
+    }
+    const list = TemplateService.getAll(wsId);
     setTemplates(list);
     setStats(TemplateService.getStats(list));
-  }, []);
+    setIsLoading(false);
+  }, [selectedWorkspaceId]);
 
   useEffect(() => {
-    refreshData();
-  }, [refreshData]);
+    const init = async () => {
+      setIsLoading(true);
+      const user = AuthService.getCurrentUser();
+      const activeWs = AuthService.getActiveWorkspace();
+      const isSA = user?.role === "Super Admin";
+      setIsSuperAdmin(isSA);
 
-  // Handlers
-  const handleConfirmDeactivate = () => {
-    if (templateToDeactivate) {
-      TemplateService.update(templateToDeactivate.id, { status: "Nonaktif" });
-      toast.success(`Template "${templateToDeactivate.title}" berhasil dinonaktifkan.`);
-      setIsDeactivateModalOpen(false);
-      setTemplateToDeactivate(null);
-      refreshData();
+      let targetWsId = activeWs?.id || user?.workspaceId || "";
+      let targetWsName = activeWs?.name || user?.workspaceName || "Workspace";
+
+      if (isSA) {
+        try {
+          const wsList = await WorkspaceService.fetchAll();
+          setWorkspaces(wsList);
+          if (wsList.length > 0) {
+            const matched = wsList.find((w) => w.id === targetWsId && w.status !== "Nonaktif");
+            if (matched) {
+              targetWsId = matched.id;
+              targetWsName = matched.companyName || matched.name;
+            } else {
+              const firstActive = wsList.find((w) => w.status !== "Nonaktif") || wsList[0];
+              targetWsId = firstActive.id;
+              targetWsName = firstActive.companyName || firstActive.name;
+              AuthService.setActiveWorkspace({
+                id: firstActive.id,
+                name: targetWsName,
+              });
+            }
+          }
+        } catch (err) {
+          console.warn("Gagal memuat daftar workspace:", err);
+        }
+      }
+
+      setSelectedWorkspaceId(targetWsId);
+      setCurrentWorkspaceName(targetWsName);
+      await refreshData(targetWsId, true);
+    };
+
+    init();
+  }, []);
+
+  const handleWorkspaceChange = async (newWsId: string) => {
+    const chosen = workspaces.find((w) => w.id === newWsId);
+    if (chosen?.status === "Nonaktif") {
+      toast.error(`Workspace "${chosen.companyName || chosen.name}" sedang nonaktif dan tidak dapat dipilih.`);
+      return;
+    }
+
+    setSelectedWorkspaceId(newWsId);
+    if (chosen) {
+      const name = chosen.companyName || chosen.name;
+      setCurrentWorkspaceName(name);
+      AuthService.setActiveWorkspace({ id: chosen.id, name });
+      toast.info(`Menampilkan template checklist untuk workspace "${name}"`);
+    }
+    await refreshData(newWsId, true);
+  };
+
+  const loadConnectedSchedulesForTemplate = async (template: TemplateItem) => {
+    try {
+      const allSchedules = await ScheduleService.fetchAll(selectedWorkspaceId);
+      const tId = template.id;
+      const tTitle = (template.title || "").toLowerCase().trim();
+      const tNumeric = tId.replace(/\D/g, "");
+
+      const active = allSchedules.filter((s) => {
+        if (s.status === "Dibatalkan") return false;
+        const sId = s.templateId;
+        const sName = (s.templateName || "").toLowerCase().trim();
+        const sNumeric = sId ? sId.replace(/\D/g, "") : "";
+
+        const matchId = sId === tId || (tNumeric && sNumeric && tNumeric === sNumeric);
+        const matchName = tTitle && sName && (sName === tTitle || sName.includes(tTitle) || tTitle.includes(sName));
+
+        return matchId || matchName;
+      });
+      setConnectedSchedules(active);
+    } catch (err) {
+      console.warn("Gagal memuat jadwal terhubung:", err);
+      setConnectedSchedules([]);
     }
   };
 
-  const handleConfirmRestore = () => {
+  const handleOpenDeactivateModal = async (template: TemplateItem) => {
+    setTemplateToDeactivate(template);
+    setIsDeactivateModalOpen(true);
+    await loadConnectedSchedulesForTemplate(template);
+  };
+
+  const handleDeactivateScheduleFromTemplate = async (schedule: AuditSchedule) => {
+    // Jika jadwal sedang berlangsung di jam dan hari ini, TIDAK BISA dinonaktifkan
+    if (isScheduleInProgress(schedule)) {
+      toast.error(
+        `Jadwal "${schedule.scheduleName}" sedang berlangsung saat ini (${schedule.timeRange || ""}). Tidak dapat dinonaktifkan selama audit berjalan.`
+      );
+      return;
+    }
+
+    // Jika jadwal masih berstatus "Terjadwal" (belum selesai), WAJIB selesaikan checklist terlebih dahulu
+    if (schedule.status === "Terjadwal") {
+      setScheduleForChecklist(schedule);
+      setIsChecklistRequiredOpen(true);
+      return;
+    }
+
+    // Jika jadwal sudah "Selesai", dapat langsung dinonaktifkan
+    setDeactivatingScheduleId(schedule.id);
+    const todayStr = format(new Date(), "yyyy-MM-dd");
+    try {
+      try {
+        await ScheduleService.updateAsync(schedule.id, {
+          status: "Dibatalkan",
+          deletedAt: todayStr,
+        });
+      } catch {
+        ScheduleService.update(schedule.id, {
+          status: "Dibatalkan",
+          deletedAt: todayStr,
+        });
+      }
+      toast.success(`Jadwal "${schedule.scheduleName}" berhasil dinonaktifkan.`);
+      setConnectedSchedules((prev) => prev.filter((s) => s.id !== schedule.id));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Gagal menonaktifkan jadwal";
+      toast.error(msg);
+    } finally {
+      setDeactivatingScheduleId(null);
+    }
+  };
+
+  const handleCompleteAndDeactivateSchedule = async () => {
+    if (!scheduleForChecklist) return;
+    if (isScheduleInProgress(scheduleForChecklist)) {
+      toast.error(
+        `Jadwal "${scheduleForChecklist.scheduleName}" sedang berlangsung saat ini (${scheduleForChecklist.timeRange || ""}). Tidak dapat dinonaktifkan selama audit berjalan.`
+      );
+      return;
+    }
+    setIsSubmittingChecklist(true);
+    const todayStr = format(new Date(), "yyyy-MM-dd");
+    try {
+      try {
+        await ScheduleService.updateAsync(scheduleForChecklist.id, {
+          status: "Dibatalkan",
+          deletedAt: todayStr,
+        });
+      } catch {
+        ScheduleService.update(scheduleForChecklist.id, {
+          status: "Dibatalkan",
+          deletedAt: todayStr,
+        });
+      }
+      toast.success(`Checklist selesai & jadwal "${scheduleForChecklist.scheduleName}" berhasil dinonaktifkan.`);
+      setConnectedSchedules((prev) => prev.filter((s) => s.id !== scheduleForChecklist.id));
+      setIsChecklistRequiredOpen(false);
+      setScheduleForChecklist(null);
+    } catch (err: unknown) {
+      toast.error("Gagal menyelesaikan checklist jadwal.");
+    } finally {
+      setIsSubmittingChecklist(false);
+    }
+  };
+
+  // Handlers
+  const handleConfirmDeactivate = async () => {
+    if (templateToDeactivate) {
+      setIsSubmittingModal(true);
+      try {
+        await Promise.all([
+          TemplateService.toggleStatusAsync(templateToDeactivate.id, "Nonaktif"),
+          new Promise((r) => setTimeout(r, 450)),
+        ]);
+        toast.success(`Template "${templateToDeactivate.title}" berhasil dinonaktifkan.`);
+        setIsDeactivateModalOpen(false);
+        setTemplateToDeactivate(null);
+        refreshData();
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Gagal menonaktifkan template";
+        toast.error(msg);
+      } finally {
+        setIsSubmittingModal(false);
+      }
+    }
+  };
+
+  const handleConfirmRestore = async () => {
     if (templateToRestore) {
-      TemplateService.update(templateToRestore.id, { status: "Aktif" });
-      toast.success(`Template "${templateToRestore.title}" berhasil diaktifkan kembali.`);
-      setIsRestoreModalOpen(false);
-      setTemplateToRestore(null);
-      refreshData();
+      setIsSubmittingModal(true);
+      try {
+        await Promise.all([
+          TemplateService.toggleStatusAsync(templateToRestore.id, "Aktif"),
+          new Promise((r) => setTimeout(r, 450)),
+        ]);
+        toast.success(`Template "${templateToRestore.title}" berhasil diaktifkan kembali.`);
+        setIsRestoreModalOpen(false);
+        setTemplateToRestore(null);
+        refreshData();
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Gagal mengaktifkan template";
+        toast.error(msg);
+      } finally {
+        setIsSubmittingModal(false);
+      }
     }
   };
 
@@ -125,14 +348,16 @@ export default function TemplateChecklistPage() {
     return (
       <DashboardLayout>
         <CreateTemplate
+          workspaceId={selectedWorkspaceId}
+          workspaceName={currentWorkspaceName}
           onBack={() => {
             setIsCreating(false);
-            refreshData();
+            refreshData(selectedWorkspaceId);
             resetScroll();
           }}
           onSuccess={() => {
             setIsCreating(false);
-            refreshData();
+            refreshData(selectedWorkspaceId);
             resetScroll();
           }}
         />
@@ -148,13 +373,13 @@ export default function TemplateChecklistPage() {
           onBack={() => {
             setIsEditing(false);
             setTemplateToEdit(null);
-            refreshData();
+            refreshData(selectedWorkspaceId);
             resetScroll();
           }}
           onSuccess={() => {
             setIsEditing(false);
             setTemplateToEdit(null);
-            refreshData();
+            refreshData(selectedWorkspaceId);
             resetScroll();
           }}
         />
@@ -166,7 +391,34 @@ export default function TemplateChecklistPage() {
     <DashboardLayout>
       <Header
         title="Template Checklist"
-        subtitle="Kelola template dan daftar butir checklist operasional audit toko"
+        subtitle={`Kelola template dan daftar butir checklist operasional audit di ${currentWorkspaceName}.`}
+        action={
+          isSuperAdmin && workspaces.length > 1 ? (
+            <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs">
+              <Building2 className="w-4 h-4 text-sky-600 shrink-0" />
+              <span className="text-xs font-semibold text-slate-600 shrink-0">Workspace:</span>
+              <select
+                value={selectedWorkspaceId}
+                onChange={(e) => handleWorkspaceChange(e.target.value)}
+                className="bg-transparent text-slate-800 text-xs font-bold focus:outline-none cursor-pointer pr-1"
+              >
+                {workspaces.map((w) => {
+                  const isInactive = w.status === "Nonaktif";
+                  return (
+                    <option
+                      key={w.id}
+                      value={w.id}
+                      disabled={isInactive}
+                      className={isInactive ? "text-slate-400 bg-slate-100 italic" : "text-slate-800"}
+                    >
+                      {w.companyName || w.name} {isInactive ? "(Nonaktif)" : `(${w.storeCount} Toko)`}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+          ) : undefined
+        }
       />
 
       {/* 3 Metric Summary Cards */}
@@ -323,7 +575,21 @@ export default function TemplateChecklistPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
-              {paginatedTemplates.length === 0 ? (
+              {isLoading ? (
+                <tr>
+                  <td colSpan={4} className="py-16 text-center text-slate-400">
+                    <div className="flex flex-col items-center justify-center gap-2">
+                      <Loader2 className="w-6 h-6 text-[#193f53] animate-spin" />
+                      <span className="text-xs font-semibold text-slate-700">
+                        Memuat data template checklist...
+                      </span>
+                      <span className="text-[11px] text-slate-400">
+                        Menghubungkan ke database
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+              ) : paginatedTemplates.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="py-12 text-center text-slate-400">
                     <FileCheck2 className="w-8 h-8 mx-auto mb-2 text-slate-300 stroke-[1.5]" />
@@ -410,8 +676,7 @@ export default function TemplateChecklistPage() {
                             isDeactivated
                               ? undefined
                               : () => {
-                                  setTemplateToDeactivate(template);
-                                  setIsDeactivateModalOpen(true);
+                                  handleOpenDeactivateModal(template);
                                 }
                           }
                           onRestore={
@@ -442,8 +707,7 @@ export default function TemplateChecklistPage() {
             <span className="font-semibold text-slate-700">{filteredTemplates.length}</span> template
           </div>
 
-          {totalPages > 1 && (
-            <div className="flex items-center gap-1.5 self-center sm:self-auto">
+          <div className="flex items-center gap-1.5 self-center sm:self-auto">
               {/* Previous Button */}
               <button
                 type="button"
@@ -477,12 +741,12 @@ export default function TemplateChecklistPage() {
                 onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
                 disabled={currentPage === totalPages}
                 className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer text-xs font-medium"
+                title="Halaman Selanjutnya"
               >
                 <span>Selanjutnya</span>
                 <ChevronRight className="w-3.5 h-3.5" />
               </button>
             </div>
-          )}
         </div>
       </div>
 
@@ -493,8 +757,26 @@ export default function TemplateChecklistPage() {
         onClose={() => {
           setIsDeactivateModalOpen(false);
           setTemplateToDeactivate(null);
+          setConnectedSchedules([]);
         }}
         onConfirm={handleConfirmDeactivate}
+        isSubmitting={isSubmittingModal}
+        connectedSchedules={connectedSchedules}
+        onDeactivateSchedule={handleDeactivateScheduleFromTemplate}
+        deactivatingScheduleId={deactivatingScheduleId}
+        workspaceName={currentWorkspaceName}
+      />
+
+      {/* Pop up Relasi: Template Checklist Wajib Selesai Sebelum Nonaktifkan Jadwal */}
+      <ChecklistRequiredModal
+        isOpen={isChecklistRequiredOpen}
+        schedule={scheduleForChecklist}
+        onClose={() => {
+          setIsChecklistRequiredOpen(false);
+          setScheduleForChecklist(null);
+        }}
+        onCompleteAndDeactivate={handleCompleteAndDeactivateSchedule}
+        isSubmitting={isSubmittingChecklist}
       />
 
       {/* Restore Template Modal */}
@@ -506,6 +788,7 @@ export default function TemplateChecklistPage() {
           setTemplateToRestore(null);
         }}
         onConfirm={handleConfirmRestore}
+        isSubmitting={isSubmittingModal}
       />
 
       {/* Detail Template Drawer */}

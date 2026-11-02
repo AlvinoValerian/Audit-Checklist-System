@@ -1,78 +1,43 @@
 import { Holiday, HolidayStatus } from "@/types/holiday";
+import { AuthService } from "@/lib/auth";
 
-const HOLIDAY_STORAGE_KEY = "audit_pro_holidays_v2";
-
-// Helper to calculate dynamic dates relative to current month & year
-const getDynamicDate = (day: number) => {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(day).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+const getBackendUrl = (): string => {
+  if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
+  if (typeof window !== "undefined") return "";
+  return "http://127.0.0.1:5000";
 };
 
-const defaultHolidays: Holiday[] = [
-  {
-    id: "1",
-    storeName: "Cabang Sudirman",
-    storeLocation: "Jakarta Pusat",
-    startDate: getDynamicDate(17),
-    endDate: getDynamicDate(18),
-    durationDays: 2,
-    reason: "Renovasi Tahunan Toko",
-    createdBy: "Admin Utama",
-    creatorRole: "Admin",
-    status: "Terjadwal",
-  },
-  {
-    id: "2",
-    storeName: "Cabang Thamrin",
-    storeLocation: "Jakarta Pusat",
-    startDate: getDynamicDate(25),
-    endDate: getDynamicDate(25),
-    durationDays: 1,
-    reason: "Maintenance Kelistrikan & AC",
-    createdBy: "Budi Santoso",
-    creatorRole: "Admin",
-    status: "Terjadwal",  
-  },
-  {
-    id: "3",
-    storeName: "Cabang Kemang",
-    storeLocation: "Jakarta Selatan",
-    startDate: getDynamicDate(10),
-    endDate: getDynamicDate(12),
-    durationDays: 3,
-    reason: "Pengecatan Ulang & Sanitasi",
-    createdBy: "Admin Utama",
-    creatorRole: "Admin",
-    status: "Selesai",
-  },
-  {
-    id: "4",
-    storeName: "Cabang Senayan",
-    storeLocation: "Jakarta Pusat",
-    startDate: getDynamicDate(17),
-    endDate: getDynamicDate(17),
-    durationDays: 1,
-    reason: "Hari Libur Khusus Toko",
-    createdBy: "Siti Rahma",
-    creatorRole: "Admin",
-    status: "Terjadwal",
-  },
-  {
-    id: "5",
-    storeName: "Cabang PIK",
-    storeLocation: "Jakarta Utara",
-    startDate: getDynamicDate(1),
-    endDate: getDynamicDate(2),
-    durationDays: 2,
-    reason: "Disinfeksi Berkala Fasilitas",
-    createdBy: "Admin Utama",
-    creatorRole: "Admin",
-    status: "Dibatalkan",
-  },
-];
+const BACKEND_URL = getBackendUrl();
+const HOLIDAY_STORAGE_KEY = "audit_pro_holidays_live_v1";
+
+const getAuthHeaders = (): Record<string, string> => {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  const token = AuthService.getToken();
+  const user = AuthService.getCurrentUser();
+  const activeWs = AuthService.getActiveWorkspace();
+
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
+  if (rawId && !rawId.startsWith("adm-")) {
+    headers["x-super-admin-id"] = rawId;
+    headers["x-user-id"] = rawId;
+  }
+  if (user?.email) {
+    headers["x-user-email"] = user.email;
+  }
+  if (activeWs?.id) {
+    headers["x-workspace-id"] = activeWs.id;
+  } else if (user?.workspaceId) {
+    headers["x-workspace-id"] = user.workspaceId;
+  }
+
+  return headers;
+};
 
 // Helper to get today's date formatted as YYYY-MM-DD
 const getTodayStr = () => {
@@ -88,7 +53,7 @@ const applyAutoCompletedStatus = (holidays: Holiday[]): { updated: Holiday[]; ha
   const todayStr = getTodayStr();
   let hasChanges = false;
 
-  const updated = holidays.map((h) => {
+  const updated = (holidays || []).map((h) => {
     const end = h.endDate || h.startDate;
     // Auto-update to "Selesai" if current status is "Terjadwal" and deadline/endDate is strictly before today
     if (h.status === "Terjadwal" && end < todayStr) {
@@ -102,98 +67,260 @@ const applyAutoCompletedStatus = (holidays: Holiday[]): { updated: Holiday[]; ha
 };
 
 export const HolidayService = {
+  cachedHolidays: [] as Holiday[],
+
+  /**
+   * Mengambil data libur toko dari Backend PostgreSQL
+   */
+  async fetchAll(customWorkspaceId?: string): Promise<Holiday[]> {
+    try {
+      const activeWs = AuthService.getActiveWorkspace();
+      const targetWsId = customWorkspaceId || activeWs?.id;
+
+      const params = new URLSearchParams();
+      if (targetWsId && targetWsId !== "all") {
+        params.append("workspaceId", targetWsId);
+      }
+
+      const queryParam = params.toString() ? `?${params.toString()}` : "";
+      const headers = getAuthHeaders();
+      if (targetWsId) {
+        headers["x-workspace-id"] = targetWsId;
+      }
+
+      const res = await fetch(`${BACKEND_URL}/api/holidays${queryParam}`, {
+        method: "GET",
+        headers,
+        cache: "no-store",
+      });
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: Gagal memuat data libur toko`);
+      }
+
+      const json = await res.json();
+      if (json.status === "success" && Array.isArray(json.data)) {
+        const { updated } = applyAutoCompletedStatus(json.data);
+        HolidayService.cachedHolidays = updated;
+        if (typeof window !== "undefined") {
+          localStorage.setItem(HOLIDAY_STORAGE_KEY, JSON.stringify(updated));
+        }
+        return updated;
+      }
+      return [];
+    } catch (err) {
+      console.warn("⚠️ Backend API offline or unreachable, using local cache:", err);
+      return HolidayService.getAll();
+    }
+  },
+
+  /**
+   * Mengambil data tersimpan secara lokal (cache sinkronus)
+   */
   getAll: (): Holiday[] => {
     if (typeof window === "undefined") {
-      const { updated } = applyAutoCompletedStatus(defaultHolidays);
-      return updated;
+      return [];
     }
+
     const stored = localStorage.getItem(HOLIDAY_STORAGE_KEY);
     let list: Holiday[] = [];
-    if (!stored) {
-      // Check legacy storage key
-      const legacy = localStorage.getItem("audit_pro_holidays");
-      if (legacy) {
-        try {
-          const parsedLegacy: Holiday[] = JSON.parse(legacy);
-          const hasOld2024 = parsedLegacy.some((h) => h.startDate.startsWith("2024-08"));
-          if (!hasOld2024) {
-            list = parsedLegacy;
-          }
-        } catch {
-          // ignore
-        }
-      }
-      if (list.length === 0) {
-        list = defaultHolidays;
-      }
-    } else {
+    if (stored) {
       try {
         list = JSON.parse(stored);
       } catch {
-        list = defaultHolidays;
+        list = [];
       }
     }
 
     const { updated, hasChanges } = applyAutoCompletedStatus(list);
-    if (hasChanges || !stored) {
+    if (hasChanges) {
       localStorage.setItem(HOLIDAY_STORAGE_KEY, JSON.stringify(updated));
     }
 
+    HolidayService.cachedHolidays = updated;
     return updated;
   },
 
-  create: (data: Omit<Holiday, "id">): Holiday => {
-    const holidays = HolidayService.getAll();
+  /**
+   * Menyimpan 1 entitas libur toko ke Backend PostgreSQL
+   */
+  async createAsync(data: Omit<Holiday, "id">): Promise<Holiday> {
     const todayStr = getTodayStr();
     const end = data.endDate || data.startDate;
     const computedStatus: HolidayStatus =
       data.status === "Terjadwal" && end < todayStr ? "Selesai" : data.status;
 
-    const newHoliday: Holiday = {
+    const payload = {
       ...data,
       status: computedStatus,
-      id: Date.now().toString(),
     };
-    holidays.unshift(newHoliday);
-    localStorage.setItem(HOLIDAY_STORAGE_KEY, JSON.stringify(holidays));
-    return newHoliday;
-  },
 
-  update: (id: string, data: Partial<Holiday>): Holiday | null => {
-    const holidays = HolidayService.getAll();
-    const index = holidays.findIndex((h) => h.id === id);
-    if (index === -1) return null;
+    const res = await fetch(`${BACKEND_URL}/api/holidays`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload),
+    });
 
-    const merged = { ...holidays[index], ...data };
-    const todayStr = getTodayStr();
-    const end = merged.endDate || merged.startDate;
-    if (merged.status === "Terjadwal" && end < todayStr) {
-      merged.status = "Selesai";
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => null);
+      throw new Error(errJson?.message || `HTTP ${res.status}: Gagal menambahkan libur toko`);
     }
 
-    holidays[index] = merged;
-    localStorage.setItem(HOLIDAY_STORAGE_KEY, JSON.stringify(holidays));
-    return holidays[index];
+    const json = await res.json();
+    const created: Holiday = json.data;
+
+    // Perbarui cache lokal
+    const current = HolidayService.getAll();
+    current.unshift(created);
+    if (typeof window !== "undefined") {
+      localStorage.setItem(HOLIDAY_STORAGE_KEY, JSON.stringify(current));
+    }
+
+    return created;
   },
 
-  delete: (id: string): boolean => {
-    const holidays = HolidayService.getAll();
-    const filtered = holidays.filter((h) => h.id !== id);
-    if (filtered.length === holidays.length) return false;
+  /**
+   * Menyimpan banyak jadwal libur toko sekaligus (batch / satu-satu per toko)
+   */
+  async createBatchAsync(items: Omit<Holiday, "id">[]): Promise<Holiday[]> {
+    if (!items || items.length === 0) return [];
 
-    localStorage.setItem(HOLIDAY_STORAGE_KEY, JSON.stringify(filtered));
+    const todayStr = getTodayStr();
+    const payloadItems = items.map((data) => {
+      const end = data.endDate || data.startDate;
+      const computedStatus: HolidayStatus =
+        data.status === "Terjadwal" && end < todayStr ? "Selesai" : data.status;
+      return {
+        ...data,
+        status: computedStatus,
+      };
+    });
+
+    const res = await fetch(`${BACKEND_URL}/api/holidays`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ holidays: payloadItems }),
+    });
+
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => null);
+      throw new Error(errJson?.message || `HTTP ${res.status}: Gagal menyimpan jadwal libur toko`);
+    }
+
+    const json = await res.json();
+    const createdList: Holiday[] = Array.isArray(json.data) ? json.data : [json.data];
+
+    // Perbarui cache lokal
+    const current = HolidayService.getAll();
+    current.unshift(...createdList);
+    if (typeof window !== "undefined") {
+      localStorage.setItem(HOLIDAY_STORAGE_KEY, JSON.stringify(current));
+    }
+
+    return createdList;
+  },
+
+  /**
+   * Memperbarui jadwal libur toko
+   */
+  async updateAsync(id: string, data: Partial<Holiday>): Promise<Holiday> {
+    const res = await fetch(`${BACKEND_URL}/api/holidays/${id}`, {
+      method: "PUT",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data),
+    });
+
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => null);
+      throw new Error(errJson?.message || `HTTP ${res.status}: Gagal memperbarui libur toko`);
+    }
+
+    const json = await res.json();
+    const updated: Holiday = json.data;
+
+    const current = HolidayService.getAll();
+    const idx = current.findIndex((h) => h.id === id);
+    if (idx !== -1) {
+      current[idx] = updated;
+      if (typeof window !== "undefined") {
+        localStorage.setItem(HOLIDAY_STORAGE_KEY, JSON.stringify(current));
+      }
+    }
+
+    return updated;
+  },
+
+  /**
+   * Memulihkan libur toko yang dibatalkan
+   */
+  async restoreAsync(id: string): Promise<Holiday> {
+    const res = await fetch(`${BACKEND_URL}/api/holidays/${id}/restore`, {
+      method: "PATCH",
+      headers: getAuthHeaders(),
+    });
+
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => null);
+      throw new Error(errJson?.message || `HTTP ${res.status}: Gagal memulihkan libur toko`);
+    }
+
+    const json = await res.json();
+    const restored: Holiday = json.data;
+
+    const current = HolidayService.getAll();
+    const idx = current.findIndex((h) => h.id === id);
+    if (idx !== -1) {
+      current[idx] = restored;
+      if (typeof window !== "undefined") {
+        localStorage.setItem(HOLIDAY_STORAGE_KEY, JSON.stringify(current));
+      }
+    }
+
+    return restored;
+  },
+
+  /**
+   * Membatalkan / Soft-Delete jadwal libur toko
+   */
+  async deleteAsync(id: string, permanent: boolean = false): Promise<boolean> {
+    const res = await fetch(`${BACKEND_URL}/api/holidays/${id}${permanent ? "?permanent=true" : ""}`, {
+      method: "DELETE",
+      headers: getAuthHeaders(),
+    });
+
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => null);
+      throw new Error(errJson?.message || `HTTP ${res.status}: Gagal menghapus libur toko`);
+    }
+
+    const current = HolidayService.getAll();
+    if (permanent) {
+      const filtered = current.filter((h) => h.id !== id);
+      if (typeof window !== "undefined") {
+        localStorage.setItem(HOLIDAY_STORAGE_KEY, JSON.stringify(filtered));
+      }
+    } else {
+      const idx = current.findIndex((h) => h.id === id);
+      if (idx !== -1) {
+        current[idx].status = "Dibatalkan";
+        if (typeof window !== "undefined") {
+          localStorage.setItem(HOLIDAY_STORAGE_KEY, JSON.stringify(current));
+        }
+      }
+    }
+
     return true;
   },
 
   getStats: (holidays: Holiday[]) => {
     const total = holidays.length;
-    const active = holidays.filter((h) => h.status === "Terjadwal").length; // Terjadwal acts as active
+    const active = holidays.filter((h) => h.status === "Terjadwal").length;
     const cancelled = holidays.filter((h) => h.status === "Dibatalkan").length;
-    
+
     return {
       total,
       active,
       cancelled,
     };
-  }
+  },
 };

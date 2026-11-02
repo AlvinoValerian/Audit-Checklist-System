@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Eye, Pencil, Trash2, RotateCcw } from "lucide-react";
+import { Eye, Pencil, Trash2, RotateCcw, Loader2 } from "lucide-react";
 
 interface ActionButtonsProps {
   onView?: () => void;
@@ -13,10 +13,15 @@ interface ActionButtonsProps {
   editTitle?: string;
   deleteTitle?: string;
   restoreTitle?: string;
+  editDisabled?: boolean;
+  editDisabledTitle?: string;
+  deleteDisabled?: boolean;
+  deleteDisabledTitle?: string;
   align?: "center" | "end" | "start";
   className?: string;
   alignRestoreWithDelete?: boolean;
   hasViewSlot?: boolean;
+  isRestoring?: boolean;
 }
 
 export default function ActionButtons({
@@ -28,10 +33,15 @@ export default function ActionButtons({
   editTitle = "Edit",
   deleteTitle = "Hapus",
   restoreTitle = "Aktifkan Kembali",
+  editDisabled = false,
+  editDisabledTitle,
+  deleteDisabled = false,
+  deleteDisabledTitle,
   align = "end",
   className = "",
   alignRestoreWithDelete = true,
   hasViewSlot = true,
+  isRestoring = false,
 }: ActionButtonsProps) {
   const justifyClass =
     align === "center"
@@ -60,9 +70,10 @@ export default function ActionButtons({
       {/* Slot 2: Edit Button or Placeholder when restoring */}
       {onEdit ? (
         <button
-          onClick={onEdit}
-          title={editTitle}
-          className="text-sky-500 hover:text-sky-600 p-1 hover:bg-sky-50 rounded transition-colors cursor-pointer"
+          onClick={editDisabled ? undefined : onEdit}
+          disabled={editDisabled}
+          title={editDisabled ? (editDisabledTitle || editTitle) : editTitle}
+          className={`p-1 rounded transition-colors ${editDisabled ? "text-slate-300 cursor-not-allowed" : "text-sky-500 hover:text-sky-600 hover:bg-sky-50 cursor-pointer"}`}
         >
           <Pencil className="w-4 h-4" />
         </button>
@@ -75,9 +86,10 @@ export default function ActionButtons({
       {/* Slot 3: Delete Button */}
       {onDelete && (
         <button
-          onClick={onDelete}
-          title={deleteTitle}
-          className="text-rose-500 hover:text-rose-600 p-1 hover:bg-rose-50 rounded transition-colors cursor-pointer"
+          onClick={deleteDisabled ? undefined : onDelete}
+          disabled={deleteDisabled}
+          title={deleteDisabled ? (deleteDisabledTitle || deleteTitle) : deleteTitle}
+          className={`p-1 rounded transition-colors ${deleteDisabled ? "text-slate-300 cursor-not-allowed" : "text-rose-500 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"}`}
         >
           <Trash2 className="w-4 h-4" />
         </button>
@@ -87,10 +99,15 @@ export default function ActionButtons({
       {onRestore && (
         <button
           onClick={onRestore}
+          disabled={isRestoring}
           title={restoreTitle}
-          className="text-emerald-600 hover:text-emerald-700 p-1 hover:bg-emerald-50 rounded transition-colors cursor-pointer"
+          className="text-emerald-600 hover:text-emerald-700 disabled:opacity-50 p-1 hover:bg-emerald-50 rounded transition-colors cursor-pointer"
         >
-          <RotateCcw className="w-4 h-4" />
+          {isRestoring ? (
+            <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
+          ) : (
+            <RotateCcw className="w-4 h-4" />
+          )}
         </button>
       )}
     </div>

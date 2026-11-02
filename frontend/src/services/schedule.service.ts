@@ -1,4 +1,38 @@
 import { AuditSchedule, ScheduleStats, ScheduleStatus } from "@/types/schedule";
+import { AuthService } from "@/lib/auth";
+
+const getBackendUrl = (): string => {
+  if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
+  if (typeof window !== "undefined") return "";
+  return "http://127.0.0.1:5000";
+};
+const BACKEND_URL = getBackendUrl();
+
+const getAuthHeaders = (): Record<string, string> => {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  const token = AuthService.getToken();
+  const user = AuthService.getCurrentUser();
+
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
+  if (rawId && !rawId.startsWith("adm-")) {
+    headers["x-super-admin-id"] = rawId;
+    headers["x-user-id"] = rawId;
+  }
+  if (user?.email) {
+    headers["x-user-email"] = user.email;
+  }
+  const activeWs = AuthService.getActiveWorkspace();
+  if (activeWs?.id) {
+    headers["x-workspace-id"] = activeWs.id;
+  }
+  return headers;
+};
 
 const SCHEDULE_STORAGE_KEY = "audit_pro_jadwal_audit_v6";
 
@@ -47,53 +81,116 @@ export const resolveScheduleStatus = (
   const m = String(now.getMonth() + 1).padStart(2, "0");
   const d = String(now.getDate()).padStart(2, "0");
   const todayStr = `${y}-${m}-${d}`;
+  const dayOfWeekShort = DAY_NAMES_SHORT[now.getDay()];
 
   const scheduleDateStr = schedule.date || todayStr;
 
-  // Tanggal di masa lalu (< hari ini) -> otomatis Selesai
+  // Cek apakah jadwal ini aktif/berlaku pada hari ini (today):
+  const runsToday =
+    scheduleDateStr === todayStr ||
+    schedule.recurrence === "Setiap Hari" ||
+    (schedule.recurrence === "Hari Tertentu" &&
+      Array.isArray(schedule.selectedDays) &&
+      schedule.selectedDays.includes(dayOfWeekShort));
+
+  if (runsToday) {
+    let endTimeStr = schedule.endTime;
+    if (!endTimeStr && schedule.timeRange) {
+      const parts = schedule.timeRange.split("-");
+      if (parts.length > 1) {
+        endTimeStr = parts[1].trim();
+      }
+    }
+
+    if (endTimeStr) {
+      const timeParts = endTimeStr.split(":");
+      if (timeParts.length >= 2) {
+        const endH = parseInt(timeParts[0], 10);
+        const endM = parseInt(timeParts[1], 10);
+        if (!isNaN(endH) && !isNaN(endM)) {
+          const scheduleEnd = new Date(
+            now.getFullYear(),
+            now.getMonth(),
+            now.getDate(),
+            endH,
+            endM,
+            0,
+            0
+          );
+          // Jika waktu saat ini sudah melebihi jam selesai jadwal:
+          if (now.getTime() >= scheduleEnd.getTime()) {
+            return "Selesai";
+          }
+        }
+      }
+    }
+    return "Terjadwal";
+  }
+
+  // Jika bukan hari ini:
   if (scheduleDateStr < todayStr) {
     return "Selesai";
   }
 
-  // Tanggal di masa depan (> hari ini) -> Terjadwal
-  if (scheduleDateStr > todayStr) {
-    return "Terjadwal";
-  }
-
-  // Tanggal hari ini (scheduleDateStr === todayStr):
-  // Cek apakah waktu saat ini sudah melebihi waktu selesai (endTime)
-  let endTimeStr = schedule.endTime;
-  if (!endTimeStr && schedule.timeRange) {
-    const parts = schedule.timeRange.split("-");
-    if (parts.length > 1) {
-      endTimeStr = parts[1].trim();
-    }
-  }
-
-  if (endTimeStr) {
-    const timeParts = endTimeStr.split(":");
-    if (timeParts.length >= 2) {
-      const endH = parseInt(timeParts[0], 10);
-      const endM = parseInt(timeParts[1], 10);
-      if (!isNaN(endH) && !isNaN(endM)) {
-        const scheduleEnd = new Date(
-          now.getFullYear(),
-          now.getMonth(),
-          now.getDate(),
-          endH,
-          endM,
-          0,
-          0
-        );
-        // Jika waktu saat ini sudah melebihi jam selesai jadwal:
-        if (now.getTime() >= scheduleEnd.getTime()) {
-          return "Selesai";
-        }
-      }
-    }
-  }
-
   return "Terjadwal";
+};
+
+/**
+ * Helper: Cek apakah suatu jadwal sedang berjalan saat ini
+ * (bertepatan pada hari pelaksanaan dan sedang berada di dalam rentang jam audit)
+ */
+export const isScheduleInProgress = (
+  schedule: AuditSchedule,
+  now: Date = new Date()
+): boolean => {
+  if (schedule.status === "Dibatalkan" || schedule.status === "Selesai") {
+    return false;
+  }
+
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  const todayStr = `${y}-${m}-${d}`;
+  const dayOfWeekShort = DAY_NAMES_SHORT[now.getDay()];
+
+  const scheduleDateStr = schedule.date || todayStr;
+
+  // Cek apakah jadwal berlangsung hari ini
+  const runsToday =
+    scheduleDateStr === todayStr ||
+    schedule.recurrence === "Setiap Hari" ||
+    (schedule.recurrence === "Hari Tertentu" &&
+      Array.isArray(schedule.selectedDays) &&
+      schedule.selectedDays.includes(dayOfWeekShort));
+
+  if (!runsToday) return false;
+
+  let startStr = schedule.startTime;
+  let endStr = schedule.endTime;
+
+  if ((!startStr || !endStr) && schedule.timeRange) {
+    const parts = schedule.timeRange.split("-").map((p) => p.trim());
+    if (parts.length >= 2) {
+      if (!startStr) startStr = parts[0];
+      if (!endStr) endStr = parts[1];
+    }
+  }
+
+  if (!startStr || !endStr) return false;
+
+  const currentH = now.getHours();
+  const currentM = now.getMinutes();
+  const currentMinutes = currentH * 60 + currentM;
+
+  const [sH, sM] = startStr.split(":").map((v) => parseInt(v, 10));
+  const [eH, eM] = endStr.split(":").map((v) => parseInt(v, 10));
+
+  if (isNaN(sH) || isNaN(eH)) return false;
+
+  const startMinutes = sH * 60 + (isNaN(sM) ? 0 : sM);
+  const endMinutes = eH * 60 + (isNaN(eM) ? 0 : eM);
+
+  return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
 };
 
 /**
@@ -341,6 +438,164 @@ const DAY_MAP_TO_SHORT: Record<string, string> = {
 };
 
 export const ScheduleService = {
+  cachedSchedules: [] as AuditSchedule[],
+
+  async fetchAll(workspaceId?: string): Promise<AuditSchedule[]> {
+    try {
+      const user = AuthService.getCurrentUser();
+      const activeWs = AuthService.getActiveWorkspace();
+      const targetWs = workspaceId !== undefined ? workspaceId : activeWs?.id;
+      const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
+
+      let queryParam = "";
+      if (targetWs) {
+        queryParam = `?workspaceId=${targetWs}`;
+      } else if (rawId && !rawId.startsWith("adm-")) {
+        queryParam = `?superAdminId=${rawId}`;
+      } else if (user?.email) {
+        queryParam = `?email=${encodeURIComponent(user.email)}`;
+      }
+
+      const headers = getAuthHeaders();
+      if (targetWs) {
+        headers["x-workspace-id"] = targetWs;
+      }
+
+      const res = await fetch(`${BACKEND_URL}/api/schedules${queryParam}`, {
+        method: "GET",
+        headers,
+        cache: "no-store",
+      });
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+
+      const json = await res.json();
+      if (json.status === "success" && Array.isArray(json.data)) {
+        this.cachedSchedules = json.data;
+        if (typeof window !== "undefined") {
+          localStorage.setItem(SCHEDULE_STORAGE_KEY, JSON.stringify(json.data));
+        }
+        return json.data;
+      }
+      return [];
+    } catch (err) {
+      console.warn("Backend API offline or unreachable, using cache:", err);
+      return this.cachedSchedules || [];
+    }
+  },
+
+  async getByIdAsync(id: string): Promise<AuditSchedule | undefined> {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/schedules/${id}`, {
+        method: "GET",
+        headers: getAuthHeaders(),
+        cache: "no-store",
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.status === "success" && json.data) {
+          return json.data;
+        }
+      }
+    } catch (err) {
+      console.warn("Backend API offline:", err);
+    }
+    return this.getById(id);
+  },
+
+  async createAsync(data: Omit<AuditSchedule, "id">): Promise<AuditSchedule> {
+    let res: Response;
+    try {
+      res = await fetch(`${BACKEND_URL}/api/schedules`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data),
+      });
+    } catch (err) {
+      console.warn("Backend offline, saving locally:", err);
+      return this.create(data);
+    }
+
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json.status !== "success") {
+      throw new Error(json.message || `Gagal membuat jadwal di server (HTTP ${res.status})`);
+    }
+
+    const created = json.data;
+    this.create(created);
+    return created;
+  },
+
+  async createBatchAsync(items: Array<Omit<AuditSchedule, "id">>): Promise<AuditSchedule[]> {
+    let res: Response;
+    try {
+      res = await fetch(`${BACKEND_URL}/api/schedules`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ items }),
+      });
+    } catch (err) {
+      console.warn("Backend offline, saving batch locally:", err);
+      return this.createBatch(items);
+    }
+
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json.status !== "success") {
+      throw new Error(json.message || `Gagal membuat jadwal batch di server (HTTP ${res.status})`);
+    }
+
+    const createdList = Array.isArray(json.data) ? json.data : [json.data];
+    this.createBatch(createdList);
+    return createdList;
+  },
+
+  async updateAsync(id: string, data: Partial<AuditSchedule>): Promise<AuditSchedule> {
+    let res: Response;
+    try {
+      res = await fetch(`${BACKEND_URL}/api/schedules/${id}`, {
+        method: "PUT",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data),
+      });
+    } catch (err) {
+      console.warn("Backend offline, updating locally:", err);
+      const updated = this.update(id, data);
+      if (!updated) throw new Error("Jadwal tidak ditemukan.");
+      return updated;
+    }
+
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json.status !== "success") {
+      throw new Error(json.message || `Gagal memperbarui jadwal di server (HTTP ${res.status})`);
+    }
+
+    this.update(id, json.data);
+    return json.data;
+  },
+
+  async deleteAsync(id: string, permanent: boolean = false): Promise<boolean> {
+    let res: Response;
+    try {
+      res = await fetch(`${BACKEND_URL}/api/schedules/${id}${permanent ? "?permanent=true" : ""}`, {
+        method: "DELETE",
+        headers: getAuthHeaders(),
+      });
+    } catch (err) {
+      console.warn("Backend offline, deleting locally:", err);
+      return this.delete(id);
+    }
+
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json.status !== "success") {
+      throw new Error(json.message || `Gagal menghapus jadwal di server (HTTP ${res.status})`);
+    }
+
+    this.delete(id);
+    return true;
+  },
+
   getAll(): AuditSchedule[] {
     const now = new Date();
     if (typeof window === "undefined") {
@@ -362,13 +617,13 @@ export const ScheduleService = {
       let list: AuditSchedule[] = [];
       if (data) {
         const parsed = JSON.parse(data);
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed)) {
           list = parsed;
         } else {
-          list = defaultSchedules;
+          list = [];
         }
       } else {
-        list = defaultSchedules;
+        list = [];
       }
 
       const currentYearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;

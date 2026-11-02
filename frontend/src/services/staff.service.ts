@@ -1,165 +1,181 @@
 import { StaffUser, StaffStats, StaffStatus } from "@/types/staff";
+import { AuthService } from "@/lib/auth";
 
-const STAFF_STORAGE_KEY = "audit_pro_staff_data";
+const getBackendUrl = (): string => {
+  if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
+  if (typeof window !== "undefined") return "";
+  return "http://127.0.0.1:5000";
+};
 
-export const defaultStaffs: StaffUser[] = [
-  {
-    id: "1",
-    fullName: "Andi Wijaya",
-    email: "andi.wijaya@auditpro.com",
-    storeName: "Cabang Sudirman",
-    storeLocation: "Jakarta Pusat",
-    position: "Auditor Lapangan",
-    status: "Aktif",
-    phone: "0812-3456-7890",
-    joinDate: "10 Jan 2023",
-  },
-  {
-    id: "2",
-    fullName: "Budi Santoso",
-    email: "budi.santoso@auditpro.com",
-    storeName: "Cabang Thamrin",
-    storeLocation: "Jakarta Pusat",
-    position: "Auditor Lapangan",
-    status: "Aktif",
-    phone: "0812-3456-7891",
-    joinDate: "15 Feb 2023",
-  },
-  {
-    id: "3",
-    fullName: "Chandra Pratama",
-    email: "chandra.pratama@auditpro.com",
-    storeName: "Cabang Kemang",
-    storeLocation: "Jakarta Selatan",
-    position: "Auditor Lapangan",
-    status: "Aktif",
-    phone: "0812-3456-7892",
-    joinDate: "01 Mar 2023",
-  },
-  {
-    id: "4",
-    fullName: "Siti Rahmawati",
-    email: "siti.rahma@auditpro.com",
-    storeName: "Cabang Senayan",
-    storeLocation: "Jakarta Pusat",
-    position: "Auditor Lapangan",
-    status: "Aktif",
-    phone: "0812-3456-7893",
-    joinDate: "12 Apr 2023",
-  },
-  {
-    id: "5",
-    fullName: "Dewi Lestari",
-    email: "dewi.lestari@auditpro.com",
-    storeName: "Cabang PIK",
-    storeLocation: "Jakarta Utara",
-    position: "Auditor Lapangan",
-    status: "Nonaktif",
-    phone: "0812-3456-7894",
-    joinDate: "20 Mei 2023",
-  },
-  {
-    id: "6",
-    fullName: "Eko Prasetyo",
-    email: "eko.prasetyo@auditpro.com",
-    storeName: "Cabang Kelapa Gading",
-    storeLocation: "Jakarta Utara",
-    position: "Auditor Lapangan",
-    status: "Aktif",
-    phone: "0812-3456-7895",
-    joinDate: "05 Jun 2023",
-  },
-  {
-    id: "7",
-    fullName: "Fajar Nugraha",
-    email: "fajar.nugraha@auditpro.com",
-    storeName: "Cabang Puri Indah",
-    storeLocation: "Jakarta Barat",
-    position: "Auditor Lapangan",
-    status: "Aktif",
-    phone: "0812-3456-7896",
-    joinDate: "18 Jul 2023",
-  },
-  {
-    id: "8",
-    fullName: "Gita Permata",
-    email: "gita.permata@auditpro.com",
-    storeName: "Cabang Pondok Indah",
-    storeLocation: "Jakarta Selatan",
-    position: "Auditor Lapangan",
-    status: "Aktif",
-    phone: "0812-3456-7897",
-    joinDate: "22 Agu 2023",
-  },
-  {
-    id: "9",
-    fullName: "Hendra Setiawan",
-    email: "hendra.setiawan@auditpro.com",
-    storeName: "Cabang Bintaro",
-    storeLocation: "Tangerang Selatan",
-    position: "Auditor Lapangan",
-    status: "Aktif",
-    phone: "0812-3456-7898",
-    joinDate: "14 Sep 2023",
-  },
-  {
-    id: "10",
-    fullName: "Indah Kusuma",
-    email: "indah.kusuma@auditpro.com",
-    storeName: "Cabang Serpong",
-    storeLocation: "Tangerang Selatan",
-    position: "Auditor Lapangan",
-    status: "Aktif",
-    phone: "0812-3456-7899",
-    joinDate: "01 Okt 2023",
-  },
-  {
-    id: "11",
-    fullName: "Joko Widodo",
-    email: "joko.widodo@auditpro.com",
-    storeName: "Cabang Grand Indonesia",
-    storeLocation: "Jakarta Pusat",
-    position: "Auditor Lapangan",
-    status: "Aktif",
-    phone: "0812-3456-7800",
-    joinDate: "15 Nov 2023",
-  },
-  {
-    id: "12",
-    fullName: "Kurniawan Dwi",
-    email: "kurniawan.dwi@auditpro.com",
-    storeName: "Cabang Central Park",
-    storeLocation: "Jakarta Barat",
-    position: "Auditor Lapangan",
-    status: "Nonaktif",
-    phone: "0812-3456-7801",
-    joinDate: "05 Des 2023",
-  },
-];
+const BACKEND_URL = getBackendUrl();
+const STAFF_STORAGE_KEY = "audit_pro_staff_live_v1";
+
+const getAuthHeaders = (): Record<string, string> => {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  const token = AuthService.getToken();
+  const user = AuthService.getCurrentUser();
+  const activeWs = AuthService.getActiveWorkspace();
+
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
+  if (rawId && !rawId.startsWith("adm-")) {
+    headers["x-super-admin-id"] = rawId;
+    headers["x-user-id"] = rawId;
+  }
+  if (user?.email) {
+    headers["x-user-email"] = user.email;
+  }
+  if (activeWs?.id) {
+    headers["x-workspace-id"] = activeWs.id;
+  } else if (user?.workspaceId) {
+    headers["x-workspace-id"] = user.workspaceId;
+  }
+
+  return headers;
+};
 
 export const StaffService = {
-  getAll(): StaffUser[] {
-    if (typeof window === "undefined") return defaultStaffs;
+  cachedStaffs: [] as StaffUser[],
+
+  /**
+   * Mengambil data staf dari backend PostgreSQL
+   */
+  async fetchAll(customWorkspaceId?: string): Promise<StaffUser[]> {
     try {
-      const data = localStorage.getItem(STAFF_STORAGE_KEY);
-      if (data) {
-        const parsed = JSON.parse(data);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map((s: StaffUser) => ({
-            ...s,
-            status: (s.status === "Dinonaktifkan" as any) ? "Nonaktif" : s.status,
-          }));
+      const activeWs = AuthService.getActiveWorkspace();
+      const targetWsId = customWorkspaceId || activeWs?.id;
+
+      const params = new URLSearchParams();
+      if (targetWsId && targetWsId !== "all") {
+        params.append("workspaceId", targetWsId);
+      }
+
+      const queryParam = params.toString() ? `?${params.toString()}` : "";
+      const res = await fetch(`${BACKEND_URL}/api/staff${queryParam}`, {
+        method: "GET",
+        headers: getAuthHeaders(),
+        cache: "no-store",
+      });
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: Gagal memuat data staf dari backend`);
+      }
+
+      const json = await res.json();
+      if (json.status === "success" && Array.isArray(json.data)) {
+        StaffService.cachedStaffs = json.data;
+        if (typeof window !== "undefined") {
+          localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(json.data));
+        }
+        return json.data;
+      }
+      return [];
+    } catch (err) {
+      console.warn("⚠️ Backend API offline or unreachable, using local cache:", err);
+      return StaffService.getAll();
+    }
+  },
+
+  /**
+   * Mengambil data staf dari cache lokal (sinkronus)
+   */
+  getAll(customWorkspaceId?: string): StaffUser[] {
+    let resultList = StaffService.cachedStaffs;
+
+    if (!resultList || resultList.length === 0) {
+      if (typeof window !== "undefined") {
+        try {
+          const data = localStorage.getItem(STAFF_STORAGE_KEY);
+          if (data) {
+            const parsed = JSON.parse(data);
+            if (Array.isArray(parsed)) {
+              resultList = parsed.map((s: StaffUser) => ({
+                ...s,
+                status: (s.status === ("Dinonaktifkan" as any) ? "Nonaktif" : s.status) as StaffStatus,
+              }));
+              StaffService.cachedStaffs = resultList;
+            }
+          }
+        } catch {
+          resultList = [];
         }
       }
-      localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(defaultStaffs));
-      return defaultStaffs;
-    } catch {
-      return defaultStaffs;
     }
+
+    if (customWorkspaceId && customWorkspaceId !== "all" && Array.isArray(resultList)) {
+      const cleanTarget = customWorkspaceId.replace(/\D/g, "");
+      return resultList.filter((s) => !s.workspaceId || s.workspaceId.replace(/\D/g, "") === cleanTarget);
+    }
+
+    return resultList || [];
+  },
+
+  /**
+   * Mengambil detail satu staf berdasarkan ID
+   */
+  async getByIdAsync(id: string): Promise<StaffUser | null> {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/staff/${id}`, {
+        method: "GET",
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.status === "success" && json.data) {
+          return json.data;
+        }
+      }
+    } catch (e) {
+      console.warn("⚠️ Fallback to local getById:", e);
+    }
+    return this.getById(id) || null;
   },
 
   getById(id: string): StaffUser | undefined {
     return this.getAll().find((s) => s.id === id);
+  },
+
+  /**
+   * Menambahkan staf baru ke backend PostgreSQL
+   */
+  async createAsync(staff: Omit<StaffUser, "id">): Promise<StaffUser> {
+    try {
+      const activeWs = AuthService.getActiveWorkspace();
+      const res = await fetch(`${BACKEND_URL}/api/staff`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          ...staff,
+          workspaceId: staff.workspaceId || activeWs?.id,
+        }),
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => null);
+        throw new Error(errJson?.message || `HTTP ${res.status}: Gagal menambahkan staf`);
+      }
+
+      const json = await res.json();
+      const createdStaff: StaffUser = json.data;
+
+      // Update local cache
+      const list = this.getAll();
+      const updated = [createdStaff, ...list.filter((s) => s.id !== createdStaff.id)];
+      StaffService.cachedStaffs = updated;
+      if (typeof window !== "undefined") {
+        localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(updated));
+      }
+
+      return createdStaff;
+    } catch (err) {
+      console.warn("⚠️ Backend error, falling back to local creation:", err);
+      return this.create(staff);
+    }
   },
 
   create(staff: Omit<StaffUser, "id">): StaffUser {
@@ -169,10 +185,52 @@ export const StaffService = {
       id: `staff-${Date.now()}`,
     };
     const updated = [newStaff, ...list];
+    StaffService.cachedStaffs = updated;
     if (typeof window !== "undefined") {
       localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(updated));
     }
     return newStaff;
+  },
+
+  /**
+   * Memperbarui data staf di backend PostgreSQL
+   */
+  async updateAsync(id: string, data: Partial<StaffUser>): Promise<StaffUser> {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/staff/${id}`, {
+        method: "PUT",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data),
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => null);
+        throw new Error(errJson?.message || `HTTP ${res.status}: Gagal memperbarui staf`);
+      }
+
+      const json = await res.json();
+      const updatedStaff: StaffUser = json.data;
+
+      // Update cache
+      const list = this.getAll();
+      const idx = list.findIndex((s) => s.id === id);
+      if (idx !== -1) {
+        list[idx] = updatedStaff;
+      } else {
+        list.unshift(updatedStaff);
+      }
+      StaffService.cachedStaffs = [...list];
+      if (typeof window !== "undefined") {
+        localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(list));
+      }
+
+      return updatedStaff;
+    } catch (err) {
+      console.warn("⚠️ Backend error, falling back to local update:", err);
+      const fallback = this.update(id, data);
+      if (!fallback) throw err;
+      return fallback;
+    }
   },
 
   update(id: string, data: Partial<StaffUser>): StaffUser | null {
@@ -182,10 +240,85 @@ export const StaffService = {
 
     const updatedStaff = { ...list[index], ...data };
     list[index] = updatedStaff;
+    StaffService.cachedStaffs = [...list];
     if (typeof window !== "undefined") {
       localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(list));
     }
     return updatedStaff;
+  },
+
+  /**
+   * Mengaktifkan kembali staf (restore dari soft-delete)
+   */
+  async restoreAsync(id: string): Promise<StaffUser> {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/staff/${id}/restore`, {
+        method: "PATCH",
+        headers: getAuthHeaders(),
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => null);
+        throw new Error(errJson?.message || `HTTP ${res.status}: Gagal memulihkan staf`);
+      }
+
+      const json = await res.json();
+      const restoredStaff: StaffUser = json.data;
+
+      const list = this.getAll();
+      const idx = list.findIndex((s) => s.id === id);
+      if (idx !== -1) {
+        list[idx] = restoredStaff;
+      }
+      StaffService.cachedStaffs = [...list];
+      if (typeof window !== "undefined") {
+        localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(list));
+      }
+
+      return restoredStaff;
+    } catch (err) {
+      console.warn("⚠️ Backend error on restore, fallback to local:", err);
+      const fallback = this.update(id, { status: "Aktif" });
+      if (!fallback) throw err;
+      return fallback;
+    }
+  },
+
+  /**
+   * Toggle status staf
+   */
+  async toggleStatusAsync(id: string): Promise<StaffUser> {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/staff/${id}/status`, {
+        method: "PATCH",
+        headers: getAuthHeaders(),
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => null);
+        throw new Error(errJson?.message || `HTTP ${res.status}: Gagal mengubah status staf`);
+      }
+
+      const json = await res.json();
+      const updatedStaff: StaffUser = json.data;
+
+      const list = this.getAll();
+      const idx = list.findIndex((s) => s.id === id);
+      if (idx !== -1) {
+        list[idx] = updatedStaff;
+      }
+      StaffService.cachedStaffs = [...list];
+      if (typeof window !== "undefined") {
+        localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(list));
+      }
+
+      return updatedStaff;
+    } catch (err) {
+      console.warn("⚠️ Backend error on toggle, fallback to local:", err);
+      const fallback = this.toggleStatus(id);
+      if (!fallback) throw err;
+      return fallback;
+    }
   },
 
   toggleStatus(id: string): StaffUser | null {
@@ -196,10 +329,56 @@ export const StaffService = {
     return this.update(id, { status: newStatus });
   },
 
+  /**
+   * Menghapus (soft delete atau permanen) staf
+   */
+  async deleteAsync(id: string, permanent: boolean = false): Promise<boolean> {
+    try {
+      const queryParam = permanent ? "?permanent=true" : "";
+      const res = await fetch(`${BACKEND_URL}/api/staff/${id}${queryParam}`, {
+        method: "DELETE",
+        headers: getAuthHeaders(),
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => null);
+        throw new Error(errJson?.message || `HTTP ${res.status}: Gagal menonaktifkan staf`);
+      }
+
+      if (permanent) {
+        const list = this.getAll().filter((s) => s.id !== id);
+        StaffService.cachedStaffs = list;
+        if (typeof window !== "undefined") {
+          localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(list));
+        }
+      } else {
+        const list = this.getAll();
+        const idx = list.findIndex((s) => s.id === id);
+        if (idx !== -1) {
+          list[idx] = { ...list[idx], status: "Nonaktif" };
+        }
+        StaffService.cachedStaffs = [...list];
+        if (typeof window !== "undefined") {
+          localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(list));
+        }
+      }
+
+      return true;
+    } catch (err) {
+      console.warn("⚠️ Backend error on delete, fallback to local:", err);
+      if (permanent) {
+        return this.delete(id);
+      } else {
+        return Boolean(this.update(id, { status: "Nonaktif" }));
+      }
+    }
+  },
+
   delete(id: string): boolean {
     const list = this.getAll();
     const filtered = list.filter((s) => s.id !== id);
     if (filtered.length === list.length) return false;
+    StaffService.cachedStaffs = filtered;
     if (typeof window !== "undefined") {
       localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(filtered));
     }

@@ -13,9 +13,14 @@ import {
   ChevronLeft,
   ChevronRight,
   TrendingUp,
+  Loader2,
+  Building2,
 } from "lucide-react";
 import { StaffService } from "@/services/staff.service";
 import { StaffUser, StaffStatus, StaffStats } from "@/types/staff";
+import { Workspace } from "@/types/workspace";
+import { WorkspaceService } from "@/services/workspace.service";
+import { AuthService } from "@/lib/auth";
 import { toast } from "sonner";
 import ActionButtons from "@/components/ui/ActionButtons";
 import CreateStaffModal from "./components/CreateStaffModal";
@@ -31,6 +36,8 @@ export default function StaffPage() {
     inactive: 0,
     activePercentage: 0,
   });
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Modal States
   const [isStaffModalOpen, setIsStaffModalOpen] = useState(false);
@@ -54,48 +61,144 @@ export default function StaffPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 5;
 
-  const refreshData = () => {
-    const list = StaffService.getAll();
-    setStaffs(list);
-    setStats(StaffService.getStats(list));
-  };
+  // Workspace Switcher States (Super Admin)
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>("");
+  const [currentWorkspaceName, setCurrentWorkspaceName] = useState<string>("Workspace");
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
-  const handleSaveStaff = (staffData: Omit<StaffUser, "id">) => {
-    if (staffToEdit) {
-      StaffService.update(staffToEdit.id, staffData);
-      toast.success(`Data staf ${staffData.fullName} berhasil diperbarui.`);
-    } else {
-      StaffService.create(staffData);
-      toast.success(`Staf baru ${staffData.fullName} berhasil ditambahkan.`);
-    }
-    refreshData();
-    setIsStaffModalOpen(false);
-    setStaffToEdit(null);
-  };
-
-  const handleConfirmDelete = () => {
-    if (staffToDelete) {
-      StaffService.update(staffToDelete.id, { status: "Nonaktif" });
-      toast.success(`Staf ${staffToDelete.fullName} dinonaktifkan.`);
-      setIsDeleteModalOpen(false);
-      setStaffToDelete(null);
-      refreshData();
-    }
-  };
-
-  const handleConfirmRestore = () => {
-    if (staffToRestore) {
-      StaffService.update(staffToRestore.id, { status: "Aktif" });
-      toast.success(`Staf ${staffToRestore.fullName} berhasil diaktifkan kembali.`);
-      setIsRestoreModalOpen(false);
-      setStaffToRestore(null);
-      refreshData();
+  const refreshData = async (targetWs?: string, showLoading = false) => {
+    if (showLoading) setIsLoading(true);
+    const targetWsId = targetWs !== undefined ? targetWs : selectedWorkspaceId;
+    try {
+      const list = await StaffService.fetchAll(targetWsId);
+      setStaffs(list);
+      setStats(StaffService.getStats(list));
+    } catch (err) {
+      console.warn("⚠️ Gagal memuat data staf dari backend:", err);
+      const fallbackList = StaffService.getAll(targetWsId);
+      setStaffs(fallbackList);
+      setStats(StaffService.getStats(fallbackList));
+    } finally {
+      setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    refreshData();
+    const init = async () => {
+      setIsLoading(true);
+      const user = AuthService.getCurrentUser();
+      const activeWs = AuthService.getActiveWorkspace();
+      const isSA = user?.role === "Super Admin";
+      setIsSuperAdmin(isSA);
+
+      let targetWsId = activeWs?.id || user?.workspaceId || "";
+      let targetWsName = activeWs?.name || user?.workspaceName || "Workspace";
+
+      if (isSA) {
+        try {
+          const wsList = await WorkspaceService.fetchAll();
+          setWorkspaces(wsList);
+          if (wsList.length > 0) {
+            const matched = wsList.find((w) => w.id === targetWsId && w.status !== "Nonaktif");
+            if (matched) {
+              targetWsId = matched.id;
+              targetWsName = matched.companyName || matched.name;
+            } else {
+              const firstActive = wsList.find((w) => w.status !== "Nonaktif") || wsList[0];
+              targetWsId = firstActive.id;
+              targetWsName = firstActive.companyName || firstActive.name;
+              AuthService.setActiveWorkspace({
+                id: firstActive.id,
+                name: targetWsName,
+              });
+            }
+          }
+        } catch (err) {
+          console.warn("Gagal memuat daftar workspace:", err);
+        }
+      }
+
+      setSelectedWorkspaceId(targetWsId);
+      setCurrentWorkspaceName(targetWsName);
+      await refreshData(targetWsId, false);
+      setIsLoading(false);
+    };
+
+    init();
   }, []);
+
+  const handleWorkspaceChange = async (newWsId: string) => {
+    const chosen = workspaces.find((w) => w.id === newWsId);
+    if (chosen?.status === "Nonaktif") {
+      toast.error(`Workspace "${chosen.companyName || chosen.name}" sedang nonaktif dan tidak dapat dipilih.`);
+      return;
+    }
+
+    setSelectedWorkspaceId(newWsId);
+    if (chosen) {
+      const name = chosen.companyName || chosen.name;
+      setCurrentWorkspaceName(name);
+      AuthService.setActiveWorkspace({ id: chosen.id, name });
+      toast.info(`Menampilkan data staf untuk workspace "${name}"`);
+    }
+    await refreshData(newWsId, true);
+  };
+
+  const handleSaveStaff = async (staffData: Omit<StaffUser, "id">) => {
+    setIsSubmitting(true);
+    try {
+      if (staffToEdit) {
+        await StaffService.updateAsync(staffToEdit.id, staffData);
+        toast.success(`Data staf ${staffData.fullName} berhasil diperbarui.`);
+      } else {
+        await StaffService.createAsync({
+          ...staffData,
+          workspaceId: selectedWorkspaceId || staffData.workspaceId,
+        });
+        toast.success(`Staf baru ${staffData.fullName} berhasil ditambahkan.`);
+      }
+      await refreshData();
+      setIsStaffModalOpen(false);
+      setStaffToEdit(null);
+    } catch (err: any) {
+      toast.error(err?.message || "Gagal menyimpan data staf.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!staffToDelete) return;
+    setIsSubmitting(true);
+    try {
+      await StaffService.deleteAsync(staffToDelete.id);
+      toast.success(`Staf ${staffToDelete.fullName} dinonaktifkan.`);
+      setIsDeleteModalOpen(false);
+      setStaffToDelete(null);
+      await refreshData();
+    } catch (err: any) {
+      toast.error(err?.message || "Gagal menonaktifkan staf.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleConfirmRestore = async () => {
+    if (!staffToRestore) return;
+    setIsSubmitting(true);
+    try {
+      await StaffService.restoreAsync(staffToRestore.id);
+      toast.success(`Staf ${staffToRestore.fullName} berhasil diaktifkan kembali.`);
+      setIsRestoreModalOpen(false);
+      setStaffToRestore(null);
+      await refreshData();
+    } catch (err: any) {
+      toast.error(err?.message || "Gagal mengaktifkan kembali staf.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   // Filter Logic
   const filteredStaffs = useMemo(() => {
@@ -127,7 +230,34 @@ export default function StaffPage() {
     <DashboardLayout>
       <Header
         title="Staff"
-        subtitle="Kelola data staf auditor, penugasan toko, dan hak akses operasional."
+        subtitle={`Kelola data staf auditor, penugasan toko, dan hak akses operasional di ${currentWorkspaceName}.`}
+        action={
+          isSuperAdmin && workspaces.length > 0 ? (
+            <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs">
+              <Building2 className="w-4 h-4 text-sky-600 shrink-0" />
+              <span className="text-xs font-semibold text-slate-600 shrink-0">Workspace:</span>
+              <select
+                value={selectedWorkspaceId}
+                onChange={(e) => handleWorkspaceChange(e.target.value)}
+                className="bg-transparent text-slate-800 text-xs font-bold focus:outline-none cursor-pointer pr-1"
+              >
+                {workspaces.map((w) => {
+                  const isInactive = w.status === "Nonaktif";
+                  return (
+                    <option
+                      key={w.id}
+                      value={w.id}
+                      disabled={isInactive}
+                      className={isInactive ? "text-slate-400 bg-slate-100 italic" : "text-slate-800"}
+                    >
+                      {w.companyName || w.name} {isInactive ? "(Nonaktif)" : `(${w.storeCount} Toko)`}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+          ) : undefined
+        }
       />
 
       {/* 3 Metric Summary Cards - Compact libur-toko style */}
@@ -144,7 +274,11 @@ export default function StaffPage() {
           </div>
           <div className="mt-3 sm:mt-4">
             <div className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
-              {stats.total}
+              {isLoading ? (
+                <div className="w-8 h-6 bg-slate-200 rounded animate-pulse" />
+              ) : (
+                stats.total
+              )}
             </div>
           </div>
         </div>
@@ -160,13 +294,19 @@ export default function StaffPage() {
             </div>
           </div>
           <div className="mt-3 sm:mt-4 flex items-baseline gap-2">
-            <span className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
-              {stats.active}
-            </span>
-            <span className="inline-flex items-center gap-1 text-emerald-600 text-[11px] font-semibold">
-              <TrendingUp className="w-3 h-3" />
-              <span>{stats.activePercentage}% dari total</span>
-            </span>
+            {isLoading ? (
+              <div className="w-8 h-6 bg-slate-200 rounded animate-pulse" />
+            ) : (
+              <>
+                <span className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
+                  {stats.active}
+                </span>
+                <span className="inline-flex items-center gap-1 text-emerald-600 text-[11px] font-semibold">
+                  <TrendingUp className="w-3 h-3" />
+                  <span>{stats.activePercentage}% dari total</span>
+                </span>
+              </>
+            )}
           </div>
         </div>
 
@@ -182,7 +322,11 @@ export default function StaffPage() {
           </div>
           <div className="mt-3 sm:mt-4">
             <div className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
-              {stats.inactive}
+              {isLoading ? (
+                <div className="w-8 h-6 bg-slate-200 rounded animate-pulse" />
+              ) : (
+                stats.inactive
+              )}
             </div>
           </div>
         </div>
@@ -283,10 +427,23 @@ export default function StaffPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
-              {paginatedStaffs.length === 0 ? (
+              {isLoading ? (
                 <tr>
-                  <td colSpan={6} className="text-center py-10 text-slate-400 text-xs">
-                    Tidak ada data staff yang sesuai.
+                  <td colSpan={6} className="text-center py-14">
+                    <div className="flex flex-col items-center justify-center gap-2.5">
+                      <Loader2 className="w-6 h-6 animate-spin text-[#193f53]" />
+                      <span className="text-xs font-semibold text-slate-600">
+                        Memuat data staf dari backend PostgreSQL...
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+              ) : paginatedStaffs.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="text-center py-12 text-slate-400 text-xs">
+                    {searchTerm || filterStatus !== "Semua"
+                      ? "Tidak ada data staff yang sesuai dengan filter pencarian."
+                      : "Belum ada data staff yang terdaftar pada workspace ini."}
                   </td>
                 </tr>
               ) : (
@@ -441,11 +598,16 @@ export default function StaffPage() {
 
       {/* Modals */}
       <CreateStaffModal
+        key={`${selectedWorkspaceId}-${staffToEdit?.id || "create"}`}
         isOpen={isStaffModalOpen}
         staffToEdit={staffToEdit}
+        isSubmitting={isSubmitting}
+        workspaceId={selectedWorkspaceId}
         onClose={() => {
-          setIsStaffModalOpen(false);
-          setStaffToEdit(null);
+          if (!isSubmitting) {
+            setIsStaffModalOpen(false);
+            setStaffToEdit(null);
+          }
         }}
         onSubmit={handleSaveStaff}
       />
@@ -466,9 +628,12 @@ export default function StaffPage() {
       <SoftDeleteModal
         isOpen={isDeleteModalOpen}
         staff={staffToDelete}
+        isSubmitting={isSubmitting}
         onClose={() => {
-          setIsDeleteModalOpen(false);
-          setStaffToDelete(null);
+          if (!isSubmitting) {
+            setIsDeleteModalOpen(false);
+            setStaffToDelete(null);
+          }
         }}
         onConfirm={handleConfirmDelete}
       />
@@ -476,9 +641,12 @@ export default function StaffPage() {
       <RestoreStaffModal
         isOpen={isRestoreModalOpen}
         staff={staffToRestore}
+        isSubmitting={isSubmitting}
         onClose={() => {
-          setIsRestoreModalOpen(false);
-          setStaffToRestore(null);
+          if (!isSubmitting) {
+            setIsRestoreModalOpen(false);
+            setStaffToRestore(null);
+          }
         }}
         onConfirm={handleConfirmRestore}
       />

@@ -128,6 +128,7 @@ export default function PhotoDetailModal({
               <img
                 src={imageSrc}
                 alt={photo.caption}
+                referrerPolicy="no-referrer"
                 onError={() => setImageError(true)}
                 className="w-full h-full object-cover transition-all"
               />

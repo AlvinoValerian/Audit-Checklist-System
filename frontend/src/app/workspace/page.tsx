@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import Header from "@/components/layout/Header";
 import WorkspaceStats from "./components/WorkspaceStats";
@@ -11,6 +12,7 @@ import DeleteWorkspaceModal from "./components/DeleteWorkspaceModal";
 import Modal from "@/components/ui/Modal";
 import { WorkspaceService } from "@/services/workspace.service";
 import { Workspace, WorkspaceStatsData } from "@/types/workspace";
+import { AuthService } from "@/lib/auth";
 import {
   Pencil,
   Building2,
@@ -18,11 +20,21 @@ import {
   User,
   MapPin,
   AlertCircle,
+  Loader2,
+  LayoutGrid,
+  ExternalLink,
+  Sparkles,
+  ShieldCheck,
+  Info,
+  X,
+  ArrowRight,
 } from "lucide-react";
 import { toast } from "sonner";
 
 export default function WorkspacePage() {
+  const router = useRouter();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [stats, setStats] = useState<WorkspaceStatsData>({
     totalWorkspaces: 0,
     activeWorkspaces: 0,
@@ -43,19 +55,70 @@ export default function WorkspacePage() {
   const [selectedDetailWorkspace, setSelectedDetailWorkspace] =
     useState<Workspace | null>(null);
 
-  const refreshData = async () => {
-    const cached = WorkspaceService.getAll();
-    setWorkspaces(cached);
-    setStats(WorkspaceService.getStats(cached));
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-    const list = await WorkspaceService.fetchAll();
-    setWorkspaces(list);
-    setStats(WorkspaceService.getStats(list));
+  // State Banner Panduan Masuk Workspace
+  const [showGuideBanner, setShowGuideBanner] = useState(true);
+
+  useEffect(() => {
+    try {
+      const dismissed = localStorage.getItem("dismissed_workspace_guide_v1");
+      if (dismissed === "true") {
+        setShowGuideBanner(false);
+      }
+    } catch {}
+  }, []);
+
+  const handleDismissGuide = () => {
+    setShowGuideBanner(false);
+    try {
+      localStorage.setItem("dismissed_workspace_guide_v1", "true");
+    } catch {}
+  };
+
+  const handleShowGuide = () => {
+    setShowGuideBanner(true);
+    try {
+      localStorage.removeItem("dismissed_workspace_guide_v1");
+    } catch {}
+  };
+
+  /**
+   * Mengambil data workspace langsung dari database PostgreSQL via backend API
+   */
+  const refreshData = async (options?: { silent?: boolean }) => {
+    const isSilent = options?.silent ?? false;
+    if (!isSilent && workspaces.length === 0) {
+      setIsLoading(true);
+    }
+    try {
+      const list = await WorkspaceService.fetchAll();
+      setWorkspaces(list);
+      setStats(WorkspaceService.getStats(list));
+    } catch (err: unknown) {
+      const errorMessage =
+        err instanceof Error
+          ? err.message
+          : "Gagal memuat data workspace.";
+      console.error("Gagal mengambil data workspace:", errorMessage);
+      if (!isSilent) toast.error(errorMessage);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   useEffect(() => {
     refreshData();
-  }, []);
+
+    // Auto-refresh silent polling di background setiap 5 detik
+    const interval = setInterval(() => {
+      if (!isCreateModalOpen && !isEditModalOpen && !isDeleteModalOpen && !selectedDetailWorkspace) {
+        refreshData({ silent: true });
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [isCreateModalOpen, isEditModalOpen, isDeleteModalOpen, selectedDetailWorkspace]);
 
   const handleOpenCreateModal = () => {
     setIsCreateModalOpen(true);
@@ -71,41 +134,74 @@ export default function WorkspacePage() {
     setIsDeleteModalOpen(true);
   };
 
+  const handleEnterWorkspace = (ws: Workspace) => {
+    if (ws.status === "Nonaktif") {
+      toast.error(`Workspace "${ws.name}" sedang dinonaktifkan. Seluruh sistem untuk workspace ini diberhentikan.`);
+      return;
+    }
+    AuthService.setActiveWorkspace({
+      id: ws.id,
+      name: ws.name,
+      companyName: ws.companyName || ws.name,
+    });
+    setSelectedDetailWorkspace(null);
+    toast.success(`Memasuki workspace "${ws.name}"...`);
+    router.push(`/dashboard-monitoring?workspaceId=${ws.id}`);
+  };
+
   const handleCreateSubmit = async (formData: {
     name: string;
     companyName: string;
     category: string;
     description: string;
     headquartersAddress: string;
+    picName: string;
+    picPhone: string;
     status: "Aktif" | "Nonaktif";
   }) => {
-    await WorkspaceService.createAsync({
-      name: formData.name,
-      companyName: formData.companyName,
-      category: formData.category,
-      companyCategory: formData.category,
-      companyDescription: formData.description,
-      description: formData.description,
-      headquartersAddress: formData.headquartersAddress || "-",
-      picName: "Hendra Gunawan",
-      picPhone: "+62 812-8899-1023",
-      storeCount: 0,
-      status: formData.status || "Aktif",
-    });
-    toast.success(`Workspace "${formData.name}" berhasil ditambahkan!`);
-    setIsCreateModalOpen(false);
-    refreshData();
+    setIsSubmitting(true);
+    try {
+      await WorkspaceService.createAsync({
+        name: formData.name,
+        companyName: formData.companyName,
+        category: formData.category,
+        companyCategory: formData.category,
+        companyDescription: formData.description,
+        description: formData.description,
+        headquartersAddress: formData.headquartersAddress || "-",
+        picName: formData.picName || "-",
+        picPhone: formData.picPhone || "-",
+        storeCount: 0,
+        status: formData.status || "Aktif",
+      });
+      toast.success(`Workspace "${formData.name}" berhasil disimpan ke database!`);
+      setIsCreateModalOpen(false);
+      await refreshData();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Gagal menyimpan workspace";
+      toast.error(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleEditSubmit = async (formData: Partial<Workspace>) => {
     if (!selectedWorkspaceToEdit) return;
-    await WorkspaceService.updateAsync(selectedWorkspaceToEdit.id, formData);
-    toast.success(
-      `Workspace "${formData.companyName || formData.name}" berhasil diperbarui!`
-    );
-    setIsEditModalOpen(false);
-    setSelectedWorkspaceToEdit(null);
-    refreshData();
+    setIsSubmitting(true);
+    try {
+      await WorkspaceService.updateAsync(selectedWorkspaceToEdit.id, formData);
+      toast.success(
+        `Workspace "${formData.companyName || formData.name || selectedWorkspaceToEdit.name}" berhasil diperbarui!`
+      );
+      setIsEditModalOpen(false);
+      setSelectedWorkspaceToEdit(null);
+      await refreshData();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Gagal memperbarui workspace";
+      toast.error(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleConfirmDelete = async () => {
@@ -113,15 +209,23 @@ export default function WorkspacePage() {
     const isDeactivating = deleteTargetWorkspace.status === "Aktif";
     const newStatus = isDeactivating ? "Nonaktif" : "Aktif";
 
-    await WorkspaceService.updateAsync(deleteTargetWorkspace.id, { status: newStatus });
-    toast.success(
-      isDeactivating
-        ? `Workspace "${deleteTargetWorkspace.name}" berhasil dinonaktifkan.`
-        : `Workspace "${deleteTargetWorkspace.name}" berhasil diaktifkan kembali.`
-    );
-    setIsDeleteModalOpen(false);
-    setDeleteTargetWorkspace(null);
-    refreshData();
+    setIsSubmitting(true);
+    try {
+      await WorkspaceService.updateAsync(deleteTargetWorkspace.id, { status: newStatus });
+      toast.success(
+        isDeactivating
+          ? `Workspace "${deleteTargetWorkspace.name}" berhasil dinonaktifkan.`
+          : `Workspace "${deleteTargetWorkspace.name}" berhasil diaktifkan kembali.`
+      );
+      setIsDeleteModalOpen(false);
+      setDeleteTargetWorkspace(null);
+      await refreshData();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Gagal mengubah status workspace";
+      toast.error(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -133,8 +237,91 @@ export default function WorkspacePage() {
 
       <WorkspaceStats stats={stats} />
 
+      {/* Modern Notice: Panduan Masuk Workspace untuk Super Admin */}
+      {showGuideBanner ? (
+        <div className="mb-5 sm:mb-6 rounded-2xl border border-sky-200/80 bg-gradient-to-r from-sky-50/90 via-white to-blue-50/40 p-4 sm:p-5 shadow-2xs relative overflow-hidden transition-all duration-300">
+          {/* Subtle background decorative glow */}
+          <div className="absolute top-0 right-0 -mt-6 -mr-6 w-36 h-36 bg-sky-200/40 rounded-full blur-2xl pointer-events-none" />
+
+          <div className="flex items-start justify-between gap-3 sm:gap-4 relative z-10">
+            <div className="flex items-start gap-3 sm:gap-3.5">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#193f53] to-sky-600 text-white flex items-center justify-center shrink-0 shadow-2xs mt-0.5">
+                <Sparkles className="w-4 h-4 text-sky-200" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-sky-100 text-sky-800 border border-sky-200/80">
+                    <ShieldCheck className="w-3 h-3 text-sky-600" />
+                    Panduan Super Admin
+                  </span>
+                  <span className="text-[11px] text-slate-400 font-medium hidden sm:inline">
+                    • Navigasi Ruang Kerja
+                  </span>
+                </div>
+                <h3 className="text-xs sm:text-sm font-bold text-slate-900 leading-snug">
+                  Cara Memasuki Ruang Kerja (Workspace) Toko
+                </h3>
+                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                  Sebagai Super Admin, Anda dapat berpindah dan mengelola data audit gerai toko pada workspace yang dituju dengan 2 cara:
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 mt-3">
+                  {/* Cara 1 */}
+                  <div className="flex items-start gap-2.5 p-2.5 rounded-xl bg-white/95 border border-sky-100 shadow-3xs hover:border-sky-300 transition-colors">
+                    <div className="w-5 h-5 rounded-md bg-sky-100 text-sky-700 flex items-center justify-center font-bold text-[11px] shrink-0 mt-0.5">
+                      1
+                    </div>
+                    <div className="text-xs">
+                      <span className="font-bold text-slate-800">Klik Langsung Judul Workspace</span>
+                      <p className="text-slate-500 text-[11px] mt-0.5 leading-snug">
+                        Klik tautan nama workspace pada tabel berikon <ExternalLink className="w-3 h-3 inline text-sky-600 mx-0.5 -translate-y-px" /> untuk langsung berpindah ke Dashboard Monitoring.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Cara 2 */}
+                  <div className="flex items-start gap-2.5 p-2.5 rounded-xl bg-white/95 border border-sky-100 shadow-3xs hover:border-sky-300 transition-colors">
+                    <div className="w-5 h-5 rounded-md bg-sky-100 text-sky-700 flex items-center justify-center font-bold text-[11px] shrink-0 mt-0.5">
+                      2
+                    </div>
+                    <div className="text-xs">
+                      <span className="font-bold text-slate-800">Melalui Modal Detail Workspace</span>
+                      <p className="text-slate-500 text-[11px] mt-0.5 leading-snug">
+                        Klik tombol mata (Lihat Detail) pada kolom Action, lalu pilih tombol <strong className="text-sky-700">&quot;Masuk Workspace&quot;</strong>.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Tombol Tutup Banner */}
+            <button
+              type="button"
+              onClick={handleDismissGuide}
+              className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors shrink-0 cursor-pointer"
+              title="Tutup panduan ini"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex justify-end mb-3">
+          <button
+            type="button"
+            onClick={handleShowGuide}
+            className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-sky-700 bg-sky-50 hover:bg-sky-100/80 border border-sky-200/60 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+          >
+            <Info className="w-3.5 h-3.5 text-sky-600" />
+            <span>Panduan Akses Workspace</span>
+          </button>
+        </div>
+      )}
+
       <WorkspaceTable
         workspaces={workspaces}
+        isLoading={isLoading}
         onAdd={handleOpenCreateModal}
         onDetail={(ws) => setSelectedDetailWorkspace(ws)}
         onEdit={handleOpenEditModal}
@@ -144,33 +331,42 @@ export default function WorkspacePage() {
       {/* 1. Modal Tambah Workspace (Create) */}
       <CreateWorkspaceModal
         isOpen={isCreateModalOpen}
-        onClose={() => setIsCreateModalOpen(false)}
+        isSubmitting={isSubmitting}
+        onClose={() => {
+          if (!isSubmitting) setIsCreateModalOpen(false);
+        }}
         onSubmit={handleCreateSubmit}
       />
 
       {/* 2. Modal Edit Workspace (Edit) */}
       <EditWorkspaceModal
         isOpen={isEditModalOpen}
+        isSubmitting={isSubmitting}
         workspace={selectedWorkspaceToEdit}
         onClose={() => {
-          setIsEditModalOpen(false);
-          setSelectedWorkspaceToEdit(null);
+          if (!isSubmitting) {
+            setIsEditModalOpen(false);
+            setSelectedWorkspaceToEdit(null);
+          }
         }}
         onSubmit={handleEditSubmit}
       />
 
-      {/* 2. Modal Delete (Soft Delete) */}
+      {/* 3. Modal Delete (Soft Delete) */}
       <DeleteWorkspaceModal
         isOpen={isDeleteModalOpen}
+        isSubmitting={isSubmitting}
         workspace={deleteTargetWorkspace}
         onClose={() => {
-          setIsDeleteModalOpen(false);
-          setDeleteTargetWorkspace(null);
+          if (!isSubmitting) {
+            setIsDeleteModalOpen(false);
+            setDeleteTargetWorkspace(null);
+          }
         }}
         onConfirm={handleConfirmDelete}
       />
 
-      {/* 3. Modal Detail Workspace */}
+      {/* 4. Modal Detail Workspace (Tanpa data dummy/mock) */}
       {selectedDetailWorkspace && (() => {
         const initials =
           selectedDetailWorkspace.name
@@ -180,47 +376,11 @@ export default function WorkspacePage() {
             .slice(0, 2)
             .toUpperCase() || "WS";
 
-        const adminEmail =
-          selectedDetailWorkspace.adminEmail ||
-          `admin.${selectedDetailWorkspace.name.toLowerCase().replace(/\s+/g, "")}@auditpro.com`;
-
-        const picName = selectedDetailWorkspace.picName || "Hendra Gunawan";
-        const picPhone = selectedDetailWorkspace.picPhone || "+62 812-8899-1023";
-
-        const existingStores = selectedDetailWorkspace.stores || [];
-        const targetCount = Math.max(
-          selectedDetailWorkspace.storeCount || 0,
-          existingStores.length
-        );
-        const storeList: string[] = [...existingStores];
-
-        if (storeList.length < targetCount) {
-          const isHub =
-            selectedDetailWorkspace.name.toLowerCase().includes("hub") ||
-            (existingStores.length > 0 && existingStores[0].startsWith("Hub"));
-          const prefix = isHub ? "Hub" : "Toko";
-          const code =
-            selectedDetailWorkspace.name.replace(/[^A-Za-z0-9]/g, "").slice(-1).toUpperCase() || "A";
-
-          const defaultLocations = [
-            "Gudang Cimahi Sentral",
-            "Distribusi Pasteur Express",
-            "Depo Ujung Berung",
-            "Hub Transit Padalarang",
-            "Gudang Kopo Sayati",
-            "Cabang Buah Batu",
-            "Cabang Setiabudi",
-            "Cabang Dago",
-            "Cabang Cihampelas",
-            "Cabang Soekarno Hatta",
-          ];
-
-          for (let i = storeList.length + 1; i <= targetCount; i++) {
-            const num = String(i).padStart(2, "0");
-            const loc = defaultLocations[(i - 1) % defaultLocations.length];
-            storeList.push(`${prefix} ${code}-${num}: ${loc}`);
-          }
-        }
+        const adminEmail = selectedDetailWorkspace.adminEmail || "-";
+        const picName = selectedDetailWorkspace.picName || "-";
+        const picPhone = selectedDetailWorkspace.picPhone || "-";
+        const address = selectedDetailWorkspace.headquartersAddress || "-";
+        const storeList: string[] = selectedDetailWorkspace.stores || [];
 
         return (
           <Modal
@@ -240,9 +400,15 @@ export default function WorkspacePage() {
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <div className="font-bold text-slate-900 text-base leading-tight">
-                        {selectedDetailWorkspace.name}
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleEnterWorkspace(selectedDetailWorkspace)}
+                        className="font-bold text-slate-900 text-base leading-tight hover:text-blue-600 hover:underline flex items-center gap-1.5 text-left group/name cursor-pointer transition-colors"
+                        title="Masuk ke Dashboard Monitoring"
+                      >
+                        <span>{selectedDetailWorkspace.name}</span>
+                        <ExternalLink className="w-3.5 h-3.5 text-slate-400 group-hover/name:text-blue-600 transition-colors" />
+                      </button>
                       {selectedDetailWorkspace.status === "Nonaktif" && (
                         <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-600 border border-rose-200">
                           Nonaktif
@@ -250,7 +416,7 @@ export default function WorkspacePage() {
                       )}
                     </div>
                     <div className="text-xs text-slate-500 font-medium mt-0.5">
-                      {selectedDetailWorkspace.companyName || "PT Sumber Retail Sejahtera"}
+                      {selectedDetailWorkspace.companyName || selectedDetailWorkspace.name}
                     </div>
                   </div>
                 </div>
@@ -317,8 +483,9 @@ export default function WorkspacePage() {
                       DESKRIPSI WORKSPACE
                     </div>
                     <div className="p-3 rounded-xl bg-slate-50 border border-slate-100 text-xs text-slate-600 leading-relaxed min-h-[75px]">
-                      {selectedDetailWorkspace.companyDescription ||
-                        selectedDetailWorkspace.description}
+                      {selectedDetailWorkspace.description ||
+                        selectedDetailWorkspace.companyDescription ||
+                        "-"}
                     </div>
                   </div>
 
@@ -330,7 +497,7 @@ export default function WorkspacePage() {
                     <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex items-center gap-2.5 text-xs text-slate-700 font-medium">
                       <User className="w-4 h-4 text-slate-400 shrink-0" />
                       <span>
-                        {picName} • {picPhone}
+                        {picName} {picPhone !== "-" ? `• ${picPhone}` : ""}
                       </span>
                     </div>
                   </div>
@@ -345,10 +512,7 @@ export default function WorkspacePage() {
                     </div>
                     <div className="p-3 rounded-xl bg-slate-50 border border-slate-100 flex items-start gap-2.5 text-xs text-slate-600 leading-relaxed min-h-[75px]">
                       <MapPin className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
-                      <span>
-                        {selectedDetailWorkspace.headquartersAddress ||
-                          "Gedung Wisma Niaga Lt. 8, Jl. TB Simatupang No. 18, Jakarta Selatan 12560"}
-                      </span>
+                      <span>{address}</span>
                     </div>
                   </div>
 
@@ -375,7 +539,7 @@ export default function WorkspacePage() {
                         ))
                       ) : (
                         <div className="text-xs text-slate-400 italic py-3 text-center bg-slate-50 border border-slate-100 rounded-lg">
-                          Belum ada toko yang terdaftar
+                          Belum ada toko yang terdaftar di workspace ini
                         </div>
                       )}
                     </div>
@@ -384,28 +548,41 @@ export default function WorkspacePage() {
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setSelectedDetailWorkspace(null)}
-                  className="px-5 py-2 text-xs sm:text-sm font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer"
+                  onClick={() => handleEnterWorkspace(selectedDetailWorkspace)}
+                  className="px-4 py-2 text-xs sm:text-sm font-semibold text-white bg-gradient-to-r from-sky-600 to-[#193f53] hover:from-sky-700 hover:to-[#143343] rounded-lg transition-all shadow-xs flex items-center gap-2 cursor-pointer"
+                  title="Masuk ke Dashboard Monitoring Workspace ini"
                 >
-                  Tutup
+                  <LayoutGrid className="w-3.5 h-3.5 text-sky-200" />
+                  <span>Masuk Workspace</span>
+                  <ArrowRight className="w-3.5 h-3.5 text-sky-200 ml-0.5" />
                 </button>
-                {selectedDetailWorkspace.status !== "Nonaktif" && (
+
+                <div className="flex items-center gap-2.5">
                   <button
                     type="button"
-                    onClick={() => {
-                      const wsToEdit = selectedDetailWorkspace;
-                      setSelectedDetailWorkspace(null);
-                      handleOpenEditModal(wsToEdit);
-                    }}
-                    className="px-5 py-2 text-xs sm:text-sm font-semibold text-white bg-[#193f53] hover:bg-[#143343] rounded-lg transition-colors shadow-2xs flex items-center gap-2 cursor-pointer"
+                    onClick={() => setSelectedDetailWorkspace(null)}
+                    className="px-4 py-2 text-xs sm:text-sm font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer"
                   >
-                    <Pencil className="w-3.5 h-3.5" />
-                    <span>Edit Workspace</span>
+                    Tutup
                   </button>
-                )}
+                  {selectedDetailWorkspace.status !== "Nonaktif" && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const wsToEdit = selectedDetailWorkspace;
+                        setSelectedDetailWorkspace(null);
+                        handleOpenEditModal(wsToEdit);
+                      }}
+                      className="px-4 py-2 text-xs sm:text-sm font-semibold text-white bg-[#193f53] hover:bg-[#143343] rounded-lg transition-colors shadow-2xs flex items-center gap-2 cursor-pointer"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                      <span>Edit Workspace</span>
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </Modal>

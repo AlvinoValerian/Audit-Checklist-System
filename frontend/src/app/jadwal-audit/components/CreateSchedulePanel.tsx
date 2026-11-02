@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   X,
   CalendarPlus,
@@ -10,16 +10,24 @@ import {
   Clock,
   ChevronDown,
   Save,
+  Loader2,
 } from "lucide-react";
 import { AuditSchedule, RecurrenceType, ScheduleStatus } from "@/types/schedule";
+import { TemplateItem } from "@/types/template";
 import { toast } from "sonner";
+import { TokoService } from "@/services/toko.service";
+import { TemplateService } from "@/services/template.service";
+import { AuthService } from "@/lib/auth";
 
 interface CreateSchedulePanelProps {
   isOpen: boolean;
   initialData?: AuditSchedule | null;
   schedule?: AuditSchedule | null;
   onClose: () => void;
-  onSubmit: (data: Omit<AuditSchedule, "id"> | Array<Omit<AuditSchedule, "id">>) => void;
+  onSubmit: (data: Omit<AuditSchedule, "id"> | Array<Omit<AuditSchedule, "id">>) => Promise<void> | void;
+  workspaceId?: string;
+  workspaceName?: string;
+  isSubmitting?: boolean;
 }
 
 export const STORE_OPTIONS = [
@@ -33,16 +41,6 @@ export const STORE_OPTIONS = [
   { name: "Cabang Puri Indah", location: "Jakarta Barat" },
   { name: "Cabang Fatmawati", location: "Jakarta Selatan" },
   { name: "Cabang Pondok Indah", location: "Jakarta Selatan" },
-];
-
-const TEMPLATE_OPTIONS = [
-  "Checklist Operasional Harian",
-  "Audit Display & Promosi",
-  "Audit Kebersihan & K3",
-  "Audit Stok & Inventori",
-  "Audit Fasilitas & Keamanan",
-  "Audit Kepatuhan Kasir & POS",
-  "Inspeksi Cold Storage & Chiller",
 ];
 
 const ALL_DAYS = ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"];
@@ -77,6 +75,9 @@ export default function CreateSchedulePanel({
   schedule,
   onClose,
   onSubmit,
+  workspaceId,
+  workspaceName,
+  isSubmitting = false,
 }: CreateSchedulePanelProps) {
   const targetData = schedule || initialData;
   const isEdit = Boolean(targetData);
@@ -87,7 +88,98 @@ export default function CreateSchedulePanel({
   const [storeSearch, setStoreSearch] = useState("");
   const [isStoreDropdownOpen, setIsStoreDropdownOpen] = useState(false);
 
-  const [template, setTemplate] = useState(TEMPLATE_OPTIONS[0]);
+  const [storeOptions, setStoreOptions] = useState<{ name: string; location: string }[]>([]);
+  const [templateOptions, setTemplateOptions] = useState<string[]>([]);
+  const [template, setTemplate] = useState<string>("");
+  const [isLoadingTemplates, setIsLoadingTemplates] = useState<boolean>(true);
+
+  /* Load real stores & templates from database */
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const loadDynamicData = async () => {
+      const activeWs = AuthService.getActiveWorkspace();
+      const targetWs = workspaceId || activeWs?.id;
+      setIsLoadingTemplates(true);
+
+      // Helper: Filter template yang hanya berstatus AKTIF
+      const isTemplateActive = (t: TemplateItem) => {
+        const st = (t.status || "").toLowerCase();
+        return st === "aktif" || st === "active";
+      };
+
+      // 1. Ambil cache template yang strictly AKTIF milik targetWs ini (tidak boleh template nonaktif)
+      const cachedTpls = TemplateService.getAll(targetWs);
+      const cachedActive = cachedTpls.filter(isTemplateActive);
+      const cachedNames = cachedActive.map((t) => t.title);
+      setTemplateOptions(cachedNames);
+      if (targetData?.templateName) {
+        setTemplate(targetData.templateName);
+      } else if (targetData?.scheduleName) {
+        setTemplate(targetData.scheduleName);
+      } else if (cachedNames.length > 0) {
+        setTemplate(cachedNames[0]);
+      } else {
+        setTemplate("");
+      }
+
+      try {
+        const liveStores = await TokoService.fetchAll(targetWs);
+        if (Array.isArray(liveStores)) {
+          const seen = new Set<string>();
+          const uniqueStores: { name: string; location: string }[] = [];
+          for (const s of liveStores) {
+            const name = (s.name || s.storeName || "").trim();
+            if (name && !seen.has(name.toLowerCase())) {
+              seen.add(name.toLowerCase());
+              uniqueStores.push({
+                name,
+                location: s.city || s.address || "Lokasi",
+              });
+            }
+          }
+          setStoreOptions(uniqueStores);
+        }
+      } catch (err) {
+        console.warn("Gagal memuat toko dinamis:", err);
+      }
+
+      try {
+        const liveTemplates = await TemplateService.fetchAll(targetWs);
+        const activeTemplates = Array.isArray(liveTemplates)
+          ? liveTemplates.filter(isTemplateActive)
+          : [];
+        const names = activeTemplates.map((t) => t.title);
+
+        // Jika sedang edit data yang sudah ada, tetap pertahankan nama template jadwal tersebut
+        const currentTpl = targetData?.templateName || targetData?.scheduleName;
+        if (currentTpl && !names.includes(currentTpl)) {
+          names.unshift(currentTpl);
+        }
+
+        setTemplateOptions(names);
+        if (targetData?.templateName) {
+          setTemplate(targetData.templateName);
+        } else if (targetData?.scheduleName && names.includes(targetData.scheduleName)) {
+          setTemplate(targetData.scheduleName);
+        } else if (names.length > 0) {
+          setTemplate((prev) => (names.includes(prev) ? prev : names[0]));
+        } else {
+          setTemplate("");
+        }
+      } catch (err) {
+        console.warn("Gagal memuat template dinamis:", err);
+      } finally {
+        setIsLoadingTemplates(false);
+      }
+    };
+
+    loadDynamicData();
+  }, [isOpen, targetData, workspaceId]);
+  const startTimeInputRef = useRef<HTMLInputElement>(null);
+  const endTimeInputRef = useRef<HTMLInputElement>(null);
+  const [isSubmittingLocal, setIsSubmittingLocal] = useState(false);
+  const isPending = Boolean(isSubmitting || isSubmittingLocal);
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("12:00");
   const [recurrence, setRecurrence] = useState<RecurrenceType>("Setiap Hari");
@@ -104,16 +196,13 @@ export default function CreateSchedulePanel({
       if (targetData.selectedStores && targetData.selectedStores.length > 0) {
         setSelectedStores(targetData.selectedStores);
       } else if (targetData.storeName === "Semua Toko") {
-        setSelectedStores(STORE_OPTIONS.map((s) => s.name));
+        setSelectedStores(storeOptions.map((s) => s.name));
       } else {
         setSelectedStores([targetData.storeName]);
       }
       setStoreSearch("");
-      setTemplate(
-        TEMPLATE_OPTIONS.includes(targetData.scheduleName)
-          ? targetData.scheduleName
-          : TEMPLATE_OPTIONS[0]
-      );
+      const initialTemplate = targetData.templateName || targetData.scheduleName || (templateOptions[0] || "");
+      setTemplate(initialTemplate);
       setStartTime(targetData.startTime || "09:00");
       setEndTime(targetData.endTime || "12:00");
       const rec = targetData.recurrence || "Setiap Hari";
@@ -134,7 +223,6 @@ export default function CreateSchedulePanel({
       setScheduleName("");
       setSelectedStores([]);
       setStoreSearch("");
-      setTemplate(TEMPLATE_OPTIONS[0]);
       setStartTime("09:00");
       setEndTime("12:00");
       setRecurrence("Setiap Hari");
@@ -147,27 +235,43 @@ export default function CreateSchedulePanel({
 
   /* ─── Dynamic store list (include schedule store if not in predefined list) ── */
   const availableStores = useMemo(() => {
+    const list: { name: string; location: string }[] = [];
+    const seen = new Set<string>();
+
     if (
       targetData &&
+      targetData.storeName &&
       targetData.storeName !== "Semua Toko" &&
-      !targetData.storeName.includes("Toko Terpilih") &&
-      !STORE_OPTIONS.some((s) => s.name === targetData.storeName)
+      !targetData.storeName.includes("Toko Terpilih")
     ) {
-      return [
-        { name: targetData.storeName, location: targetData.storeLocation || "Jakarta" },
-        ...STORE_OPTIONS,
-      ];
+      const cleanTargetName = targetData.storeName.trim();
+      seen.add(cleanTargetName.toLowerCase());
+      list.push({
+        name: cleanTargetName,
+        location: targetData.storeLocation || "Lokasi",
+      });
     }
-    return STORE_OPTIONS;
-  }, [targetData]);
 
-  const filteredStores = useMemo(
-    () =>
-      availableStores.filter((s) =>
-        s.name.toLowerCase().includes(storeSearch.toLowerCase())
-      ),
-    [availableStores, storeSearch]
-  );
+    for (const s of storeOptions) {
+      const name = (s.name || "").trim();
+      if (name && !seen.has(name.toLowerCase())) {
+        seen.add(name.toLowerCase());
+        list.push({ name, location: s.location || "Lokasi" });
+      }
+    }
+
+    return list;
+  }, [targetData, storeOptions]);
+
+  const filteredStores = useMemo(() => {
+    const q = storeSearch.trim().toLowerCase();
+    if (!q) return availableStores;
+    return availableStores.filter(
+      (s) =>
+        s.name.toLowerCase().includes(q) ||
+        s.location.toLowerCase().includes(q)
+    );
+  }, [availableStores, storeSearch]);
 
   const allSelected = selectedStores.length === availableStores.length;
 
@@ -230,8 +334,9 @@ export default function CreateSchedulePanel({
   };
 
   /* ─── Submit ─────────────────────────────────────────── */
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isPending) return;
     if (selectedStores.length === 0) return;
 
     if (recurrence === "Hari Tertentu" && selectedDays.length === 0) {
@@ -242,41 +347,31 @@ export default function CreateSchedulePanel({
     const finalName = scheduleName.trim() || targetData?.scheduleName || template;
     const finalStatus: ScheduleStatus = isActive ? "Terjadwal" : "Dibatalkan";
 
-    if (isEdit) {
-      // Mode Edit: edit 1 jadwal toko spesifik
-      const chosenStore =
-        availableStores.find((s) => s.name === selectedStores[0]) || {
-          name: selectedStores[0],
-          location: targetData?.storeLocation || "Jakarta",
-        };
+    // Resolusi Template Checklist yang dipilih
+    const activeWs = AuthService.getActiveWorkspace();
+    const targetWs = workspaceId || activeWs?.id;
+    const allTemplates = TemplateService.getAll(targetWs);
+    const selectedTpl = allTemplates.find((t) => t.title === template);
+    const resolvedTemplateId = selectedTpl?.id || targetData?.templateId;
+    const resolvedTemplateName = template || targetData?.templateName || finalName;
 
-      onSubmit({
-        storeName: chosenStore.name,
-        storeLocation: chosenStore.location,
-        scheduleName: finalName,
-        date: targetData?.date || new Date().toISOString().split("T")[0],
-        startTime,
-        endTime,
-        timeRange: `${startTime} - ${endTime}`,
-        recurrence,
-        selectedDays: recurrence === "Setiap Hari" ? [...ALL_DAYS] : selectedDays,
-        status: finalStatus,
-        notes: notes.trim() || undefined,
-        createdAt: targetData?.createdAt || new Date().toISOString().split("T")[0],
-        auditorName: targetData?.auditorName,
-      });
-    } else {
-      // Mode Create: buat 1 log terpisah per toko yang dipilih (Bulk Create)
-      const schedulesToCreate: Array<Omit<AuditSchedule, "id">> = selectedStores.map((storeName) => {
-        const storeObj = availableStores.find((s) => s.name === storeName) || {
-          name: storeName,
-          location: "Jakarta",
-        };
-        return {
-          storeName: storeObj.name,
-          storeLocation: storeObj.location,
+    setIsSubmittingLocal(true);
+    try {
+      if (isEdit) {
+        // Mode Edit: edit 1 jadwal toko spesifik
+        const chosenStore =
+          availableStores.find((s) => s.name === selectedStores[0]) || {
+            name: selectedStores[0],
+            location: targetData?.storeLocation || "Jakarta",
+          };
+
+        await onSubmit({
+          storeName: chosenStore.name,
+          storeLocation: chosenStore.location,
           scheduleName: finalName,
-          date: new Date().toISOString().split("T")[0],
+          templateId: resolvedTemplateId,
+          templateName: resolvedTemplateName,
+          date: targetData?.date || new Date().toISOString().split("T")[0],
           startTime,
           endTime,
           timeRange: `${startTime} - ${endTime}`,
@@ -284,14 +379,43 @@ export default function CreateSchedulePanel({
           selectedDays: recurrence === "Setiap Hari" ? [...ALL_DAYS] : selectedDays,
           status: finalStatus,
           notes: notes.trim() || undefined,
-          createdAt: new Date().toISOString().split("T")[0],
-        };
-      });
+          createdAt: targetData?.createdAt || new Date().toISOString().split("T")[0],
+          auditorName: targetData?.auditorName,
+          workspaceId: targetData?.workspaceId || workspaceId || AuthService.getActiveWorkspace()?.id,
+        });
+      } else {
+        // Mode Create: buat 1 log terpisah per toko yang dipilih (Bulk Create)
+        const schedulesToCreate: Array<Omit<AuditSchedule, "id">> = selectedStores.map((storeName) => {
+          const storeObj = availableStores.find((s) => s.name === storeName) || {
+            name: storeName,
+            location: "Jakarta",
+          };
+          return {
+            storeName: storeObj.name,
+            storeLocation: storeObj.location,
+            scheduleName: finalName,
+            templateId: resolvedTemplateId,
+            templateName: resolvedTemplateName,
+            date: new Date().toISOString().split("T")[0],
+            startTime,
+            endTime,
+            timeRange: `${startTime} - ${endTime}`,
+            recurrence,
+            selectedDays: recurrence === "Setiap Hari" ? [...ALL_DAYS] : selectedDays,
+            status: finalStatus,
+            notes: notes.trim() || undefined,
+            createdAt: new Date().toISOString().split("T")[0],
+            workspaceId: workspaceId || AuthService.getActiveWorkspace()?.id,
+          };
+        });
 
-      onSubmit(schedulesToCreate);
+        await onSubmit(schedulesToCreate);
+      }
+    } catch (err) {
+      console.error("Error submitting schedule in panel:", err);
+    } finally {
+      setIsSubmittingLocal(false);
     }
-
-    onClose();
   };
 
   if (!isOpen) return null;
@@ -301,7 +425,7 @@ export default function CreateSchedulePanel({
       {/* Backdrop */}
       <div
         className="flex-1 bg-slate-900/40 backdrop-blur-xs transition-opacity"
-        onClick={onClose}
+        onClick={isPending ? undefined : onClose}
       />
 
       {/* Side Panel */}
@@ -411,28 +535,42 @@ export default function CreateSchedulePanel({
 
             {/* Dropdown trigger */}
             <div className="relative">
-              <button
-                type="button"
-                onClick={() => setIsStoreDropdownOpen((v) => !v)}
-                className="w-full flex items-center gap-2 px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-500 hover:border-slate-300 transition-all cursor-pointer"
-              >
+              <div className="w-full flex items-center gap-2 px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium focus-within:ring-2 focus-within:ring-[#193f53]/15 focus-within:border-[#193f53] transition-all">
                 <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                 <input
                   type="text"
                   value={storeSearch}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setIsStoreDropdownOpen(true);
-                  }}
+                  onFocus={() => setIsStoreDropdownOpen(true)}
                   onChange={(e) => {
                     setStoreSearch(e.target.value);
                     setIsStoreDropdownOpen(true);
                   }}
-                  placeholder="Cari toko atau cabang..."
-                  className="flex-1 bg-transparent outline-none text-slate-700 placeholder:text-slate-400"
+                  placeholder="Cari atau filter nama toko / cabang..."
+                  className="flex-1 bg-transparent outline-none text-slate-800 placeholder:text-slate-400 text-xs"
                 />
-                <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-              </button>
+                {storeSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setStoreSearch("")}
+                    className="text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
+                    title="Hapus pencarian"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setIsStoreDropdownOpen((v) => !v)}
+                  className="p-1 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  title="Buka daftar toko"
+                >
+                  <ChevronDown
+                    className={`w-3.5 h-3.5 transition-transform duration-200 ${
+                      isStoreDropdownOpen ? "rotate-180" : ""
+                    }`}
+                  />
+                </button>
+              </div>
 
               {isStoreDropdownOpen && (
                 <>
@@ -441,7 +579,15 @@ export default function CreateSchedulePanel({
                     onClick={() => setIsStoreDropdownOpen(false)}
                   />
                   <div className="absolute left-0 right-0 mt-1.5 bg-white border border-slate-200 rounded-xl shadow-xl z-20 overflow-hidden max-h-56 overflow-y-auto">
-                    {/* Pilih semua row (hanya di form baru) */}
+                    {/* Header info / jumlah */}
+                    <div className="px-3.5 py-1.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between text-[11px] font-semibold text-slate-500">
+                      <span>Daftar Toko ({filteredStores.length} tersedia)</span>
+                      {selectedStores.length > 0 && (
+                        <span className="text-sky-600 font-bold">{selectedStores.length} toko dipilih</span>
+                      )}
+                    </div>
+
+                    {/* Pilih semua row (hanya di form create) */}
                     {!isEdit && (
                       <label className="flex items-center gap-3 px-3.5 py-2.5 hover:bg-slate-50 cursor-pointer border-b border-slate-100">
                         <input
@@ -461,36 +607,42 @@ export default function CreateSchedulePanel({
                       </label>
                     )}
 
-                    {filteredStores.map((store) => {
-                      const checked = selectedStores.includes(store.name);
-                      return (
-                        <label
-                          key={store.name}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            toggleStore(store.name);
-                          }}
-                          className="flex items-center gap-3 px-3.5 py-2.5 hover:bg-slate-50 cursor-pointer"
-                        >
-                          <input
-                            type={isEdit ? "radio" : "checkbox"}
-                            name="storeSelection"
-                            checked={checked}
-                            onChange={() => {}}
-                            className="w-3.5 h-3.5 rounded accent-[#193f53] cursor-pointer"
-                          />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs font-semibold text-slate-800 truncate">
-                              {store.name}
-                            </p>
-                            <p className="text-[10px] text-slate-400">{store.location}</p>
-                          </div>
-                          {checked && (
-                            <Check className="w-3.5 h-3.5 text-sky-600 shrink-0" />
-                          )}
-                        </label>
-                      );
-                    })}
+                    {filteredStores.length === 0 ? (
+                      <div className="py-6 text-center text-xs text-slate-400">
+                        Tidak ada toko yang cocok dengan pencarian &quot;{storeSearch}&quot;
+                      </div>
+                    ) : (
+                      filteredStores.map((store) => {
+                        const checked = selectedStores.includes(store.name);
+                        return (
+                          <label
+                            key={store.name}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              toggleStore(store.name);
+                            }}
+                            className="flex items-center gap-3 px-3.5 py-2.5 hover:bg-slate-50 cursor-pointer transition-colors"
+                          >
+                            <input
+                              type={isEdit ? "radio" : "checkbox"}
+                              name="storeSelection"
+                              checked={checked}
+                              onChange={() => {}}
+                              className="w-3.5 h-3.5 rounded accent-[#193f53] cursor-pointer"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-semibold text-slate-800 truncate">
+                                {store.name}
+                              </p>
+                              <p className="text-[10px] text-slate-400">{store.location}</p>
+                            </div>
+                            {checked && (
+                              <Check className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                            )}
+                          </label>
+                        );
+                      })
+                    )}
                   </div>
                 </>
               )}
@@ -499,20 +651,43 @@ export default function CreateSchedulePanel({
 
           {/* Template Checklist */}
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-              Template Checklist <span className="text-rose-500">*</span>
-            </label>
-            <select
-              value={template}
-              onChange={(e) => setTemplate(e.target.value)}
-              className={INPUT_CLS + " cursor-pointer"}
-            >
-              {TEMPLATE_OPTIONS.map((tpl) => (
-                <option key={tpl} value={tpl}>
-                  {tpl}
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-xs font-semibold text-slate-700">
+                Template Checklist <span className="text-rose-500">*</span>
+              </label>
+              {workspaceName && (
+                <span className="text-[10px] text-slate-400 font-medium">
+                  {workspaceName}
+                </span>
+              )}
+            </div>
+
+            {isLoadingTemplates && templateOptions.length === 0 ? (
+              <div className="flex items-center gap-2 px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-500">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-600" />
+                <span>Memuat template checklist {workspaceName ? `untuk ${workspaceName}...` : "..."}</span>
+              </div>
+            ) : templateOptions.length === 0 ? (
+              <div className="p-3 bg-amber-50/80 border border-amber-200 rounded-xl text-xs text-amber-800">
+                <p className="font-bold text-[11px] mb-0.5">Belum Ada Template Checklist</p>
+                <p className="text-[10px] text-amber-700 leading-relaxed">
+                  Workspace {workspaceName ? `"${workspaceName}"` : "ini"} belum memiliki template checklist.
+                  Silakan buat template terlebih dahulu melalui menu Template Checklist.
+                </p>
+              </div>
+            ) : (
+              <select
+                value={template}
+                onChange={(e) => setTemplate(e.target.value)}
+                className={INPUT_CLS + " cursor-pointer"}
+              >
+                {templateOptions.map((tpl) => (
+                  <option key={tpl} value={tpl}>
+                    {tpl}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
 
           {/* Waktu Audit */}
@@ -522,26 +697,78 @@ export default function CreateSchedulePanel({
             </label>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <p className="text-[10px] text-slate-400 mb-1">Jam Mulai</p>
-                <div className="relative">
+                <p
+                  className="text-[10px] text-slate-400 mb-1 cursor-pointer select-none"
+                  onClick={() => {
+                    try {
+                      startTimeInputRef.current?.showPicker();
+                    } catch {
+                      startTimeInputRef.current?.focus();
+                    }
+                  }}
+                >
+                  Jam Mulai
+                </p>
+                <div
+                  className="relative cursor-pointer"
+                  onClick={() => {
+                    try {
+                      startTimeInputRef.current?.showPicker();
+                    } catch {
+                      startTimeInputRef.current?.focus();
+                    }
+                  }}
+                >
                   <Clock className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
+                    ref={startTimeInputRef}
                     type="time"
                     value={startTime}
+                    onClick={(e) => {
+                      try {
+                        e.currentTarget.showPicker();
+                      } catch {}
+                    }}
                     onChange={(e) => setStartTime(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#193f53]/15 focus:border-[#193f53]"
+                    className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#193f53]/15 focus:border-[#193f53] cursor-pointer [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                   />
                 </div>
               </div>
               <div>
-                <p className="text-[10px] text-slate-400 mb-1">Jam Selesai</p>
-                <div className="relative">
+                <p
+                  className="text-[10px] text-slate-400 mb-1 cursor-pointer select-none"
+                  onClick={() => {
+                    try {
+                      endTimeInputRef.current?.showPicker();
+                    } catch {
+                      endTimeInputRef.current?.focus();
+                    }
+                  }}
+                >
+                  Jam Selesai
+                </p>
+                <div
+                  className="relative cursor-pointer"
+                  onClick={() => {
+                    try {
+                      endTimeInputRef.current?.showPicker();
+                    } catch {
+                      endTimeInputRef.current?.focus();
+                    }
+                  }}
+                >
                   <Clock className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
+                    ref={endTimeInputRef}
                     type="time"
                     value={endTime}
+                    onClick={(e) => {
+                      try {
+                        e.currentTarget.showPicker();
+                      } catch {}
+                    }}
                     onChange={(e) => setEndTime(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#193f53]/15 focus:border-[#193f53]"
+                    className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#193f53]/15 focus:border-[#193f53] cursor-pointer [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                   />
                 </div>
               </div>
@@ -677,7 +904,8 @@ export default function CreateSchedulePanel({
           <button
             type="button"
             onClick={onClose}
-            className="px-5 py-2.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer"
+            disabled={isPending}
+            className="px-5 py-2.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
           >
             Batal
           </button>
@@ -689,13 +917,19 @@ export default function CreateSchedulePanel({
               if (form) form.requestSubmit();
             }}
             disabled={
+              isPending ||
               selectedStores.length === 0 ||
               !scheduleName.trim() ||
               (recurrence === "Hari Tertentu" && selectedDays.length === 0)
             }
             className="flex items-center gap-2 px-5 py-2.5 bg-[#193f53] hover:bg-[#123040] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-xs font-semibold transition-all shadow-2xs cursor-pointer"
           >
-            {isEdit ? (
+            {isPending ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>{isEdit ? "Menyimpan Perubahan..." : "Menyimpan Jadwal..."}</span>
+              </>
+            ) : isEdit ? (
               <>
                 <Save className="w-3.5 h-3.5" />
                 <span>Simpan Perubahan</span>

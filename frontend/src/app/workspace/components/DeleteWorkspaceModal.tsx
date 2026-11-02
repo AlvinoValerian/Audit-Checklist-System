@@ -3,13 +3,14 @@
 import React from "react";
 import Modal from "@/components/ui/Modal";
 import { Workspace } from "@/types/workspace";
-import { Trash2, AlertCircle, RotateCcw, CheckCircle2 } from "lucide-react";
+import { Trash2, AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 
 interface DeleteWorkspaceModalProps {
   isOpen: boolean;
   workspace: Workspace | null;
   onClose: () => void;
   onConfirm: () => void;
+  isSubmitting?: boolean;
 }
 
 export default function DeleteWorkspaceModal({
@@ -17,6 +18,7 @@ export default function DeleteWorkspaceModal({
   workspace,
   onClose,
   onConfirm,
+  isSubmitting = false,
 }: DeleteWorkspaceModalProps) {
   if (!workspace) return null;
 
@@ -25,7 +27,7 @@ export default function DeleteWorkspaceModal({
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={isSubmitting ? () => {} : onClose}
       title={isDeactivating ? "Konfirmasi Nonaktifkan Workspace" : "Konfirmasi Aktifkan Workspace"}
       subtitle={isDeactivating ? "Hapus Sementara (Soft Delete)" : "Aktifkan Kembali Unit Kerja"}
       icon={
@@ -80,20 +82,29 @@ export default function DeleteWorkspaceModal({
           <button
             type="button"
             onClick={onClose}
-            className="w-full sm:w-auto px-5 py-2.5 text-xs sm:text-sm font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer text-center"
+            disabled={isSubmitting}
+            className="w-full sm:w-auto px-5 py-2.5 text-xs sm:text-sm font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 disabled:opacity-40 rounded-lg transition-colors cursor-pointer text-center"
           >
             Batal
           </button>
           <button
             type="button"
             onClick={onConfirm}
-            className={`w-full sm:w-auto px-5 py-2.5 text-xs sm:text-sm font-semibold text-white rounded-lg transition-colors shadow-2xs cursor-pointer text-center ${
+            disabled={isSubmitting}
+            className={`w-full sm:w-auto px-5 py-2.5 text-xs sm:text-sm font-semibold text-white rounded-lg transition-colors shadow-2xs cursor-pointer text-center flex items-center justify-center gap-2 min-w-[200px] ${
               isDeactivating
-                ? "bg-[#cc0000] hover:bg-[#b30000]"
-                : "bg-emerald-600 hover:bg-emerald-700"
+                ? "bg-[#cc0000] hover:bg-[#b30000] disabled:opacity-70"
+                : "bg-emerald-600 hover:bg-emerald-700 disabled:opacity-70"
             }`}
           >
-            {isDeactivating ? "Ya, Nonaktifkan Workspace" : "Ya, Aktifkan Workspace"}
+            {isSubmitting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>{isDeactivating ? "Menonaktifkan..." : "Mengaktifkan..."}</span>
+              </>
+            ) : (
+              <span>{isDeactivating ? "Ya, Nonaktifkan Workspace" : "Ya, Aktifkan Workspace"}</span>
+            )}
           </button>
         </div>
       </div>

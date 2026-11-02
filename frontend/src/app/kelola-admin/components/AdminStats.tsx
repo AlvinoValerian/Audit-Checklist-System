@@ -10,7 +10,7 @@ interface AdminStatsProps {
 
 export default function AdminStats({ stats }: AdminStatsProps) {
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-5 sm:mb-6">
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-5 sm:mb-6">
       {/* Card 1: Total Admin */}
       <div className="bg-[#fefdfa] rounded-xl border border-slate-200 p-4 sm:p-5 shadow-2xs flex flex-col justify-between">
         <div className="flex justify-between items-start">
@@ -71,7 +71,8 @@ export default function AdminStats({ stats }: AdminStatsProps) {
         </div>
       </div>
 
-      {/* Card 4: Total Workspace / Auditor */}
+      {/* Card 4: Total Workspace / Auditor (Dicomment) */}
+      {/* 
       <div className="bg-[#fefdfa] rounded-xl border border-slate-200 p-4 sm:p-5 shadow-2xs flex flex-col justify-between">
         <div className="flex justify-between items-start">
           <h3 className="text-[11px] font-bold text-slate-500 tracking-wider uppercase">
@@ -90,6 +91,7 @@ export default function AdminStats({ stats }: AdminStatsProps) {
           </span>
         </div>
       </div>
+      */}
     </div>
   );
 }

@@ -4,6 +4,7 @@ export interface ChecklistTask {
   id: string;
   text: string;
   requirePhoto: boolean;
+  priority?: "High" | "Medium" | "Low";
   order?: number;
 }
 
@@ -20,6 +21,7 @@ export interface ChecklistItem {
   category?: string;
   required?: boolean;
   requirePhoto?: boolean;
+  priority?: "High" | "Medium" | "Low";
 }
 
 export interface TemplateItem {

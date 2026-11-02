@@ -13,6 +13,7 @@ model admin {
   email              String               @unique @db.VarChar(255)
   name               String               @db.VarChar(255)
   password           String               @db.VarChar(255)
+  profile_picture    String?
   status             String?              @default("active") @db.VarChar(20)
   created_at         DateTime?            @default(now()) @db.Timestamptz(6)
   updated_at         DateTime?            @default(now()) @db.Timestamptz(6)
@@ -89,6 +90,8 @@ model checklist_template {
   status            String?             @default("active") @db.VarChar(20)
   time_submitted    DateTime?           @db.Time(6)
   radius            Decimal?            @db.Decimal(10, 2)
+  created_by_name   String?             @db.VarChar(255)
+  creator_role      String?             @db.VarChar(100)
   created_at        DateTime?           @default(now()) @db.Timestamptz(6)
   admin             admin               @relation(fields: [admin_id], references: [admin_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_template_admin")
   store             store               @relation(fields: [store_id], references: [store_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_template_store")
@@ -109,6 +112,9 @@ model schedule {
   start_date         DateTime             @db.Date
   end_date           DateTime?            @db.Date
   status             String?              @default("active") @db.VarChar(20)
+  notes              String?
+  selected_days      String?              @db.VarChar(255)
+  deleted_at         DateTime?            @db.Timestamptz(6)
   created_at         DateTime?            @default(now()) @db.Timestamptz(6)
   updated_at         DateTime?            @default(now()) @db.Timestamptz(6)
   checklist_report   checklist_report[]
@@ -157,7 +163,7 @@ model staff {
   assigned_at      DateTime?          @default(now()) @db.Timestamptz(6)
   created_at       DateTime?          @default(now()) @db.Timestamptz(6)
   updated_at       DateTime?          @default(now()) @db.Timestamptz(6)
-  photo            String?            @db.VarChar(255)
+  photo            String?
   checklist_report checklist_report[]
   schedule_staff   schedule_staff[]
   admin            admin              @relation(fields: [admin_id], references: [admin_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_staff_admin")
@@ -174,7 +180,7 @@ model store {
   address             String?
   location_radius_gps Decimal?             @db.Decimal(10, 2)
   description         String?
-  store_picture       String?              @db.VarChar(255)
+  store_picture       String?
   status              String?              @default("active") @db.VarChar(20)
   created_at          DateTime?            @default(now()) @db.Timestamptz(6)
   updated_at          DateTime?            @default(now()) @db.Timestamptz(6)
@@ -195,6 +201,7 @@ model super_admin {
   phone_number   String?     @db.VarChar(50)
   password       String      @db.VarChar(255)
   company_name   String?     @db.VarChar(255)
+  profile_picture String?
   created_at     DateTime?   @default(now()) @db.Timestamptz(6)
   updated_at     DateTime?   @default(now()) @db.Timestamptz(6)
   workspace      workspace[]
@@ -216,6 +223,7 @@ model template_task {
   kategori_id       BigInt
   task_description  String
   is_photo_required Boolean?           @default(false)
+  priority          String?            @default("Low") @db.VarChar(20)
   sort_order        Int?               @default(0)
   created_at        DateTime?          @default(now()) @db.Timestamptz(6)
   updated_at        DateTime?          @default(now()) @db.Timestamptz(6)
@@ -263,4 +271,24 @@ model ai_audit_log {
   checklist_report  checklist_report? @relation(fields: [report_id], references: [report_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_ai_report")
 
   @@index([report_id], map: "idx_ai_log_report_id")
+}
+
+model store_holiday {
+  holiday_id     BigInt    @id @default(autoincrement())
+  store_id       BigInt?
+  workspace_id   BigInt?
+  store_name     String    @db.VarChar(255)
+  store_location String?   @db.VarChar(255)
+  start_date     DateTime  @db.Date
+  end_date       DateTime  @db.Date
+  duration_days  Int?      @default(1)
+  reason         String
+  created_by     String?   @default("Admin") @db.VarChar(255)
+  creator_role   String?   @default("Admin") @db.VarChar(100)
+  status         String?   @default("Terjadwal") @db.VarChar(50)
+  libur_type     String?   @default("full") @db.VarChar(50)
+  schedules      Json?     @default("[]")
+  deleted_at     DateTime? @db.Timestamptz(6)
+  created_at     DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime? @default(now()) @db.Timestamptz(6)
 }

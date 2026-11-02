@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { ChevronDown } from "lucide-react";
 
 interface MonitoringHeaderProps {
+  activeWorkspaceName?: string;
   selectedMonth: string;
   onMonthChange: (month: string) => void;
   selectedStore: string;
@@ -61,6 +62,7 @@ export function getDynamicMonthOptions() {
 }
 
 export default function MonitoringHeader({
+  activeWorkspaceName,
   selectedMonth,
   onMonthChange,
   selectedStore,
@@ -224,7 +226,7 @@ export default function MonitoringHeader({
       {/* Baris 2: No 4 (Deskripsi) di bawah judul */}
       <div>
         <p className="text-xs sm:text-sm text-slate-500">
-          Pantau kondisi dan performa seluruh toko dalam Workspace A
+          Pantau kondisi dan performa seluruh toko{activeWorkspaceName ? ` dalam ${activeWorkspaceName}` : ""}
         </p>
       </div>
     </div>

@@ -1,264 +1,256 @@
 import { StoreItem, StoreStats, StoreStatus } from "@/types/toko";
+import { AuthService } from "@/lib/auth";
 
+const getBackendUrl = (): string => {
+  if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
+  if (typeof window !== "undefined") return "";
+  return "http://127.0.0.1:5000";
+};
+const BACKEND_URL = getBackendUrl();
 const TOKO_STORAGE_KEY = "audit_pro_toko_data_v3";
 
-export const defaultStores: StoreItem[] = [
-  {
-    id: "toko-1",
-    name: "Toko A",
-    city: "Jakarta Pusat",
-    address: "Jl. M.H. Thamrin No. 28, Kebon Sirih, Menteng, Jakarta Pusat, DKI Jakarta 10350",
-    timezone: "WIB (UTC+7)",
-    timezoneLabel: "WIB (UTC+7) - Asia/Jakarta",
-    geofenceRadius: 100,
-    latitude: -6.183418,
-    longitude: 106.823456,
-    operationalHours: "Setiap hari • 10:00 - 22:00 WIB",
-    description: "Gerai utama di lantai ground floor, akses lobi barat. Operasional setiap hari 10:00 - 22:00 WIB.",
-    findingsCount: 2,
-    status: "Aktif",
-    managerName: "Budi Santoso",
-    phone: "0812-3456-7890",
-    workspace: "Workspace A",
-    createdAt: "12 Okt 2023",
-  },
-  {
-    id: "toko-2",
-    name: "Toko B",
-    city: "Kota Bandung",
-    address: "Jl. Ir. H. Juanda No. 126, Dago, Coblong, Kota Bandung, Jawa Barat 40132",
-    timezone: "WIB (UTC+7)",
-    timezoneLabel: "WIB (UTC+7) - Asia/Jakarta",
-    geofenceRadius: 100,
-    latitude: -6.886421,
-    longitude: 107.615289,
-    operationalHours: "Setiap hari • 09:00 - 21:00 WIB",
-    description: "Cabang strategis kawasan Dago, memiliki fasilitas parkir luas dan drive-thru.",
-    findingsCount: 0,
-    status: "Aktif",
-    managerName: "Siti Rahmawati",
-    phone: "0812-3456-7891",
-    workspace: "Workspace A",
-    createdAt: "15 Okt 2023",
-  },
-  {
-    id: "toko-3",
-    name: "Toko C",
-    city: "Kota Surabaya",
-    address: "Jl. Tunjungan No. 65, Genteng, Tegalsari, Kota Surabaya, Jawa Timur 60275",
-    timezone: "WIB (UTC+7)",
-    timezoneLabel: "WIB (UTC+7) - Asia/Jakarta",
-    geofenceRadius: 120,
-    latitude: -7.257472,
-    longitude: 112.737834,
-    operationalHours: "Setiap hari • 10:00 - 22:00 WIB",
-    description: "Berada di koridor utama pertokoan historis Tunjungan, dekat dengan pusat perbelanjaan.",
-    findingsCount: 5,
-    status: "Aktif",
-    managerName: "Ahmad Fauzi",
-    phone: "0812-3456-7892",
-    workspace: "Workspace A",
-    createdAt: "20 Okt 2023",
-  },
-  {
-    id: "toko-4",
-    name: "Toko D",
-    city: "Kota Yogyakarta",
-    address: "Jl. Malioboro No. 52, Sosromenduran, Gedong Tengen, Kota Yogyakarta, DIY 55271",
-    timezone: "WIB (UTC+7)",
-    timezoneLabel: "WIB (UTC+7) - Asia/Jakarta",
-    geofenceRadius: 100,
-    latitude: -7.792589,
-    longitude: 110.365982,
-    operationalHours: "Setiap hari • 08:00 - 22:00 WIB",
-    description: "Outlet sentral kawasan wisata Malioboro, dilengkapi display produk lokal unggulan.",
-    findingsCount: 1,
-    status: "Aktif",
-    managerName: "Dewi Lestari",
-    phone: "0812-3456-7893",
-    workspace: "Workspace A",
-    createdAt: "01 Nov 2023",
-  },
-  {
-    id: "toko-5",
-    name: "Toko E",
-    city: "Kota Semarang",
-    address: "Jl. Pemuda No. 118, Sekayu, Semarang Tengah, Kota Semarang, Jawa Tengah 50132",
-    timezone: "WIB (UTC+7)",
-    timezoneLabel: "WIB (UTC+7) - Asia/Jakarta",
-    geofenceRadius: 100,
-    latitude: -6.981829,
-    longitude: 110.414981,
-    operationalHours: "Setiap hari • 09:00 - 21:00 WIB",
-    description: "Lokasi persimpangan CBD kota Semarang, terintegrasi jalur transportasi publik.",
-    findingsCount: 0,
-    status: "Nonaktif",
-    managerName: "Eko Prasetyo",
-    phone: "0812-3456-7894",
-    workspace: "Workspace A",
-    createdAt: "10 Nov 2023",
-  },
-  {
-    id: "toko-6",
-    name: "Toko F",
-    city: "Kota Denpasar",
-    address: "Jl. Teuku Umar No. 88, Dauh Puri Kauh, Denpasar Barat, Kota Denpasar, Bali 80113",
-    timezone: "WITA (UTC+8)",
-    timezoneLabel: "WITA (UTC+8) - Asia/Makassar",
-    geofenceRadius: 100,
-    latitude: -8.675412,
-    longitude: 115.207834,
-    operationalHours: "Setiap hari • 09:00 - 22:00 WITA",
-    description: "Pusat aktivitas bisnis Denpasar Barat, melayani area komersial dan turis domestik.",
-    findingsCount: 3,
-    status: "Aktif",
-    managerName: "Wayan Sudarta",
-    phone: "0812-3456-7895",
-    workspace: "Workspace A",
-    createdAt: "18 Nov 2023",
-  },
-  {
-    id: "toko-7",
-    name: "Toko G",
-    city: "Kota Makassar",
-    address: "Jl. Pantai Losari No. 14, Ujung Pandang, Kota Makassar, Sulawesi Selatan 90111",
-    timezone: "WITA (UTC+8)",
-    timezoneLabel: "WITA (UTC+8) - Asia/Makassar",
-    geofenceRadius: 100,
-    latitude: -5.143219,
-    longitude: 119.405781,
-    operationalHours: "Setiap hari • 10:00 - 23:00 WITA",
-    description: "View pesisir pantai Losari, jam operasional panjang melayani pengunjung malam.",
-    findingsCount: 0,
-    status: "Aktif",
-    managerName: "Fajar Nugraha",
-    phone: "0812-3456-7896",
-    workspace: "Workspace A",
-    createdAt: "01 Des 2023",
-  },
-  {
-    id: "toko-8",
-    name: "Toko H",
-    city: "Balikpapan Kota",
-    address: "Jl. Jenderal Sudirman No. 45, Klandasan Ilir, Balikpapan Kota, Kalimantan Timur 76113",
-    timezone: "WITA (UTC+8)",
-    timezoneLabel: "WITA (UTC+8) - Asia/Makassar",
-    geofenceRadius: 100,
-    latitude: -1.268712,
-    longitude: 116.831201,
-    operationalHours: "Setiap hari • 09:00 - 21:00 WITA",
-    description: "Kawasan pusat niaga utama Balikpapan dekat dengan pelabuhan dan perkantoran.",
-    findingsCount: 2,
-    status: "Nonaktif",
-    managerName: "Hendra Setiawan",
-    phone: "0812-3456-7897",
-    workspace: "Workspace A",
-    createdAt: "12 Des 2023",
-  },
-  {
-    id: "toko-9",
-    name: "Toko I",
-    city: "Kota Medan",
-    address: "Jl. Ahmad Yani No. 102, Kesawan, Medan Barat, Kota Medan, Sumatera Utara 20111",
-    timezone: "WIB (UTC+7)",
-    timezoneLabel: "WIB (UTC+7) - Asia/Jakarta",
-    geofenceRadius: 100,
-    latitude: 3.590219,
-    longitude: 98.679124,
-    operationalHours: "Setiap hari • 09:00 - 22:00 WIB",
-    description: "Gedung peninggalan bernuansa kolonial modern di kawasan cagar budaya Kesawan.",
-    findingsCount: 0,
-    status: "Aktif",
-    managerName: "Gita Permata",
-    phone: "0812-3456-7898",
-    workspace: "Workspace A",
-    createdAt: "05 Jan 2024",
-  },
-  {
-    id: "toko-10",
-    name: "Toko J",
-    city: "Kota Manado",
-    address: "Jl. Sam Ratulangi No. 70, Wenang Utara, Kota Manado, Sulawesi Utara 95111",
-    timezone: "WITA (UTC+8)",
-    timezoneLabel: "WITA (UTC+8) - Asia/Makassar",
-    geofenceRadius: 100,
-    latitude: 1.487129,
-    longitude: 124.842109,
-    operationalHours: "Setiap hari • 09:00 - 21:00 WITA",
-    description: "Jantung komersial kota Manado dengan fasilitas penunjang audit lengkap.",
-    findingsCount: 0,
-    status: "Aktif",
-    managerName: "Indah Kusuma",
-    phone: "0812-3456-7899",
-    workspace: "Workspace A",
-    createdAt: "15 Jan 2024",
-  },
-];
+/**
+ * Helper untuk menyusun headers otentikasi user saat ini
+ */
+const getAuthHeaders = (): Record<string, string> => {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  const token = AuthService.getToken();
+  const user = AuthService.getCurrentUser();
+  const activeWs = AuthService.getActiveWorkspace();
+
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
+  if (rawId && !rawId.startsWith("adm-")) {
+    headers["x-super-admin-id"] = rawId;
+    headers["x-user-id"] = rawId;
+  }
+  if (user?.email) {
+    headers["x-user-email"] = user.email;
+  }
+  if (activeWs?.id) {
+    headers["x-workspace-id"] = activeWs.id;
+  } else if (user?.workspaceId) {
+    headers["x-workspace-id"] = user.workspaceId;
+  }
+
+  return headers;
+};
 
 export const TokoService = {
+  cachedStores: [] as StoreItem[],
+
+  /**
+   * Mengambil data toko langsung dari backend PostgreSQL
+   * Secara otomatis menyaring toko yang berelasi dengan Workspace aktif
+   */
+  async fetchAll(customWorkspaceId?: string): Promise<StoreItem[]> {
+    try {
+      const user = AuthService.getCurrentUser();
+      const activeWs = AuthService.getActiveWorkspace();
+      const targetWsId =
+        customWorkspaceId ||
+        activeWs?.id ||
+        (user && user.workspaceId ? user.workspaceId : undefined);
+
+      const params = new URLSearchParams();
+      if (targetWsId && targetWsId !== "all") {
+        params.append("workspaceId", targetWsId);
+      }
+
+      const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
+      if (rawId && !rawId.startsWith("adm-")) {
+        params.append("superAdminId", rawId);
+      } else if (user?.email) {
+        params.append("email", user.email);
+      }
+
+      const queryString = params.toString() ? `?${params.toString()}` : "";
+      const res = await fetch(`${BACKEND_URL}/api/stores${queryString}`, {
+        method: "GET",
+        headers: getAuthHeaders(),
+        cache: "no-store",
+      });
+
+      if (!res.ok) {
+        throw new Error(`Gagal memuat toko dari server (HTTP ${res.status})`);
+      }
+
+      const json = await res.json();
+      if (json.status === "success" && Array.isArray(json.data)) {
+        this.cachedStores = json.data;
+        if (typeof window !== "undefined") {
+          localStorage.setItem(TOKO_STORAGE_KEY, JSON.stringify(json.data));
+        }
+        return json.data;
+      }
+
+      return [];
+    } catch (error) {
+      console.warn("Backend API offline or unreachable, using local cache:", error);
+      return this.getAll();
+    }
+  },
+
   getAll(): StoreItem[] {
-    if (typeof window === "undefined") return defaultStores;
+    if (this.cachedStores.length > 0) return this.cachedStores;
+    if (typeof window === "undefined") return [];
     try {
       const data = localStorage.getItem(TOKO_STORAGE_KEY);
       if (data) {
         const parsed = JSON.parse(data);
         if (Array.isArray(parsed) && parsed.length > 0) {
+          this.cachedStores = parsed;
           return parsed;
         }
       }
-      localStorage.setItem(TOKO_STORAGE_KEY, JSON.stringify(defaultStores));
-      return defaultStores;
+      return [];
     } catch {
-      return defaultStores;
+      return [];
     }
+  },
+
+  async getByIdAsync(id: string): Promise<StoreItem | undefined> {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/stores/${id}`, {
+        method: "GET",
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.status === "success" && json.data) {
+          return json.data;
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to fetch store by ID from API:", err);
+    }
+    return this.getById(id);
   },
 
   getById(id: string): StoreItem | undefined {
     return this.getAll().find((s) => s.id === id);
   },
 
-  create(data: Omit<StoreItem, "id">): StoreItem {
-    const list = this.getAll();
-    const newStore: StoreItem = {
-      ...data,
-      id: `toko-${Date.now()}`,
-      createdAt: data.createdAt || new Date().toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" }),
-    };
-    const updated = [newStore, ...list];
-    if (typeof window !== "undefined") {
-      localStorage.setItem(TOKO_STORAGE_KEY, JSON.stringify(updated));
+  /**
+   * Menambahkan toko baru langsung ke database PostgreSQL
+   */
+  async createAsync(data: Omit<StoreItem, "id">): Promise<StoreItem> {
+    const activeWs = AuthService.getActiveWorkspace();
+    const user = AuthService.getCurrentUser();
+    const targetWsId =
+      data.workspaceId ||
+      activeWs?.id ||
+      (user && user.workspaceId ? user.workspaceId : undefined);
+
+    let res: Response;
+    try {
+      res = await fetch(`${BACKEND_URL}/api/stores`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          name: data.name,
+          city: data.city,
+          address: data.address,
+          timezone: data.timezone,
+          geofenceRadius: data.geofenceRadius,
+          latitude: data.latitude,
+          longitude: data.longitude,
+          description: data.description,
+          status: data.status,
+          workspaceId: targetWsId,
+          workspace: data.workspace || activeWs?.name,
+          storePicture: data.storePicture,
+        }),
+      });
+    } catch (networkErr: unknown) {
+      console.error("Network error on POST /api/stores:", networkErr);
+      throw new Error("Tidak dapat terhubung ke server backend (http://localhost:5000). Pastikan server backend sedang aktif.");
     }
-    return newStore;
+
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json.status !== "success") {
+      throw new Error(json.message || `Gagal menambahkan toko ke database (HTTP ${res.status})`);
+    }
+
+    const createdStore: StoreItem = json.data;
+    this.cachedStores = [createdStore, ...this.cachedStores];
+    return createdStore;
   },
 
-  update(id: string, data: Partial<StoreItem>): StoreItem | null {
-    const list = this.getAll();
-    const index = list.findIndex((s) => s.id === id);
-    if (index === -1) return null;
-
-    const updatedStore = { ...list[index], ...data };
-    list[index] = updatedStore;
-    if (typeof window !== "undefined") {
-      localStorage.setItem(TOKO_STORAGE_KEY, JSON.stringify(list));
+  /**
+   * Memperbarui data toko di database PostgreSQL
+   */
+  async updateAsync(id: string, data: Partial<StoreItem>): Promise<StoreItem> {
+    let res: Response;
+    try {
+      res = await fetch(`${BACKEND_URL}/api/stores/${id}`, {
+        method: "PUT",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          name: data.name,
+          city: data.city,
+          address: data.address,
+          timezone: data.timezone,
+          geofenceRadius: data.geofenceRadius,
+          latitude: data.latitude,
+          longitude: data.longitude,
+          description: data.description,
+          status: data.status,
+          storePicture: data.storePicture,
+        }),
+      });
+    } catch (networkErr: unknown) {
+      console.error("Network error on PUT /api/stores:", networkErr);
+      throw new Error("Tidak dapat terhubung ke server backend (http://localhost:5000). Pastikan server backend sedang aktif.");
     }
+
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json.status !== "success") {
+      throw new Error(json.message || `Gagal memperbarui data toko di database (HTTP ${res.status})`);
+    }
+
+    const updatedStore: StoreItem = json.data;
+    this.cachedStores = this.cachedStores.map((s) => (s.id === id ? updatedStore : s));
     return updatedStore;
   },
 
-  delete(id: string): boolean {
-    const list = this.getAll();
-    const filtered = list.filter((s) => s.id !== id);
-    if (filtered.length === list.length) return false;
-    if (typeof window !== "undefined") {
-      localStorage.setItem(TOKO_STORAGE_KEY, JSON.stringify(filtered));
+  /**
+   * Menghapus atau me-nonaktifkan toko dari database PostgreSQL
+   */
+  async deleteAsync(id: string, permanent: boolean = false): Promise<boolean> {
+    let res: Response;
+    try {
+      res = await fetch(`${BACKEND_URL}/api/stores/${id}?permanent=${permanent ? "true" : "false"}`, {
+        method: "DELETE",
+        headers: getAuthHeaders(),
+      });
+    } catch (networkErr: unknown) {
+      console.error("Network error on DELETE /api/stores:", networkErr);
+      throw new Error("Tidak dapat terhubung ke server backend (http://localhost:5000). Pastikan server backend sedang aktif.");
+    }
+
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json.status !== "success") {
+      throw new Error(json.message || `Gagal menghapus toko (HTTP ${res.status})`);
+    }
+
+    if (permanent) {
+      this.cachedStores = this.cachedStores.filter((s) => s.id !== id);
+    } else if (json.data) {
+      this.cachedStores = this.cachedStores.map((s) => (s.id === id ? json.data : s));
     }
     return true;
   },
 
-  toggleStatus(id: string): StoreItem | null {
+  async toggleStatusAsync(id: string): Promise<StoreItem | null> {
     const store = this.getById(id);
-    if (!store) return null;
-    const newStatus: StoreStatus = store.status === "Aktif" ? "Nonaktif" : "Aktif";
-    return this.update(id, { status: newStatus });
+    const newStatus: StoreStatus = store?.status === "Aktif" ? "Nonaktif" : "Aktif";
+    return this.updateAsync(id, { status: newStatus });
   },
 
   getStats(stores?: StoreItem[]): StoreStats {

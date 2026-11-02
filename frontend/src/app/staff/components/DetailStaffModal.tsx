@@ -148,14 +148,34 @@ export default function DetailStaffModal({
                 {isAktif ? (
                   <>
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                    <span>Aktif (Siap ditugaskan jadwal audit)</span>
+                    <span>Aktif (Siap ditugaskan)</span>
                   </>
                 ) : (
                   <>
                     <XCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                    <span>Nonaktif (Tidak ditugaskan jadwal audit)</span>
+                    <span>Nonaktif</span>
                   </>
                 )}
+              </div>
+            </div>
+
+            {/* 5. Nomor Telepon */}
+            <div>
+              <div className="text-[10px] font-bold text-slate-400 tracking-wider uppercase mb-1">
+                NO. TELEPON / WHATSAPP
+              </div>
+              <div className="text-xs font-semibold text-slate-800">
+                {staff.phone && staff.phone !== "-" ? staff.phone : "Belum dicantumkan"}
+              </div>
+            </div>
+
+            {/* 6. Tanggal Bergabung / Ditugaskan */}
+            <div>
+              <div className="text-[10px] font-bold text-slate-400 tracking-wider uppercase mb-1">
+                TANGGAL DITUGASKAN
+              </div>
+              <div className="text-xs font-semibold text-slate-800">
+                {staff.joinDate || "-"}
               </div>
             </div>
           </div>
