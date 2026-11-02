@@ -39,6 +39,7 @@ const templateRoutes = require('./src/routes/template.routes');
 const scheduleRoutes = require('./src/routes/schedule.routes');
 const holidayRoutes = require('./src/routes/holiday.routes');
 const staffRoutes = require('./src/routes/staff.routes');
+const teknisRoutes = require('./src/routes/teknis.routes');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/ai', aiRoutes);
@@ -58,6 +59,7 @@ app.use('/api/holidays', holidayRoutes);
 app.use('/api/holiday', holidayRoutes);
 app.use('/api/staff', staffRoutes);
 app.use('/api/staffs', staffRoutes);
+app.use('/api/teknis', teknisRoutes);
 
 // Base Route / Health Check
 app.get('/api/health', (req, res) => {

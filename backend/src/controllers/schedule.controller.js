@@ -202,7 +202,9 @@ exports.getAllSchedules = async (req, res) => {
     const where = {};
 
     // 1. Logika penentuan workspace:
-    if (requestedWsId && requestedWsId !== 'all') {
+    if (user && (user.role === 'Divisi Teknis' || user.role === 'Teknis') && user.workspaceId) {
+      where.store = { workspace_id: BigInt(user.workspaceId) };
+    } else if (requestedWsId && requestedWsId !== 'all') {
       const cleanWs = BigInt(requestedWsId.toString().replace(/^ws-/, ''));
       where.store = { workspace_id: cleanWs };
     } else if (user && user.role === 'Admin' && user.workspaceId) {
