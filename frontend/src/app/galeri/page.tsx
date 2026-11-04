@@ -1,10 +1,10 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
+import Header from "@/components/layout/Header";
 import {
   Search,
-  Filter,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -12,15 +12,29 @@ import {
   AlertTriangle,
   ZoomIn,
   SlidersHorizontal,
+  Loader2,
+  Building2,
 } from "lucide-react";
 import { GalleryService } from "@/services/gallery.service";
 import { AuditGalleryLog, AuditPhoto } from "@/types/gallery";
 import PhotoDetailModal from "./components/PhotoDetailModal";
 import FilterModal, { GalleryFilterState } from "./components/FilterModal";
+import { AuthService } from "@/lib/auth";
+import { WorkspaceService } from "@/services/workspace.service";
+import { Workspace } from "@/types/workspace";
+import { toast } from "sonner";
 
 export default function GaleriPage() {
-  const [logs] = useState<AuditGalleryLog[]>(GalleryService.getAll());
-  
+  const [logs, setLogs] = useState<AuditGalleryLog[]>([]);
+  const [storesList, setStoresList] = useState<string[]>(["Semua Toko"]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Workspace Switcher States
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>("");
+  const [currentWorkspaceName, setCurrentWorkspaceName] = useState<string>("Workspace");
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+
   // Search & Filter State
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedStore, setSelectedStore] = useState<string>("Semua Toko");
@@ -52,13 +66,111 @@ export default function GaleriPage() {
     }
   };
 
-  // Pagination State (4 cards per page as shown in screenshot)
+  // Pagination State (4 cards per page)
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 4;
 
-  const storesList = useMemo(() => {
-    return ["Semua Toko", ...GalleryService.getStoresList()];
-  }, []);
+  // Load Data from Backend with Workspace Context
+  const loadData = useCallback(async (showLoading = true, customWsId?: string) => {
+    if (showLoading) setIsLoading(true);
+
+    try {
+      const activeWs = AuthService.getActiveWorkspace();
+      const wsId = customWsId !== undefined ? customWsId : (selectedWorkspaceId || activeWs?.id);
+
+      const [liveLogs, dynamicStores] = await Promise.all([
+        GalleryService.fetchAll({ workspaceId: wsId }),
+        GalleryService.fetchStores(wsId),
+      ]);
+
+      if (Array.isArray(liveLogs)) {
+        setLogs(liveLogs);
+        const storeSet = new Set(["Semua Toko", ...dynamicStores, ...liveLogs.map((l) => l.storeName)]);
+        setStoresList(Array.from(storeSet));
+      }
+    } catch (err) {
+      console.warn("Gagal memuat galeri audit:", err);
+      const fallback = GalleryService.getAll();
+      setLogs(fallback);
+      setStoresList(["Semua Toko", ...GalleryService.getStoresList()]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [selectedWorkspaceId]);
+
+  useEffect(() => {
+    const init = async () => {
+      setIsLoading(true);
+      const user = AuthService.getCurrentUser();
+      const activeWs = AuthService.getActiveWorkspace();
+      const isSA = user?.role === "Super Admin";
+      setIsSuperAdmin(isSA);
+
+      let targetWsId = activeWs?.id || user?.workspaceId || "";
+      let targetWsName = activeWs?.name || user?.workspaceName || "Workspace";
+
+      if (isSA) {
+        try {
+          const wsList = await WorkspaceService.fetchAll();
+          setWorkspaces(wsList);
+          if (wsList.length > 0) {
+            const matched = wsList.find((w) => w.id === targetWsId && w.status !== "Nonaktif");
+            if (matched) {
+              targetWsId = matched.id;
+              targetWsName = matched.companyName || matched.name;
+            } else {
+              const firstActive = wsList.find((w) => w.status !== "Nonaktif") || wsList[0];
+              targetWsId = firstActive.id;
+              targetWsName = firstActive.companyName || firstActive.name;
+              AuthService.setActiveWorkspace({
+                id: firstActive.id,
+                name: targetWsName,
+              });
+            }
+          }
+        } catch (err) {
+          console.warn("Gagal memuat daftar workspace:", err);
+        }
+      }
+
+      setSelectedWorkspaceId(targetWsId);
+      setCurrentWorkspaceName(targetWsName);
+      loadData(true, targetWsId);
+    };
+
+    init();
+
+    const handleWsChange = () => {
+      const activeWs = AuthService.getActiveWorkspace();
+      if (activeWs?.id) {
+        setSelectedWorkspaceId(activeWs.id);
+        setCurrentWorkspaceName(activeWs.name);
+        loadData(true, activeWs.id);
+      }
+    };
+
+    window.addEventListener("workspace-changed", handleWsChange);
+    return () => {
+      window.removeEventListener("workspace-changed", handleWsChange);
+    };
+  }, [loadData]);
+
+  const handleWorkspaceChange = async (newWsId: string) => {
+    const chosen = workspaces.find((w) => w.id === newWsId);
+    if (chosen?.status === "Nonaktif") {
+      toast.error(`Workspace "${chosen.companyName || chosen.name}" sedang nonaktif dan tidak dapat dipilih.`);
+      return;
+    }
+
+    setSelectedWorkspaceId(newWsId);
+    if (chosen) {
+      const name = chosen.companyName || chosen.name;
+      setCurrentWorkspaceName(name);
+      AuthService.setActiveWorkspace({ id: chosen.id, name });
+      toast.info(`Menampilkan galeri untuk workspace "${name}"`);
+    }
+    await loadData(true, newWsId);
+  };
 
   // Filtered Logs
   const filteredLogs = useMemo(() => {
@@ -69,7 +181,8 @@ export default function GaleriPage() {
         !searchTerm ||
         log.storeName.toLowerCase().includes(searchLower) ||
         log.scheduleTitle.toLowerCase().includes(searchLower) ||
-        log.date.toLowerCase().includes(searchLower);
+        log.date.toLowerCase().includes(searchLower) ||
+        (log.auditor?.name && log.auditor.name.toLowerCase().includes(searchLower));
 
       if (!matchSearch) return false;
 
@@ -93,8 +206,9 @@ export default function GaleriPage() {
 
       // 5. Advanced: Category filter
       if (advancedFilters.category !== "Semua Kategori") {
-        const hasMatchingCat = log.photos.some(
-          (p) => p.category === advancedFilters.category
+        const catTarget = advancedFilters.category.toLowerCase();
+        const hasMatchingCat = log.photos.some((p) =>
+          p.category.toLowerCase().includes(catTarget)
         );
         if (!hasMatchingCat) return false;
       }
@@ -154,22 +268,38 @@ export default function GaleriPage() {
 
   return (
     <DashboardLayout>
-      {/* Header Section */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <h2 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
-              Galeri Foto Audit
-            </h2>
-            <span className="px-2.5 py-0.5 rounded-full bg-blue-50 border border-blue-200 text-blue-600 text-xs font-semibold">
-              Workspace A
-            </span>
-          </div>
-          <p className="text-xs sm:text-sm text-slate-500 mt-1">
-            Dokumentasi bukti foto kepatuhan operasional dan inspeksi checklist toko
-          </p>
-        </div>
-      </div>
+      {/* Header Section with Workspace Switcher like in Jadwal Audit */}
+      <Header
+        title="Galeri Foto Audit"
+        subtitle={`Dokumentasi bukti foto kepatuhan operasional dan inspeksi checklist toko di ${currentWorkspaceName}.`}
+        action={
+          isSuperAdmin && workspaces.length > 0 ? (
+            <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs">
+              <Building2 className="w-4 h-4 text-sky-600 shrink-0" />
+              <span className="text-xs font-semibold text-slate-600 shrink-0">Workspace:</span>
+              <select
+                value={selectedWorkspaceId}
+                onChange={(e) => handleWorkspaceChange(e.target.value)}
+                className="bg-transparent text-slate-800 text-xs font-bold focus:outline-none cursor-pointer pr-1"
+              >
+                {workspaces.map((w) => {
+                  const isInactive = w.status === "Nonaktif";
+                  return (
+                    <option
+                      key={w.id}
+                      value={w.id}
+                      disabled={isInactive}
+                      className={isInactive ? "text-slate-400 bg-slate-100 italic" : "text-slate-800"}
+                    >
+                      {w.companyName || w.name} {isInactive ? "(Nonaktif)" : `(${w.storeCount} Toko)`}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+          ) : undefined
+        }
+      />
 
       {/* Main Container */}
       <div className="space-y-3.5">
@@ -217,7 +347,7 @@ export default function GaleriPage() {
                       className="fixed inset-0 z-20"
                       onClick={() => setIsStoreDropdownOpen(false)}
                     />
-                    <div className="absolute right-0 lg:left-0 mt-2 w-52 bg-white rounded-xl shadow-lg border border-slate-100 py-1.5 z-30 max-h-60 overflow-y-auto">
+                    <div className="absolute right-0 lg:left-0 mt-2 w-56 bg-white rounded-xl shadow-lg border border-slate-100 py-1.5 z-30 max-h-60 overflow-y-auto">
                       {storesList.map((store) => (
                         <button
                           key={store}
@@ -315,8 +445,20 @@ export default function GaleriPage() {
           </div>
         </div>
 
-        {/* Audit Cards List */}
-        {paginatedLogs.length > 0 ? (
+        {/* Audit Cards List or Loading */}
+        {isLoading ? (
+          <div className="bg-white border border-slate-200 rounded-xl py-16 text-center shadow-xs">
+            <div className="flex flex-col items-center justify-center gap-2">
+              <Loader2 className="w-6 h-6 text-[#193f53] animate-spin" />
+              <span className="text-xs font-semibold text-slate-700">
+                Memuat data galeri foto audit...
+              </span>
+              <span className="text-[11px] text-slate-400">
+                Menghubungkan ke database
+              </span>
+            </div>
+          </div>
+        ) : paginatedLogs.length > 0 ? (
           <div className="space-y-3">
             {paginatedLogs.map((log) => (
               <div
@@ -439,55 +581,57 @@ export default function GaleriPage() {
         )}
 
         {/* Pagination Section */}
-        <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs flex flex-wrap gap-3 items-center justify-between">
-          <p className="text-[11px] text-slate-500">
-            Menampilkan <span className="font-bold text-slate-900">{startItem}-{endItem}</span> dari{" "}
-            <span className="font-bold text-slate-900">{totalFilteredCount} toko terverifikasi</span>
-          </p>
+        {!isLoading && paginatedLogs.length > 0 && (
+          <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs flex flex-wrap gap-3 items-center justify-between">
+            <p className="text-[11px] text-slate-500">
+              Menampilkan <span className="font-bold text-slate-900">{startItem}-{endItem}</span> dari{" "}
+              <span className="font-bold text-slate-900">{totalFilteredCount} laporan audit</span>
+            </p>
 
-          <div className="flex gap-1 text-[11px]">
-            {/* Prev Button */}
-            <button
-              onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-              disabled={currentPage === 1}
-              className={`w-7 h-7 flex items-center justify-center rounded-md border border-slate-200 transition-colors ${
-                currentPage === 1
-                  ? "text-slate-300 border-slate-100 cursor-not-allowed"
-                  : "text-slate-600 hover:bg-slate-50 cursor-pointer"
-              }`}
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-
-            {/* Page Numbers */}
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+            <div className="flex gap-1 text-[11px]">
+              {/* Prev Button */}
               <button
-                key={page}
-                onClick={() => setCurrentPage(page)}
-                className={`w-7 h-7 rounded-md flex items-center justify-center font-bold text-xs transition-colors cursor-pointer ${
-                  currentPage === page
-                    ? "bg-[#193f53] text-white shadow-2xs"
-                    : "border border-slate-200 text-slate-600 hover:bg-slate-50"
+                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className={`w-7 h-7 flex items-center justify-center rounded-md border border-slate-200 transition-colors ${
+                  currentPage === 1
+                    ? "text-slate-300 border-slate-100 cursor-not-allowed"
+                    : "text-slate-600 hover:bg-slate-50 cursor-pointer"
                 }`}
               >
-                {page}
+                <ChevronLeft className="w-4 h-4" />
               </button>
-            ))}
 
-            {/* Next Button */}
-            <button
-              onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
-              disabled={currentPage === totalPages}
-              className={`px-3 h-7 flex items-center justify-center rounded-md border border-slate-200 font-bold ml-1 transition-colors ${
-                currentPage === totalPages
-                  ? "text-slate-300 border-slate-100 cursor-not-allowed"
-                  : "text-slate-600 hover:bg-slate-50 cursor-pointer"
-              }`}
-            >
-              Selanjutnya <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
-            </button>
+              {/* Page Numbers */}
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                <button
+                  key={page}
+                  onClick={() => setCurrentPage(page)}
+                  className={`w-7 h-7 rounded-md flex items-center justify-center font-bold text-xs transition-colors cursor-pointer ${
+                    currentPage === page
+                      ? "bg-[#193f53] text-white shadow-2xs"
+                      : "border border-slate-200 text-slate-600 hover:bg-slate-50"
+                  }`}
+                >
+                  {page}
+                </button>
+              ))}
+
+              {/* Next Button */}
+              <button
+                onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+                disabled={currentPage === totalPages}
+                className={`px-3 h-7 flex items-center justify-center rounded-md border border-slate-200 font-bold ml-1 transition-colors ${
+                  currentPage === totalPages
+                    ? "text-slate-300 border-slate-100 cursor-not-allowed"
+                    : "text-slate-600 hover:bg-slate-50 cursor-pointer"
+                }`}
+              >
+                Selanjutnya <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
+              </button>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Lightbox / Detail Photo Modal */}

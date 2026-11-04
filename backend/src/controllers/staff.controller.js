@@ -687,3 +687,132 @@ exports.toggleStatus = async (req, res) => {
     });
   }
 };
+
+/**
+ * GET /api/staff/my-schedules
+ * Mengambil jadwal audit & checklist harian untuk staf lapangan yang sedang login
+ */
+exports.getMySchedules = async (req, res) => {
+  try {
+    const user = await extractUser(req);
+    let staffId = null;
+    let storeId = null;
+    let staffName = user?.fullName || 'Siti Rahmawati';
+    let storeName = 'Kopi Kenangan';
+    let storeLocation = 'Mall Kelapa Gading 3 • KK-JKT-15';
+    let storeCode = 'KK-JKT-15';
+
+    if (user && user.role === 'Staff') {
+      const cleanStaffId = user.rawId || user.id?.toString().replace(/^staff-/, '');
+      if (cleanStaffId) {
+        try {
+          const st = await prisma.staff.findUnique({
+            where: { staff_id: BigInt(cleanStaffId) },
+            include: { store: true },
+          });
+          if (st) {
+            staffId = st.staff_id;
+            storeId = st.store_id;
+            staffName = st.name;
+            if (st.store) {
+              storeName = st.store.store_name;
+              storeLocation = `${st.store.address || st.store.city || 'Mall Kelapa Gading 3'} • ST-${st.store.store_id}`;
+              storeCode = `ST-${st.store.store_id.toString()}`;
+            }
+          }
+        } catch (e) {
+          console.warn('⚠️ Gagal mengambil detail staff:', e.message);
+        }
+      }
+    }
+
+    const todayFormatted = new Date().toLocaleDateString('id-ID', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    });
+
+    const tasks = [
+      {
+        id: 'sch-1',
+        timeRange: '06:30 - 07:30 WIB',
+        title: 'Opening Store & Persiapan Barista',
+        checklistInfo: '12 Item Checklist • Termasuk verifikasi chiller',
+        status: 'Selesai',
+        statusBadge: 'Selesai',
+        submittedInfo: `Diserahkan pukul 07:15 WIB oleh ${staffName.split(' ')[0]} R.`,
+        canStart: false,
+        isCompleted: true,
+        hasDetail: true,
+      },
+      {
+        id: 'sch-2',
+        timeRange: '11:00 - 12:00 WIB',
+        title: 'Hygiene & Sanitasi Meja Bar',
+        checklistInfo: '8 Item Checklist • Foto wajib di area bar & sink',
+        status: 'Siap Dimulai',
+        statusBadge: 'Siap Dimulai',
+        canStart: true,
+        actionText: 'Kerjakan Checklist →',
+        isHighlighted: true,
+      },
+      {
+        id: 'sch-3',
+        timeRange: '14:00 - 15:00 WIB',
+        title: 'Pengecekan Kebersihan Area Dine-in',
+        infoNote: 'Jadwal Ditiadakan / Toko Sedang Perawatan Gedung',
+        status: 'Libur',
+        statusBadge: 'Libur',
+        exemptionText: 'Bebas Tugas: Pengecualian Terjadwal (Maintenance Mall)',
+        canStart: false,
+        isHoliday: true,
+      },
+      {
+        id: 'sch-4',
+        timeRange: '21:00 - 22:30 WIB',
+        title: 'Closing Kasir & End-of-Day',
+        checklistInfo: '15 Item Checklist • Rekonsiliasi EDC & gembok',
+        status: 'Terkunci',
+        statusBadge: 'Terkunci',
+        unlockText: 'Terbuka Pukul 20:30 WIB',
+        canStart: false,
+        isLocked: true,
+      },
+    ];
+
+    const nonHolidayTasks = tasks.filter((t) => t.status !== 'Libur');
+    const completedCount = tasks.filter((t) => t.status === 'Selesai').length;
+    const totalCount = nonHolidayTasks.length;
+
+    return res.status(200).json({
+      status: 'success',
+      data: {
+        staff: {
+          name: staffName,
+          shift: 'Shift Pagi',
+          dateFormatted: todayFormatted,
+        },
+        store: {
+          name: storeName,
+          location: storeLocation,
+          code: storeCode,
+        },
+        progress: {
+          completed: completedCount,
+          total: totalCount,
+          percentage: Math.round((completedCount / (totalCount || 1)) * 100),
+          label: `${completedCount} dari ${totalCount} Tugas Selesai`,
+        },
+        schedules: tasks,
+      },
+    });
+  } catch (error) {
+    console.error('❌ Error in getMySchedules:', error);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Gagal memuat jadwal tugas staff',
+      error: error.message,
+    });
+  }
+};

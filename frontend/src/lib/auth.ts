@@ -8,6 +8,10 @@ export interface AuthUser {
   role: "Super Admin" | "Divisi Teknis" | "Admin" | "Area Admin" | "Auditor Lapangan" | "Staff";
   workspaceId?: string;
   workspaceName?: string;
+  storeId?: string;
+  storeName?: string;
+  storeLocation?: string;
+  storeCode?: string;
   profilePicture?: string | null;
   token?: string;
 }

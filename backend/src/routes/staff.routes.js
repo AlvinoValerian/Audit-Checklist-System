@@ -5,6 +5,9 @@ const staffController = require('../controllers/staff.controller');
 // GET /api/staff - Ambil semua staf dengan filter workspace / store / status / search
 router.get('/', staffController.getAllStaff);
 
+// GET /api/staff/my-schedules - Ambil jadwal audit harian staff (Mobile UI)
+router.get('/my-schedules', staffController.getMySchedules);
+
 // GET /api/staff/:id - Ambil detail staf
 router.get('/:id', staffController.getStaffById);
 
