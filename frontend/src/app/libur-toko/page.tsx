@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import Header from "@/components/layout/Header";
-import { Calendar as CalendarIcon, CheckCircle2, XCircle, Search, Filter, Plus, Store, X, ChevronLeft, ChevronRight, Building2 } from "lucide-react";
+import { Calendar as CalendarIcon, CheckCircle2, XCircle, Search, Filter, Plus, Store, X, ChevronLeft, ChevronRight, Building2, Loader2 } from "lucide-react";
 import { HolidayService } from "@/services/holiday.service";
 import { Holiday, HolidayStatus } from "@/types/holiday";
 import { toast } from "sonner";
@@ -508,7 +508,21 @@ export default function LiburTokoPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {paginatedHolidays.length === 0 ? (
+              {isLoading ? (
+                <tr>
+                  <td colSpan={6} className="py-16 text-center text-slate-400">
+                    <div className="flex flex-col items-center justify-center gap-2">
+                      <Loader2 className="w-6 h-6 text-[#193f53] animate-spin" />
+                      <span className="text-xs font-semibold text-slate-700">
+                        Memuat data libur toko & pengecualian jadwal...
+                      </span>
+                      <span className="text-[11px] text-slate-400">
+                        Menghubungkan ke database
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+              ) : paginatedHolidays.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-12 text-center text-slate-400">
                     <CalendarIcon className="w-8 h-8 mx-auto mb-2 text-slate-300 stroke-[1.5]" />

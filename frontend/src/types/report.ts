@@ -8,21 +8,28 @@ export interface ChecklistFinding {
   issueNote?: string;
   severity?: "Rendah" | "Sedang" | "Tinggi";
   photoUrl?: string;
+  photoCaption?: string;
+  photoTimestamp?: string;
+  recommendation?: string;
+  auditorNote?: string;
 }
 
 export interface AuditReportItem {
   id: string;
   storeName: string;
-  storeLocation: string; // e.g., "Jakarta Pusat", "Jakarta Selatan"
-  scheduleName: string; // e.g., "Checklist Operasional Harian", "Audit Display & Promosi"
-  auditorName: string; // e.g., "Budi Santoso", "Andi Wijaya"
+  storeLocation: string; // e.g., "Jakarta Pusat", "Malang Singosari"
+  scheduleName: string; // e.g., "Checklist Operasional Harian", "Audit Opening"
+  auditorName: string; // e.g., "Budi Santoso", "Dina Lestari"
   auditorRole: string; // e.g., "Auditor Lapangan"
-  submitDate: string; // e.g., "18 Agustus 2024"
+  submitDate: string; // e.g., "4 November 2026"
   submitTime: string; // e.g., "14:15 WIB"
-  month: string; // e.g., "Agustus 2024"
+  month: string; // e.g., "November 2026"
   status: ReportStatus;
-  issueCount: number; // e.g., 1, 2, 0
-  complianceScore: number; // e.g. 85%, 98%
+  issueCount: number; // e.g., 0, 1, 2
+  complianceScore: number; // e.g., 88, 100
   summaryNote?: string;
   findings: ChecklistFinding[];
+  signatureUrl?: string;
+  auditorPhoto?: string;
+  workspaceName?: string;
 }

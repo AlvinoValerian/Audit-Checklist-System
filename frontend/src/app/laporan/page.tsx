@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
+import Header from "@/components/layout/Header";
 import {
   Search,
   ChevronDown,
@@ -12,21 +13,38 @@ import {
   Eye,
   Download,
   X,
+  Loader2,
+  Building2,
 } from "lucide-react";
 import { ReportService } from "@/services/report.service";
 import { AuditReportItem } from "@/types/report";
 import DetailLaporanView from "./components/DetailLaporanView";
 import { toast } from "sonner";
+import { AuthService } from "@/lib/auth";
+import { WorkspaceService } from "@/services/workspace.service";
+import { Workspace } from "@/types/workspace";
 
 export default function LaporanPage() {
-  const [reports] = useState<AuditReportItem[]>(ReportService.getAll());
+  const [reports, setReports] = useState<AuditReportItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Filters State - default initial matching the requirement
+  // Workspace Switcher States
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>("");
+  const [currentWorkspaceName, setCurrentWorkspaceName] = useState<string>("Workspace");
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+
+  // Filters State
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedStore, setSelectedStore] = useState<string>("Semua Toko");
   const [selectedSchedule, setSelectedSchedule] = useState<string>("Semua Jadwal");
-  const [selectedMonth, setSelectedMonth] = useState<string>("Bulan Ini");
-  const [selectedStatus, setSelectedStatus] = useState<string>("Masalah");
+  const [selectedMonth, setSelectedMonth] = useState<string>("Semua Bulan");
+  const [selectedStatus, setSelectedStatus] = useState<string>("Semua Status");
+
+  // Dynamic filter dropdown options
+  const [storeOptions, setStoreOptions] = useState<string[]>(["Semua Toko"]);
+  const [scheduleOptions, setScheduleOptions] = useState<string[]>(["Semua Jadwal"]);
+  const [monthOptions, setMonthOptions] = useState<string[]>(["Semua Bulan"]);
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
@@ -35,11 +53,114 @@ export default function LaporanPage() {
   // Selected Report for Full Detail View
   const [selectedReportToView, setSelectedReportToView] = useState<AuditReportItem | null>(null);
 
-  // Dropdown options
-  const storeOptions = useMemo(() => ["Semua Toko", ...ReportService.getStores()], []);
-  const scheduleOptions = useMemo(() => ["Semua Jadwal", ...ReportService.getSchedules()], []);
-  const monthOptions = useMemo(() => ["Bulan Ini", "Semua Bulan", ...ReportService.getMonths()], []);
   const statusOptions = ["Semua Status", "Masalah", "Sesuai"];
+
+  // Load Data from Backend
+  const loadReportsData = useCallback(async (showLoading = true, customWsId?: string) => {
+    if (showLoading) setIsLoading(true);
+
+    try {
+      const activeWs = AuthService.getActiveWorkspace();
+      const wsId = customWsId !== undefined ? customWsId : (selectedWorkspaceId || activeWs?.id);
+
+      const [liveReports, meta] = await Promise.all([
+        ReportService.fetchAll({ workspaceId: wsId }),
+        ReportService.fetchMeta(wsId),
+      ]);
+
+      if (Array.isArray(liveReports)) {
+        setReports(liveReports);
+
+        const dynamicStores = Array.from(new Set(["Semua Toko", ...(meta.stores || []), ...liveReports.map((r) => r.storeName)]));
+        const dynamicSchedules = Array.from(new Set(["Semua Jadwal", ...(meta.schedules || []), ...liveReports.map((r) => r.scheduleName)]));
+        const dynamicMonths = Array.from(new Set(["Semua Bulan", ...(meta.months || []), ...liveReports.map((r) => r.month)]));
+
+        setStoreOptions(dynamicStores);
+        setScheduleOptions(dynamicSchedules);
+        setMonthOptions(dynamicMonths);
+      }
+    } catch (err) {
+      console.warn("Gagal memuat laporan audit dari backend:", err);
+      const fallback = ReportService.getAll();
+      setReports(fallback);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [selectedWorkspaceId]);
+
+  useEffect(() => {
+    const init = async () => {
+      setIsLoading(true);
+      const user = AuthService.getCurrentUser();
+      const activeWs = AuthService.getActiveWorkspace();
+      const isSA = user?.role === "Super Admin";
+      setIsSuperAdmin(isSA);
+
+      let targetWsId = activeWs?.id || user?.workspaceId || "";
+      let targetWsName = activeWs?.name || user?.workspaceName || "Workspace";
+
+      if (isSA) {
+        try {
+          const wsList = await WorkspaceService.fetchAll();
+          setWorkspaces(wsList);
+          if (wsList.length > 0) {
+            const matched = wsList.find((w) => w.id === targetWsId && w.status !== "Nonaktif");
+            if (matched) {
+              targetWsId = matched.id;
+              targetWsName = matched.companyName || matched.name;
+            } else {
+              const firstActive = wsList.find((w) => w.status !== "Nonaktif") || wsList[0];
+              targetWsId = firstActive.id;
+              targetWsName = firstActive.companyName || firstActive.name;
+              AuthService.setActiveWorkspace({
+                id: firstActive.id,
+                name: targetWsName,
+              });
+            }
+          }
+        } catch (err) {
+          console.warn("Gagal memuat daftar workspace:", err);
+        }
+      }
+
+      setSelectedWorkspaceId(targetWsId);
+      setCurrentWorkspaceName(targetWsName);
+      loadReportsData(true, targetWsId);
+    };
+
+    init();
+
+    const handleWsChange = () => {
+      const activeWs = AuthService.getActiveWorkspace();
+      if (activeWs?.id) {
+        setSelectedWorkspaceId(activeWs.id);
+        setCurrentWorkspaceName(activeWs.name);
+        loadReportsData(true, activeWs.id);
+      }
+    };
+
+    window.addEventListener("workspace-changed", handleWsChange);
+    return () => {
+      window.removeEventListener("workspace-changed", handleWsChange);
+    };
+  }, [loadReportsData]);
+
+  const handleWorkspaceChange = async (newWsId: string) => {
+    const chosen = workspaces.find((w) => w.id === newWsId);
+    if (chosen?.status === "Nonaktif") {
+      toast.error(`Workspace "${chosen.companyName || chosen.name}" sedang nonaktif dan tidak dapat dipilih.`);
+      return;
+    }
+
+    setSelectedWorkspaceId(newWsId);
+    if (chosen) {
+      const name = chosen.companyName || chosen.name;
+      setCurrentWorkspaceName(name);
+      AuthService.setActiveWorkspace({ id: chosen.id, name });
+      toast.info(`Menampilkan laporan untuk workspace "${name}"`);
+    }
+    await loadReportsData(true, newWsId);
+  };
 
   // Filtered Reports
   const filteredReports = useMemo(() => {
@@ -66,9 +187,7 @@ export default function LaporanPage() {
       }
 
       // 4. Month Filter
-      if (selectedMonth === "Bulan Ini") {
-        if (item.month !== "Agustus 2024") return false;
-      } else if (selectedMonth !== "Semua Bulan" && item.month !== selectedMonth) {
+      if (selectedMonth !== "Semua Bulan" && item.month.toLowerCase() !== selectedMonth.toLowerCase()) {
         return false;
       }
 
@@ -106,7 +225,7 @@ export default function LaporanPage() {
     toast.info("Semua filter telah direset.");
   };
 
-  // Export handler
+  // Export handlers
   const handleExportAll = () => {
     toast.success(`Mengekspor ${filteredReports.length} data laporan audit (Excel / PDF)...`);
   };
@@ -126,7 +245,7 @@ export default function LaporanPage() {
   return (
     <DashboardLayout>
       {selectedReportToView ? (
-        /* Detailed Report View matching the screenshot */
+        /* Detailed Report View */
         <DetailLaporanView
           report={selectedReportToView}
           onBack={() => setSelectedReportToView(null)}
@@ -134,17 +253,38 @@ export default function LaporanPage() {
       ) : (
         /* Report Table List View */
         <>
-          {/* Page Header */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-            <div>
-              <h2 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
-                Laporan Audit
-              </h2>
-              <p className="text-xs sm:text-sm text-slate-500 mt-1">
-                Rekapitulasi dan evaluasi kepatuhan operasional checklist audit toko
-              </p>
-            </div>
-          </div>
+          {/* Page Header with Workspace Switcher like in Jadwal Audit */}
+          <Header
+            title="Laporan Audit"
+            subtitle={`Rekapitulasi dan evaluasi kepatuhan operasional checklist audit toko di ${currentWorkspaceName}.`}
+            action={
+              isSuperAdmin && workspaces.length > 0 ? (
+                <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs">
+                  <Building2 className="w-4 h-4 text-sky-600 shrink-0" />
+                  <span className="text-xs font-semibold text-slate-600 shrink-0">Workspace:</span>
+                  <select
+                    value={selectedWorkspaceId}
+                    onChange={(e) => handleWorkspaceChange(e.target.value)}
+                    className="bg-transparent text-slate-800 text-xs font-bold focus:outline-none cursor-pointer pr-1"
+                  >
+                    {workspaces.map((w) => {
+                      const isInactive = w.status === "Nonaktif";
+                      return (
+                        <option
+                          key={w.id}
+                          value={w.id}
+                          disabled={isInactive}
+                          className={isInactive ? "text-slate-400 bg-slate-100 italic" : "text-slate-800"}
+                        >
+                          {w.companyName || w.name} {isInactive ? "(Nonaktif)" : `(${w.storeCount} Toko)`}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              ) : undefined
+            }
+          />
 
           {/* Main Container */}
           <div className="space-y-4">
@@ -343,24 +483,24 @@ export default function LaporanPage() {
                 {/* Right Buttons */}
                 <div className="flex items-center gap-3 shrink-0">
                   {hasActiveFilters && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={handleResetFilters}
-                        className="text-xs text-slate-500 hover:text-slate-800 font-medium transition-colors cursor-pointer"
-                      >
-                        Reset Filter
-                      </button>
+                    <button
+                      type="button"
+                      onClick={handleResetFilters}
+                      className="text-xs text-slate-500 hover:text-slate-800 font-medium transition-colors cursor-pointer"
+                    >
+                      Reset Filter
+                    </button>
+                  )}
 
-                      <button
-                        type="button"
-                        onClick={handleExportAll}
-                        className="flex items-center gap-1.5 px-4 py-2 bg-[#193f53] hover:bg-[#143343] text-white rounded-lg text-xs font-semibold transition-colors shadow-2xs cursor-pointer"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        Ekspor Laporan
-                      </button>
-                    </>
+                  {filteredReports.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleExportAll}
+                      className="flex items-center gap-1.5 px-4 py-2 bg-[#193f53] hover:bg-[#143343] text-white rounded-lg text-xs font-semibold transition-colors shadow-2xs cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      Ekspor Laporan
+                    </button>
                   )}
                 </div>
               </div>
@@ -393,7 +533,21 @@ export default function LaporanPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {paginatedReports.length > 0 ? (
+                    {isLoading ? (
+                      <tr>
+                        <td colSpan={6} className="py-16 text-center text-slate-400">
+                          <div className="flex flex-col items-center justify-center gap-2">
+                            <Loader2 className="w-6 h-6 text-[#193f53] animate-spin" />
+                            <span className="text-xs font-semibold text-slate-700">
+                              Memuat data laporan audit...
+                            </span>
+                            <span className="text-[11px] text-slate-400">
+                              Menghubungkan ke database
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : paginatedReports.length > 0 ? (
                       paginatedReports.map((row) => (
                         <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
                           {/* Toko */}
@@ -515,61 +669,63 @@ export default function LaporanPage() {
               </div>
 
               {/* Pagination Section */}
-              <div className="p-4 border-t border-slate-100 flex flex-wrap gap-4 items-center justify-between">
-                <p className="text-[11px] text-slate-500">
-                  Menampilkan{" "}
-                  <span className="font-bold text-slate-900">
-                    {startItem}-{endItem}
-                  </span>{" "}
-                  dari{" "}
-                  <span className="font-bold text-slate-900">
-                    {totalFilteredCount} laporan audit
-                  </span>
-                </p>
+              {!isLoading && paginatedReports.length > 0 && (
+                <div className="p-4 border-t border-slate-100 flex flex-wrap gap-4 items-center justify-between">
+                  <p className="text-[11px] text-slate-500">
+                    Menampilkan{" "}
+                    <span className="font-bold text-slate-900">
+                      {startItem}-{endItem}
+                    </span>{" "}
+                    dari{" "}
+                    <span className="font-bold text-slate-900">
+                      {totalFilteredCount} laporan audit
+                    </span>
+                  </p>
 
-                <div className="flex gap-1 text-[11px]">
-                  {/* Prev Button */}
-                  <button
-                    onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-                    disabled={currentPage === 1}
-                    className={`w-7 h-7 flex items-center justify-center rounded-md border border-slate-200 transition-colors ${
-                      currentPage === 1
-                        ? "text-slate-300 border-slate-100 cursor-not-allowed"
-                        : "text-slate-600 hover:bg-slate-50 cursor-pointer"
-                    }`}
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-
-                  {/* Page Numbers */}
-                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                  <div className="flex gap-1 text-[11px]">
+                    {/* Prev Button */}
                     <button
-                      key={page}
-                      onClick={() => setCurrentPage(page)}
-                      className={`w-7 h-7 rounded-md flex items-center justify-center font-bold text-xs transition-colors cursor-pointer ${
-                        currentPage === page
-                          ? "bg-[#193f53] text-white shadow-2xs"
-                          : "border border-slate-200 text-slate-600 hover:bg-slate-50"
+                      onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                      disabled={currentPage === 1}
+                      className={`w-7 h-7 flex items-center justify-center rounded-md border border-slate-200 transition-colors ${
+                        currentPage === 1
+                          ? "text-slate-300 border-slate-100 cursor-not-allowed"
+                          : "text-slate-600 hover:bg-slate-50 cursor-pointer"
                       }`}
                     >
-                      {page}
+                      <ChevronLeft className="w-4 h-4" />
                     </button>
-                  ))}
 
-                  {/* Next Button */}
-                  <button
-                    onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
-                    disabled={currentPage === totalPages}
-                    className={`px-3 h-7 flex items-center justify-center rounded-md border border-slate-200 font-bold ml-1 transition-colors ${
-                      currentPage === totalPages
-                        ? "text-slate-300 border-slate-100 cursor-not-allowed"
-                        : "text-slate-600 hover:bg-slate-50 cursor-pointer"
-                    }`}
-                  >
-                    Selanjutnya <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
-                  </button>
+                    {/* Page Numbers */}
+                    {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                      <button
+                        key={page}
+                        onClick={() => setCurrentPage(page)}
+                        className={`w-7 h-7 rounded-md flex items-center justify-center font-bold text-xs transition-colors cursor-pointer ${
+                          currentPage === page
+                            ? "bg-[#193f53] text-white shadow-2xs"
+                            : "border border-slate-200 text-slate-600 hover:bg-slate-50"
+                        }`}
+                      >
+                        {page}
+                      </button>
+                    ))}
+
+                    {/* Next Button */}
+                    <button
+                      onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+                      disabled={currentPage === totalPages}
+                      className={`px-3 h-7 flex items-center justify-center rounded-md border border-slate-200 font-bold ml-1 transition-colors ${
+                        currentPage === totalPages
+                          ? "text-slate-300 border-slate-100 cursor-not-allowed"
+                          : "text-slate-600 hover:bg-slate-50 cursor-pointer"
+                      }`}
+                    >
+                      Selanjutnya <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </div>
         </>
