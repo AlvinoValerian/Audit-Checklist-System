@@ -54,7 +54,11 @@ function ProfileContent() {
   const handleLogout = () => {
     AuthService.logout();
     toast.info("Anda telah logout dari aplikasi.");
-    router.push("/login");
+    if (typeof window !== "undefined") {
+      window.location.href = "/login";
+    } else {
+      router.push("/login");
+    }
   };
 
   const displayName = currentUser?.fullName || "Siti Rahmawati";

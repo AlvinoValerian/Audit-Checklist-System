@@ -282,7 +282,11 @@ export default function JadwalStaffPage() {
   const handleLogout = () => {
     AuthService.logout();
     toast.info("Anda telah logout.");
-    router.push("/login");
+    if (typeof window !== "undefined") {
+      window.location.href = "/login";
+    } else {
+      router.push("/login");
+    }
   };
 
   // Toggle item checklist

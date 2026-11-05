@@ -26,14 +26,24 @@ ${customContext ? `Konteks Tambahan Toko/Audit Terkini:\n${customContext}\n` : '
 
     // 1. Opsi Provider: Google Gemini
     if (provider === 'gemini' && geminiApiKey) {
-      return await this._callGeminiAPI(userQuestion, systemInstructionText, geminiApiKey);
+      try {
+        return await this._callGeminiAPI(userQuestion, systemInstructionText, geminiApiKey);
+      } catch (geminiError) {
+        console.warn('⚠️ [AI Service] Gemini API gagal merespon:', geminiError.message);
+        return this._generateFallbackResponse(userQuestion, geminiError.message);
+      }
     }
 
     // 2. Opsi Provider: Local AI (Ollama)
     if (provider === 'local' || provider === 'ollama') {
       const ollamaUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
       const fullPrompt = `${systemInstructionText}\n\nPertanyaan Pengguna:\n${userQuestion}`;
-      return await this._callOllamaAPI(fullPrompt, ollamaUrl);
+      try {
+        return await this._callOllamaAPI(fullPrompt, ollamaUrl);
+      } catch (ollamaError) {
+        console.warn('⚠️ [AI Service] Ollama gagal:', ollamaError.message);
+        return this._generateFallbackResponse(userQuestion, ollamaError.message);
+      }
     }
 
     // 3. Fallback jika GEMINI_API_KEY belum diisi di .env
@@ -229,14 +239,36 @@ ${customContext ? `Konteks Tambahan Toko/Audit Terkini:\n${customContext}\n` : '
   },
 
   /**
-   * Respon simulasi jika pengguna belum memasang API key
+   * Respon fallback informatif jika API key belum valid atau layanan offline
    */
-  _generateFallbackResponse(userQuestion) {
+  _generateFallbackResponse(userQuestion, errorDetail = '') {
+    const isApiKeyError =
+      errorDetail &&
+      (errorDetail.includes('API key not valid') ||
+        errorDetail.includes('401') ||
+        errorDetail.includes('UNAUTHENTICATED') ||
+        errorDetail.includes('ACCESS_TOKEN_TYPE_UNSUPPORTED'));
+
+    if (isApiKeyError) {
+      return (
+        `Halo! Koneksi ke server backend audit telah berhasil, namun kunci API Google Gemini (GEMINI_API_KEY) yang terpasang di file backend/.env tidak valid (Error 401: API key not valid).\n\n` +
+        `Penyebab:\n` +
+        `• Kunci API saat ini diawali dengan "AQ..." (format Access Token Google Cloud), bukan Google AI Studio API Key.\n\n` +
+        `Solusi Mudah (1 Menit):\n` +
+        `1. Buka https://aistudio.google.com/app/apikey (gratis, tanpa kartu kredit)\n` +
+        `2. Klik tombol "Create API Key"\n` +
+        `3. Salin kunci yang dihasilkan (selalu diawali dengan "AIzaSy...")\n` +
+        `4. Buka file backend/.env dan perbarui baris:\n` +
+        `   GEMINI_API_KEY="AIzaSy..."\n` +
+        `5. Simpan file, lalu tanyakan kembali pertanyaan Anda.`
+      );
+    }
+
     return (
-      `[Simulasi Audit Pro Assistant]\n\n` +
+      `Halo! Saya Audit Pro Assistant, asisten sistem checklist audit retail Anda.\n\n` +
       `Pertanyaan Anda: "${userQuestion}"\n\n` +
-      `Sistem AI backend telah terhubung dan siap digunakan. ` +
-      `Untuk menghubungkan ke AI nyata (Google Gemini), silakan isi GEMINI_API_KEY di file backend/.env Anda.`
+      (errorDetail ? `⚠️ Catatan Layanan: ${errorDetail}\n\n` : '') +
+      `Sistem backend telah siap. Pastikan GEMINI_API_KEY di file backend/.env telah terisi dengan kunci API resmi dari Google AI Studio (https://aistudio.google.com/app/apikey).`
     );
   }
 };

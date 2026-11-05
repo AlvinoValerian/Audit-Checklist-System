@@ -20,6 +20,7 @@ app.use(cors({
     'x-super-admin-id',
     'x-user-id',
     'x-user-email',
+    'x-user-role',
     'x-workspace-id',
   ],
 }));
