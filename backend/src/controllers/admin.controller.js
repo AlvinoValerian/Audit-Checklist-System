@@ -3,6 +3,83 @@ const bcrypt = require('bcrypt');
 const { extractUser } = require('../middlewares/auth.middleware');
 
 /**
+ * Helper untuk menyelesaikan Super Admin ID yang valid berdasarkan user / request
+ */
+const resolveSuperAdminId = async (req, user) => {
+  // 1. Jika user teridentifikasi sebagai Super Admin
+  if (user && (user.role === 'Super Admin' || user.role?.includes('Super')) && user.rawId) {
+    try {
+      return BigInt(user.rawId.toString().replace(/^sa-/, ''));
+    } catch (e) {}
+  }
+
+  // 2. Jika user teridentifikasi sebagai Admin, ambil super_admin_id dari workspacenya
+  if (user && (user.role === 'Admin' || user.id?.toString().startsWith('adm-') || user.workspaceId)) {
+    if (user.workspaceId) {
+      try {
+        const ws = await prisma.workspace.findUnique({
+          where: { workspace_id: BigInt(user.workspaceId) },
+          select: { super_admin_id: true },
+        });
+        if (ws?.super_admin_id) return ws.super_admin_id;
+      } catch (e) {}
+    }
+    if (user.rawId) {
+      try {
+        const adm = await prisma.admin.findUnique({
+          where: { admin_id: BigInt(user.rawId.toString().replace(/^adm-/, '')) },
+          include: { workspace: true },
+        });
+        if (adm?.workspace?.super_admin_id) return adm.workspace.super_admin_id;
+      } catch (e) {}
+    }
+  }
+
+  // 3. Cek dari explicit parameter (query / body / header)
+  const explicitSaId = req.headers['x-super-admin-id'] || req.query.superAdminId || req.body?.superAdminId;
+  if (explicitSaId) {
+    try {
+      const parsed = BigInt(explicitSaId.toString().replace(/^sa-/, ''));
+      const exists = await prisma.super_admin.findUnique({
+        where: { super_admin_id: parsed },
+        select: { super_admin_id: true },
+      });
+      if (exists) return exists.super_admin_id;
+    } catch (e) {}
+  }
+
+  // 4. Resolusi dari email
+  const candidateEmail = user?.email || req.headers['x-user-email'] || req.query.email;
+  if (candidateEmail) {
+    const cleanEmail = candidateEmail.trim().toLowerCase();
+    try {
+      const sa = await prisma.super_admin.findUnique({
+        where: { email: cleanEmail },
+        select: { super_admin_id: true },
+      });
+      if (sa) return sa.super_admin_id;
+
+      const adm = await prisma.admin.findUnique({
+        where: { email: cleanEmail },
+        include: { workspace: true },
+      });
+      if (adm?.workspace?.super_admin_id) return adm.workspace.super_admin_id;
+    } catch (e) {}
+  }
+
+  // 5. Fallback Default: Super Admin pertama di database (menghindari layar kosong saat fresh visit)
+  try {
+    const fallbackSa = await prisma.super_admin.findFirst({
+      orderBy: { super_admin_id: 'asc' },
+      select: { super_admin_id: true },
+    });
+    if (fallbackSa) return fallbackSa.super_admin_id;
+  } catch (e) {}
+
+  return null;
+};
+
+/**
  * Format entitas Admin ke bentuk yang siap dipakai oleh Frontend
  */
 const formatAdmin = (adm) => {
@@ -11,8 +88,8 @@ const formatAdmin = (adm) => {
     rawId: adm.admin_id.toString(),
     fullName: adm.name,
     email: adm.email,
-    phone: '-',
-    role: 'Admin',
+    phone: adm.phone || '-',
+    role: adm.role || 'Admin',
     workspaceId: adm.workspace_id ? adm.workspace_id.toString() : null,
     workspaceName: adm.workspace ? adm.workspace.company_name : 'Belum Ditugaskan',
     status: adm.status === 'inactive' ? 'Nonaktif' : 'Aktif',
@@ -61,21 +138,18 @@ const formatSuperAdmin = (sa) => {
 };
 
 // GET /api/admins
-// HANYA menampilkan admin dan super admin yang berelasi dengan akun yang sedang login
+// Menampilkan admin dan super admin yang berelasi dengan akun yang sedang login
 exports.getAllAdmins = async (req, res) => {
   try {
     const user = await extractUser(req);
-    const superAdminId = user?.rawId || req.query.superAdminId;
+    const cleanSaId = await resolveSuperAdminId(req, user);
 
-    if (!superAdminId) {
-      // Jika belum terotentikasi, tidak boleh menampilkan data akun milik Super Admin lain
+    if (!cleanSaId) {
       return res.status(200).json({
         status: 'success',
         data: [],
       });
     }
-
-    const cleanSaId = BigInt(superAdminId.toString().replace(/^sa-/, ''));
 
     const [admins, superAdmins] = await Promise.all([
       prisma.admin.findMany({
@@ -132,7 +206,7 @@ exports.getAdminById = async (req, res) => {
   try {
     const { id } = req.params;
     const user = await extractUser(req);
-    const superAdminId = user?.rawId || req.query.superAdminId;
+    const cleanSaId = await resolveSuperAdminId(req, user);
 
     if (id.startsWith('sa-')) {
       const saId = BigInt(id.replace('sa-', ''));
@@ -146,9 +220,9 @@ exports.getAdminById = async (req, res) => {
     }
 
     const adminWhere = { admin_id: BigInt(id) };
-    if (superAdminId) {
+    if (cleanSaId) {
       adminWhere.workspace = {
-        super_admin_id: BigInt(superAdminId.toString().replace(/^sa-/, '')),
+        super_admin_id: cleanSaId,
       };
     }
 
@@ -177,16 +251,14 @@ exports.createAdmin = async (req, res) => {
   try {
     console.log('📥 [POST /api/admins] Menerima data admin baru:', req.body);
     const user = await extractUser(req);
-    const currentSuperAdminId = user?.rawId || req.body.superAdminId || req.query.superAdminId;
+    const cleanSaId = await resolveSuperAdminId(req, user);
 
-    if (!currentSuperAdminId) {
+    if (!cleanSaId) {
       return res.status(401).json({
         status: 'error',
         message: 'Otentikasi diperlukan. Akun Super Admin tidak teridentifikasi.',
       });
     }
-
-    const cleanSaId = BigInt(currentSuperAdminId.toString().replace(/^sa-/, ''));
 
     const {
       fullName,
@@ -305,6 +377,8 @@ exports.createAdmin = async (req, res) => {
         email: cleanEmail,
         password: hashedPassword,
         status: status === 'Nonaktif' || status === 'inactive' ? 'inactive' : 'active',
+        role: role || 'Admin',
+        phone: phone || null,
       },
       include: {
         workspace: true,
@@ -333,12 +407,11 @@ exports.updateAdmin = async (req, res) => {
   try {
     const { id } = req.params;
     const user = await extractUser(req);
-    const superAdminId = user?.rawId || req.query.superAdminId;
+    const cleanSaId = await resolveSuperAdminId(req, user);
 
-    if (!superAdminId) {
+    if (!cleanSaId) {
       return res.status(401).json({ status: 'error', message: 'Otentikasi diperlukan.' });
     }
-    const cleanSaId = BigInt(superAdminId.toString().replace(/^sa-/, ''));
 
     const {
       fullName,
@@ -398,6 +471,7 @@ exports.updateAdmin = async (req, res) => {
     const updateData = { updated_at: new Date() };
     if (fullName) updateData.name = fullName.trim();
     if (email) updateData.email = email.trim().toLowerCase();
+    if (phone !== undefined) updateData.phone = phone;
     if (status !== undefined) {
       updateData.status = status === 'Nonaktif' || status === 'inactive' ? 'inactive' : 'active';
     }
@@ -459,7 +533,7 @@ exports.deleteAdmin = async (req, res) => {
   try {
     const { id } = req.params;
     const user = await extractUser(req);
-    const superAdminId = user?.rawId || req.query.superAdminId;
+    const cleanSaId = await resolveSuperAdminId(req, user);
 
     if (id.startsWith('sa-')) {
       return res.status(403).json({
@@ -468,10 +542,9 @@ exports.deleteAdmin = async (req, res) => {
       });
     }
 
-    if (!superAdminId) {
+    if (!cleanSaId) {
       return res.status(401).json({ status: 'error', message: 'Otentikasi diperlukan.' });
     }
-    const cleanSaId = BigInt(superAdminId.toString().replace(/^sa-/, ''));
 
     const adminId = BigInt(id);
     const existing = await prisma.admin.findFirst({

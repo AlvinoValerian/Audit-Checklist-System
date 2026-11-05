@@ -42,16 +42,24 @@ export default function LoginPage() {
       toast.success(response.message || "Login berhasil! Mengalihkan ke dashboard...");
 
       setTimeout(() => {
-        if (user && user.role === "Staff") {
-          router.push("/jadwal-staff");
+        const isStaff =
+          user &&
+          (user.role === "Staff" ||
+           user.role === "Auditor Lapangan" ||
+           user.id?.toString().startsWith("staff-") ||
+           user.role?.toLowerCase().includes("staff") ||
+           user.role?.toLowerCase().includes("auditor"));
+
+        if (isStaff) {
+          window.location.href = "/jadwal-staff";
         } else if (user && user.role === "Admin") {
-          router.push("/dashboard-monitoring");
-        } else if (user && user.role === "Divisi Teknis") {
-          router.push("/divisi-teknis");
+          window.location.href = "/dashboard-monitoring";
+        } else if (user && (user.role === "Divisi Teknis" || user.role === "Teknis")) {
+          window.location.href = "/divisi-teknis";
         } else {
-          router.push("/workspace");
+          window.location.href = "/workspace";
         }
-      }, 600);
+      }, 500);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Terjadi kesalahan saat mencoba login.";
       toast.error(msg);

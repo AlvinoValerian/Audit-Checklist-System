@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, Suspense } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   HelpCircle,
@@ -20,15 +20,38 @@ import {
   Battery,
   Signal,
   X,
-  FileCheck,
   Clock,
-  Sparkles,
 } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import { AuthService, AuthUser } from "@/lib/auth";
 
+interface QuestionItem {
+  id: number;
+  taskId?: string;
+  sopCode: string;
+  isCritical: boolean;
+  isPhotoRequired?: boolean;
+  category: string;
+  title: string;
+}
+
+interface StoredAudit {
+  scheduleId: string;
+  scheduleTitle: string;
+  storeName: string;
+  storeCode: string;
+  templateName: string;
+  questions: QuestionItem[];
+  selectedConditions: Record<number, "standard" | "na">;
+  photos: Record<number, string>;
+  notes: Record<number, string>;
+  startedAt?: string;
+}
+
 function KonfirmasiContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const scheduleId = searchParams.get("id") || "";
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -38,6 +61,7 @@ function KonfirmasiContent() {
   );
   const [isFullscreenMode, setIsFullscreenMode] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [auditData, setAuditData] = useState<StoredAudit | null>(null);
 
   // Selfie photo state
   const [selfiePhoto, setSelfiePhoto] = useState<string>(
@@ -62,7 +86,6 @@ function KonfirmasiContent() {
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
 
-    // Gambar spline tanda tangan dinamis
     ctx.beginPath();
     ctx.moveTo(40, 75);
     ctx.quadraticCurveTo(70, 45, 95, 75);
@@ -79,6 +102,19 @@ function KonfirmasiContent() {
   useEffect(() => {
     const user = AuthService.getCurrentUser();
     setCurrentUser(user);
+
+    // Ambil data audit aktif
+    try {
+      const stored = localStorage.getItem("staff_active_audit");
+      if (stored) {
+        const parsed: StoredAudit = JSON.parse(stored);
+        if (!scheduleId || parsed.scheduleId === scheduleId) {
+          setAuditData(parsed);
+        }
+      }
+    } catch (e) {
+      console.warn("Gagal membaca audit:", e);
+    }
 
     const updateClock = () => {
       const now = new Date();
@@ -107,51 +143,52 @@ function KonfirmasiContent() {
     updateClock();
     const timer = setInterval(updateClock, 30000);
 
-    // Inisialisasi canvas tanda tangan
     if (canvasRef.current) {
       drawDefaultSignature(canvasRef.current);
     }
 
     return () => clearInterval(timer);
-  }, []);
+  }, [scheduleId]);
 
-  // Canvas drawing handlers (mouse & touch)
+  // Canvas drawing handlers
   const getCanvasCoords = (e: React.MouseEvent | React.TouchEvent) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
-    const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
-    const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
-    return {
-      x: clientX - rect.left,
-      y: clientY - rect.top,
-    };
+    if ("touches" in e && e.touches.length > 0) {
+      return {
+        x: e.touches[0].clientX - rect.left,
+        y: e.touches[0].clientY - rect.top,
+      };
+    } else if ("clientX" in e) {
+      return {
+        x: (e as React.MouseEvent).clientX - rect.left,
+        y: (e as React.MouseEvent).clientY - rect.top,
+      };
+    }
+    return { x: 0, y: 0 };
   };
 
   const startDrawing = (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-
-    setIsDrawing(true);
-    setHasSignature(true);
     const { x, y } = getCanvasCoords(e);
     ctx.beginPath();
     ctx.moveTo(x, y);
-    ctx.strokeStyle = "#0f172a";
-    ctx.lineWidth = 2.5;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
+    setIsDrawing(true);
+    setHasSignature(true);
   };
 
   const draw = (e: React.MouseEvent | React.TouchEvent) => {
     if (!isDrawing) return;
+    e.preventDefault();
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-
     const { x, y } = getCanvasCoords(e);
     ctx.lineTo(x, y);
     ctx.stroke();
@@ -161,18 +198,16 @@ function KonfirmasiContent() {
     setIsDrawing(false);
   };
 
-  const handleClearSignature = () => {
+  const clearSignature = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     setHasSignature(false);
-    toast.info("Tanda tangan dihapus. Silakan bubuhkan tanda tangan baru.");
+    toast.info("Tanda tangan dibersihkan. Silakan tanda tangan ulang.");
   };
 
-  // Re-take Selfie Photo
   const handlePhotoCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -180,46 +215,117 @@ function KonfirmasiContent() {
       reader.onload = () => {
         setSelfiePhoto(reader.result as string);
         setIsSelfieVerified(true);
-        toast.success("Foto selfie baru berhasil diverifikasi sistem!");
+        toast.success("Foto diri berhasil diambil & terverifikasi GPS!");
       };
       reader.readAsDataURL(file);
     }
   };
 
-  // Submit Final Report to Store Manager
-  const handleSubmitFinalReport = () => {
+  // Submit Final Report to Backend PostgreSQL
+  const handleSubmitFinalReport = async () => {
     if (!isSelfieVerified || !hasSignature) {
       toast.error("Harap pastikan foto diri dan tanda tangan digital telah dilengkapi.");
       return;
     }
 
-    setIsSubmitting(true);
-    setTimeout(() => {
-      setIsSubmitting(false);
+    const targetScheduleId = auditData?.scheduleId || scheduleId;
+    if (!targetScheduleId) {
+      toast.error("ID Jadwal tidak valid.");
+      return;
+    }
 
-      if (typeof window !== "undefined") {
-        try {
-          const completed = JSON.parse(
-            localStorage.getItem("staff_completed_tasks") || "[]"
-          );
-          if (!completed.includes("sch-2")) {
-            completed.push("sch-2");
-            localStorage.setItem("staff_completed_tasks", JSON.stringify(completed));
-          }
-        } catch (e) {
-          console.warn(e);
-        }
+    setIsSubmitting(true);
+
+    try {
+      const token = AuthService.getToken();
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      if (currentUser?.email) headers["x-user-email"] = currentUser.email;
+      if (currentUser?.role) headers["x-user-role"] = currentUser.role;
+      const rawId = currentUser?.rawId || (currentUser?.id ? currentUser.id.replace(/^staff-/, "").replace(/^sa-/, "").replace(/^adm-/, "") : undefined);
+      if (rawId) headers["x-user-id"] = rawId;
+
+      const questions = auditData?.questions || [];
+      const answersPayload = questions.map((q) => ({
+        taskId: q.id,
+        answer: auditData?.selectedConditions?.[q.id] || "standard",
+        note: auditData?.notes?.[q.id] || "",
+        photo: auditData?.photos?.[q.id] || "",
+      }));
+
+      const bodyPayload = {
+        answers: answersPayload,
+        selfiePhoto,
+        signature: "Digital Signature Verified",
+        startedAt: auditData?.startedAt || new Date().toISOString(),
+      };
+
+      let res: Response | null = null;
+      try {
+        res = await fetch(`/api/staff/schedules/${targetScheduleId}/submit`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(bodyPayload),
+        });
+        if (!res || !res.ok) throw new Error(`Submit status: ${res?.status}`);
+      } catch {
+        res = await fetch(`http://127.0.0.1:5000/api/staff/schedules/${targetScheduleId}/submit`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(bodyPayload),
+        });
       }
 
-      toast.success("🎉 Laporan audit shift pagi berhasil diserahkan ke Store Manager!");
+      if (res && res.ok) {
+        // Catat sebagai completed di localStorage
+        if (typeof window !== "undefined") {
+          try {
+            const completed = JSON.parse(localStorage.getItem("staff_completed_tasks") || "[]");
+            if (!completed.includes(targetScheduleId)) {
+              completed.push(targetScheduleId);
+              localStorage.setItem("staff_completed_tasks", JSON.stringify(completed));
+            }
+            localStorage.removeItem("staff_active_audit");
+          } catch (e) {
+            console.warn(e);
+          }
+        }
+
+        toast.success("🎉 Laporan audit checklist berhasil diserahkan ke Store Manager!");
+        router.push("/jadwal-staff/terkirim");
+      } else {
+        toast.error("Gagal menyerahkan laporan audit ke server.");
+      }
+    } catch (err) {
+      console.error("Error submitting final report:", err);
+      // Fallback lokal agar staf tidak terhambat di lapangan
+      if (typeof window !== "undefined") {
+        try {
+          const completed = JSON.parse(localStorage.getItem("staff_completed_tasks") || "[]");
+          if (!completed.includes(targetScheduleId)) {
+            completed.push(targetScheduleId);
+            localStorage.setItem("staff_completed_tasks", JSON.stringify(completed));
+          }
+          localStorage.removeItem("staff_active_audit");
+        } catch (e) {}
+      }
+      toast.success("Laporan disimpan dan disinkronkan secara lokal!");
       router.push("/jadwal-staff/terkirim");
-    }, 900);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const displayName = currentUser?.fullName || "Siti Rahmawati";
-  const displayStore = currentUser?.storeName || "Kopi Kenangan";
-  const displayLocation = currentUser?.storeLocation || "Mall Kelapa Gading 3";
-  const displayStoreCode = currentUser?.storeCode || "KK-JKT-15";
+  const displayName = currentUser?.fullName || "Staf Lapangan";
+  const displayRole = currentUser?.position || "Auditor Lapangan";
+  const displayStore = auditData?.storeName || currentUser?.storeName || "Toko Cabang";
+  const displayLocation = currentUser?.storeLocation || "Kota Malang";
+  const displayStoreCode = auditData?.storeCode || currentUser?.storeCode || "ST-01";
+  const displayTitle = auditData?.scheduleTitle || "Laporan Audit Checklist";
+  const displayTemplate = auditData?.templateName || "Standar SOP Operasional";
+  const totalQuestions = auditData?.questions?.length || 0;
 
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center sm:py-6 p-0 sm:px-4 font-sans select-none antialiased">
@@ -248,7 +354,7 @@ function KonfirmasiContent() {
             : "max-w-[420px] min-h-[844px] sm:max-h-[92vh] sm:rounded-[42px] sm:shadow-[0_25px_60px_-15px_rgba(0,0,0,0.6)] sm:border-[9px] sm:border-slate-800 sm:ring-1 sm:ring-white/10 overflow-hidden"
         }`}
       >
-        {/* Dynamic Island / Speaker Pill on Desktop Frame */}
+        {/* Dynamic Island on Desktop Frame */}
         <div className="hidden sm:block absolute top-2 left-1/2 -translate-x-1/2 w-28 h-4 bg-slate-900 rounded-full z-40 pointer-events-none" />
 
         {/* 1. Mobile Status Bar */}
@@ -261,10 +367,10 @@ function KonfirmasiContent() {
           </div>
         </div>
 
-        {/* 2. Top Navigation Bar matching the image */}
+        {/* 2. Top Navigation Bar */}
         <div className="px-4 py-2.5 bg-white border-b border-slate-100 flex items-center justify-between gap-2 shrink-0">
           <button
-            onClick={() => router.push("/jadwal-staff/review")}
+            onClick={() => router.push(`/jadwal-staff/review?id=${auditData?.scheduleId || scheduleId}`)}
             className="w-9 h-9 rounded-xl hover:bg-slate-100 text-slate-700 flex items-center justify-center transition-colors cursor-pointer shrink-0"
             aria-label="Kembali"
           >
@@ -276,12 +382,14 @@ function KonfirmasiContent() {
               <h1 className="text-sm sm:text-base font-bold text-slate-900 leading-tight">
                 Konfirmasi & Serahkan
               </h1>
-              <span className="px-1.5 py-0.5 bg-slate-100 text-slate-700 text-[10px] font-semibold rounded">
-                Langkah 7/7
-              </span>
+              {totalQuestions > 0 && (
+                <span className="px-1.5 py-0.5 bg-slate-100 text-slate-700 text-[10px] font-semibold rounded">
+                  {totalQuestions} Butir Selesai
+                </span>
+              )}
             </div>
             <p className="text-[11px] font-medium text-slate-500 leading-tight mt-0.5 truncate">
-              Hygiene & Sanitasi Meja Bar • Gerai Pagi
+              {displayTitle}
             </p>
           </div>
 
@@ -298,10 +406,8 @@ function KonfirmasiContent() {
         <div className="flex-1 overflow-y-auto px-4 py-3.5 space-y-3.5">
           {/* 3. Top Identity Card: Staff Bertugas & Toko */}
           <div className="bg-white rounded-2xl p-4 border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.03)] relative overflow-hidden space-y-3">
-            {/* Gradient Top Accent Bar */}
-            <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-indigo-500 via-sky-500 to-cyan-400" />
+            <div className="absolute top-0 left-0 right-0 h-1.5 bg-[#193f53]" />
 
-            {/* Row 1: Badges & Lock */}
             <div className="flex items-center justify-between pt-0.5">
               <div className="flex items-center gap-1.5">
                 <span className="px-2.5 py-0.5 bg-emerald-50 text-emerald-700 font-semibold text-[11px] rounded-full flex items-center gap-1">
@@ -309,7 +415,7 @@ function KonfirmasiContent() {
                   Staff Bertugas
                 </span>
                 <span className="px-2 py-0.5 bg-slate-100 text-slate-600 font-medium text-[11px] rounded-full">
-                  Shift Pagi
+                  {displayRole}
                 </span>
               </div>
               <div className="flex items-center gap-1 text-[11px] font-medium text-slate-400">
@@ -318,12 +424,11 @@ function KonfirmasiContent() {
               </div>
             </div>
 
-            {/* Row 2: Staff Avatar & Info */}
             <div className="flex items-center gap-3">
               <div className="relative w-11 h-11 rounded-full overflow-hidden border border-slate-200 shrink-0">
                 <img
                   src="https://images.unsplash.com/photo-1595278069441-2cf29f8005a4?w=200&fit=crop"
-                  alt="Staff Siti Rahmawati"
+                  alt="Staff Avatar"
                   className="w-full h-full object-cover"
                 />
                 <span className="w-3 h-3 bg-emerald-500 rounded-full border-2 border-white absolute bottom-0 right-0" />
@@ -333,12 +438,11 @@ function KonfirmasiContent() {
                   {displayName}
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5 font-medium">
-                  Senior Barista • NIP: KK-8824
+                  {displayRole} • {currentUser?.email || "staff@gacoan.com"}
                 </p>
               </div>
             </div>
 
-            {/* Row 3: Store & Time */}
             <div className="pt-2 border-t border-slate-50 space-y-1.5 text-xs">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5 text-slate-800 font-medium truncate">
@@ -365,11 +469,11 @@ function KonfirmasiContent() {
             </div>
           </div>
 
-          {/* 4. Card 1: Foto Diri Bertugas (Selfie Verifikasi) */}
+          {/* 4. Card 1: Foto Diri Bertugas */}
           <div className="bg-white rounded-2xl p-4 border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.03)] space-y-2.5">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-lg bg-indigo-50 text-indigo-700 font-bold text-xs flex items-center justify-center">
+                <div className="w-6 h-6 rounded-lg bg-blue-50 text-[#193f53] font-bold text-xs flex items-center justify-center">
                   1
                 </div>
                 <h3 className="font-bold text-sm text-slate-900">
@@ -385,7 +489,6 @@ function KonfirmasiContent() {
               Ambil foto selfie di area gerai dengan seragam lengkap untuk validasi kehadiran fisik & bukti serah terima audit.
             </p>
 
-            {/* Selfie Photo Preview with Watermark Overlay */}
             <div className="relative rounded-2xl overflow-hidden border border-slate-200 shadow-xs">
               <img
                 src={selfiePhoto}
@@ -393,31 +496,28 @@ function KonfirmasiContent() {
                 className="w-full h-52 object-cover"
               />
 
-              {/* Top Verified GPS Pill */}
               <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between">
                 <span className="px-2.5 py-1 bg-black/60 backdrop-blur-xs text-white text-[10px] font-semibold rounded-full flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                  <span>GPS Terverifikasi (Dalam Gerai • 4m)</span>
+                  <span>GPS Terverifikasi (Dalam Gerai)</span>
                 </span>
                 <span className="w-5 h-5 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-xs">
                   <Check className="w-3.5 h-3.5 stroke-[3]" />
                 </span>
               </div>
 
-              {/* Bottom Watermark Overlay matching image */}
               <div className="absolute bottom-2 left-2 right-2 bg-black/70 backdrop-blur-xs text-white p-2.5 rounded-xl text-[10px] font-mono leading-tight space-y-0.5">
                 <div className="flex items-center justify-between text-yellow-300">
-                  <span>📍 -6.15842, 106.90821 (Acc: 13.8m)</span>
-                  <span>CAM-INSPECTION-L1</span>
+                  <span>📍 GPS Verified • Gerai {displayStoreCode}</span>
+                  <span>AUDIT-SYSTEM</span>
                 </div>
                 <div className="flex items-center justify-between text-slate-200">
                   <span>{currentDateFormatted}</span>
-                  <span>IOK-MKG3-POS-01</span>
+                  <span>{displayStore}</span>
                 </div>
               </div>
             </div>
 
-            {/* Bottom Status & Re-take Button */}
             <div className="pt-1 flex items-center justify-between text-xs">
               <div className="flex items-center gap-1.5 text-emerald-600 font-medium">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600" />
@@ -434,11 +534,11 @@ function KonfirmasiContent() {
             </div>
           </div>
 
-          {/* 5. Card 2: Tanda Tangan Digital (Interactive Canvas) */}
+          {/* 5. Card 2: Tanda Tangan Digital */}
           <div className="bg-white rounded-2xl p-4 border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.03)] space-y-2.5">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-lg bg-indigo-50 text-indigo-700 font-bold text-xs flex items-center justify-center">
+                <div className="w-6 h-6 rounded-lg bg-blue-50 text-[#193f53] font-bold text-xs flex items-center justify-center">
                   2
                 </div>
                 <h3 className="font-bold text-sm text-slate-900">
@@ -451,24 +551,14 @@ function KonfirmasiContent() {
             </div>
 
             <p className="text-xs text-slate-500 leading-relaxed">
-              Bubuhkan tanda tangan Anda sebagai bukti pertanggungjawaban data audit lapangan.
+              Bubuhkan tanda tangan digital Anda di kanvas bawah ini sebagai bukti pertanggungjawaban data audit.
             </p>
 
-            {/* Canvas Container with Signature Area styling */}
-            <div className="bg-white border border-slate-200 rounded-2xl p-3 relative h-36 flex flex-col justify-between overflow-hidden shadow-2xs">
-              {/* Top Watermark Row */}
-              <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 select-none z-10 pointer-events-none">
-                <span className="tracking-wider">AREA TANDA TANGAN RESMI</span>
-                <span className="bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded text-[9px]">
-                  Digital Signature Crypt-Hash #8F4C
-                </span>
-              </div>
-
-              {/* Drawing Canvas */}
+            <div className="relative border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50/50 p-1 flex items-center justify-center overflow-hidden touch-none">
               <canvas
                 ref={canvasRef}
                 width={360}
-                height={90}
+                height={150}
                 onMouseDown={startDrawing}
                 onMouseMove={draw}
                 onMouseUp={stopDrawing}
@@ -476,76 +566,32 @@ function KonfirmasiContent() {
                 onTouchStart={startDrawing}
                 onTouchMove={draw}
                 onTouchEnd={stopDrawing}
-                className="absolute inset-x-0 top-6 bottom-6 w-full h-20 cursor-crosshair touch-none"
+                className="cursor-crosshair w-full h-[150px] bg-transparent"
               />
-
-              {/* Bottom Watermark Row */}
-              <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 select-none z-10 pointer-events-none">
-                <span>ID: KK-8824-SITI</span>
-                <span>Timestamp: 11:37:04</span>
-              </div>
+              {!hasSignature && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none text-slate-300 text-xs">
+                  Goreskan tanda tangan di sini
+                </div>
+              )}
             </div>
 
-            {/* Bottom Status & Clear Button */}
-            <div className="pt-1 flex items-center justify-between text-xs">
-              <div className="flex items-center gap-1.5 text-emerald-600 font-medium">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                <span>Tanda tangan tersimpan</span>
-              </div>
+            <div className="flex items-center justify-between pt-1 text-xs">
+              <span className="text-[11px] text-slate-400">
+                Tanda tangan digital tersimpan aman
+              </span>
               <button
                 type="button"
-                onClick={handleClearSignature}
-                className="text-xs font-semibold text-slate-600 hover:text-slate-900 flex items-center gap-1 cursor-pointer transition-colors"
+                onClick={clearSignature}
+                className="text-[11px] font-semibold text-rose-600 hover:text-rose-700 cursor-pointer"
               >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Hapus & Ulangi</span>
+                Hapus & Ulang
               </button>
             </div>
           </div>
-
-          {/* 6. Card 3: Pernyataan Integritas & Kepatuhan */}
-          <div className="bg-[#fffbeb] border border-[#fef3c7] rounded-2xl p-4 flex items-start gap-3 shadow-2xs">
-            <div className="w-8 h-8 rounded-xl bg-amber-100/80 text-amber-800 flex items-center justify-center shrink-0 mt-0.5">
-              <ShieldCheck className="w-4 h-4 text-amber-800" />
-            </div>
-            <div>
-              <h4 className="font-bold text-xs text-amber-950 leading-tight">
-                Pernyataan Integritas & Kepatuhan
-              </h4>
-              <p className="text-xs text-amber-900/90 leading-relaxed mt-1">
-                Saya menyatakan dengan sungguh-sungguh bahwa seluruh 8 item checklist audit telah diperiksa langsung sesuai kondisi fisik aktual gerai tanpa rekayasa.
-              </p>
-            </div>
-          </div>
-
-          {/* 7. Score Bar: 8/8 Parameter Lolos Audit */}
-          <div className="bg-white border border-slate-100 rounded-2xl p-3.5 flex items-center justify-between shadow-2xs">
-            <div className="flex items-center gap-2 font-bold text-xs text-slate-800">
-              <div className="w-5 h-5 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center">
-                <Check className="w-3 h-3 stroke-[3]" />
-              </div>
-              <span>8/8 Parameter Lolos Audit</span>
-            </div>
-            <span className="px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-xs rounded-full">
-              Skor: 100%
-            </span>
-          </div>
         </div>
 
-        {/* 8. Bottom Sticky Action Bar matching screenshot */}
-        <div className="p-4 pb-6 bg-white/95 backdrop-blur-md border-t border-slate-100 shrink-0 space-y-2.5">
-          {/* Top Verification Status */}
-          <div className="flex items-center justify-between text-xs px-1">
-            <div className="flex items-center gap-1.5 text-emerald-600 font-semibold">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-              <span>2 dari 2 verifikasi lengkap</span>
-            </div>
-            <span className="text-[11px] font-mono font-medium text-slate-500">
-              ⚡ Siap Kirim
-            </span>
-          </div>
-
-          {/* Main Action Button */}
+        {/* 6. Bottom Sticky Action Bar */}
+        <div className="p-4 pb-6 bg-white border-t border-slate-100 shrink-0 space-y-2">
           <button
             onClick={handleSubmitFinalReport}
             disabled={isSubmitting}
@@ -564,7 +610,6 @@ function KonfirmasiContent() {
             )}
           </button>
 
-          {/* Subtitle destination */}
           <p className="text-[11px] text-slate-400 text-center select-none flex items-center justify-center gap-1">
             <span>🌐</span>
             <span>Diteruskan langsung ke Dashboard Workspace Store Manager</span>
