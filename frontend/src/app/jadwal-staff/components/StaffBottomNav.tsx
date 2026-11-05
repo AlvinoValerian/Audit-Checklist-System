@@ -28,81 +28,109 @@ export default function StaffBottomNav({ activeTab }: StaffBottomNavProps) {
       : "checklist");
 
   return (
-    <div className="bg-white border-t border-slate-200/80 px-4 py-2 flex items-center justify-around shrink-0 select-none shadow-[0_-4px_16px_rgba(0,0,0,0.03)] z-30">
+    <div className="bg-white border-t border-slate-100 px-3 py-2 flex items-center justify-around shrink-0 select-none shadow-[0_-4px_16px_rgba(0,0,0,0.02)] z-30">
       {/* Tab 1: Checklist */}
       <button
+        type="button"
         onClick={() => router.push("/jadwal-staff")}
-        className={`flex flex-col items-center justify-center transition-all cursor-pointer ${
-          currentTab === "checklist" ? "text-white" : "text-slate-400 hover:text-slate-600 font-medium"
-        }`}
+        className="flex-1 flex flex-col items-center justify-center cursor-pointer transition-all group"
       >
         <div
-          className={`px-3 py-1 flex flex-col items-center justify-center rounded-xl transition-all ${
+          className={`flex items-center justify-center transition-all ${
             currentTab === "checklist"
-              ? "bg-[#193f53] text-white shadow-xs"
-              : "text-slate-400"
+              ? "w-14 h-8 bg-[#193f53] text-white rounded-full shadow-xs"
+              : "w-8 h-8 text-slate-400 group-hover:text-slate-600"
           }`}
         >
-          <ListChecks className="w-5 h-5 stroke-[2.2]" />
-          <span className="text-[10px] font-bold mt-0.5 tracking-tight">Checklist</span>
+          <ListChecks className="w-4 h-4 stroke-[2.4]" />
         </div>
+        <span
+          className={`text-[10px] mt-0.5 tracking-tight ${
+            currentTab === "checklist"
+              ? "font-bold text-[#193f53]"
+              : "font-medium text-slate-400 group-hover:text-slate-600"
+          }`}
+        >
+          Checklist
+        </span>
       </button>
 
-      {/* Tab 2: Audits */}
+      {/* Tab 2: Riwayat (Audits) */}
       <button
+        type="button"
         onClick={() => router.push("/jadwal-staff/riwayat")}
-        className={`flex flex-col items-center justify-center transition-all cursor-pointer ${
-          currentTab === "audits" ? "text-white" : "text-slate-400 hover:text-slate-600 font-medium"
-        }`}
+        className="flex-1 flex flex-col items-center justify-center cursor-pointer transition-all group"
       >
         <div
-          className={`px-3.5 py-1 flex flex-col items-center justify-center rounded-xl transition-all ${
+          className={`flex items-center justify-center transition-all ${
             currentTab === "audits"
-              ? "bg-[#193f53] text-white shadow-xs"
-              : "text-slate-400"
+              ? "w-14 h-8 bg-[#193f53] text-white rounded-full shadow-xs"
+              : "w-8 h-8 text-slate-400 group-hover:text-slate-600"
           }`}
         >
-          <ClipboardCheck className="w-5 h-5 stroke-[2.2]" />
-          <span className="text-[10px] font-bold mt-0.5 tracking-tight">Audits</span>
+          <ClipboardCheck className="w-4 h-4 stroke-[2.2]" />
         </div>
+        <span
+          className={`text-[10px] mt-0.5 tracking-tight ${
+            currentTab === "audits"
+              ? "font-bold text-[#193f53]"
+              : "font-medium text-slate-400 group-hover:text-slate-600"
+          }`}
+        >
+          Riwayat
+        </span>
       </button>
 
-      {/* Tab 3: Issues */}
+      {/* Tab 3: Issues (Kendala) */}
       <button
+        type="button"
         onClick={() => router.push("/jadwal-staff/issues")}
-        className={`flex flex-col items-center justify-center transition-all cursor-pointer ${
-          currentTab === "issues" ? "text-white" : "text-slate-400 hover:text-slate-600 font-medium"
-        }`}
+        className="flex-1 flex flex-col items-center justify-center cursor-pointer transition-all group"
       >
         <div
-          className={`px-3.5 py-1 flex flex-col items-center justify-center rounded-xl transition-all ${
+          className={`flex items-center justify-center transition-all ${
             currentTab === "issues"
-              ? "bg-[#193f53] text-white shadow-xs"
-              : "text-slate-400"
+              ? "w-14 h-8 bg-[#193f53] text-white rounded-full shadow-xs"
+              : "w-8 h-8 text-slate-400 group-hover:text-slate-600"
           }`}
         >
-          <AlertTriangle className="w-5 h-5 stroke-[2.2]" />
-          <span className="text-[10px] font-bold mt-0.5 tracking-tight">Issues</span>
+          <AlertTriangle className="w-4 h-4 stroke-[2.2]" />
         </div>
+        <span
+          className={`text-[10px] mt-0.5 tracking-tight ${
+            currentTab === "issues"
+              ? "font-bold text-[#193f53]"
+              : "font-medium text-slate-400 group-hover:text-slate-600"
+          }`}
+        >
+          Issues
+        </span>
       </button>
 
       {/* Tab 4: Profile */}
       <button
+        type="button"
         onClick={() => router.push("/jadwal-staff/profile")}
-        className={`flex flex-col items-center justify-center transition-all cursor-pointer ${
-          currentTab === "profile" ? "text-white" : "text-slate-400 hover:text-slate-600 font-medium"
-        }`}
+        className="flex-1 flex flex-col items-center justify-center cursor-pointer transition-all group"
       >
         <div
-          className={`px-3.5 py-1 flex flex-col items-center justify-center rounded-xl transition-all ${
+          className={`flex items-center justify-center transition-all ${
             currentTab === "profile"
-              ? "bg-[#193f53] text-white shadow-xs"
-              : "text-slate-400"
+              ? "w-14 h-8 bg-[#193f53] text-white rounded-full shadow-xs"
+              : "w-8 h-8 text-slate-400 group-hover:text-slate-600"
           }`}
         >
-          <User className="w-5 h-5 stroke-[2.2]" />
-          <span className="text-[10px] font-bold mt-0.5 tracking-tight">Profile</span>
+          <User className="w-4 h-4 stroke-[2.2]" />
         </div>
+        <span
+          className={`text-[10px] mt-0.5 tracking-tight ${
+            currentTab === "profile"
+              ? "font-bold text-[#193f53]"
+              : "font-medium text-slate-400 group-hover:text-slate-600"
+          }`}
+        >
+          Profile
+        </span>
       </button>
     </div>
   );

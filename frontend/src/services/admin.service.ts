@@ -22,13 +22,17 @@ const getAuthHeaders = (): Record<string, string> => {
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
-  if (rawId && !rawId.startsWith("adm-")) {
-    headers["x-super-admin-id"] = rawId;
-    headers["x-user-id"] = rawId;
-  }
-  if (user?.email) {
-    headers["x-user-email"] = user.email;
+  if (user) {
+    headers["x-user-id"] = user.id;
+    if (user.role === "Super Admin" && user.rawId) {
+      headers["x-super-admin-id"] = user.rawId;
+    }
+    if (user.role) {
+      headers["x-user-role"] = user.role;
+    }
+    if (user.email) {
+      headers["x-user-email"] = user.email;
+    }
   }
   return headers;
 };
@@ -42,11 +46,9 @@ export const AdminService = {
   async fetchAll(): Promise<AdminUser[]> {
     try {
       const user = AuthService.getCurrentUser();
-      const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
-
       let queryParam = "";
-      if (rawId && !rawId.startsWith("adm-")) {
-        queryParam = `?superAdminId=${rawId}`;
+      if (user?.role === "Super Admin" && user.rawId) {
+        queryParam = `?superAdminId=${user.rawId}`;
       } else if (user?.email) {
         queryParam = `?email=${encodeURIComponent(user.email)}`;
       }
@@ -96,7 +98,7 @@ export const AdminService = {
     password?: string;
   }): Promise<AdminUser> {
     const user = AuthService.getCurrentUser();
-    const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
+    const saId = user?.role === "Super Admin" ? (user.rawId || user.id.replace(/^sa-/, "")) : undefined;
 
     let res: Response;
     try {
@@ -105,7 +107,7 @@ export const AdminService = {
         headers: getAuthHeaders(),
         body: JSON.stringify({
           ...adminData,
-          superAdminId: rawId,
+          superAdminId: saId,
           email: user?.email,
         }),
       });
@@ -130,7 +132,7 @@ export const AdminService = {
     updateData: Partial<AdminUser> & { password?: string; workspaceId?: string }
   ): Promise<AdminUser> {
     const user = AuthService.getCurrentUser();
-    const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
+    const saId = user?.role === "Super Admin" ? (user.rawId || user.id.replace(/^sa-/, "")) : undefined;
 
     let res: Response;
     try {
@@ -139,7 +141,7 @@ export const AdminService = {
         headers: getAuthHeaders(),
         body: JSON.stringify({
           ...updateData,
-          superAdminId: rawId,
+          superAdminId: saId,
         }),
       });
     } catch (networkErr: unknown) {
