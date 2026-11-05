@@ -14,6 +14,7 @@ import {
   Square,
 } from "lucide-react";
 import { AIService, QUICK_PROMPT_SUGGESTIONS } from "@/services/ai.service";
+import { AuthService } from "@/lib/auth";
 import { ChatMessage } from "@/types/ai";
 import { toast } from "sonner";
 
@@ -48,6 +49,32 @@ export default function TanyaAIPage() {
   useEffect(() => {
     isMountedRef.current = true;
     setRenderStage("ready");
+
+    // Selalu reset messages ke array kosong saat pertama kali dibuka
+    // agar tidak pernah ada sisa state memori dari akun yang baru saja logout!
+    setMessages([]);
+
+    const user = AuthService.getCurrentUser();
+    const activeEmail = user?.email || "";
+
+    AIService.getActiveSession()
+      .then((savedMessages) => {
+        if (isMountedRef.current) {
+          const currentUserNow = AuthService.getCurrentUser();
+          if (currentUserNow?.email === activeEmail) {
+            setMessages(savedMessages || []);
+          } else {
+            setMessages([]);
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn("Gagal mengambil sesi aktif AI:", err);
+        if (isMountedRef.current) {
+          setMessages([]);
+        }
+      });
+
     return () => {
       isMountedRef.current = false;
       if (abortControllerRef.current) {
@@ -143,7 +170,12 @@ export default function TanyaAIPage() {
   };
 
   // Reset conversation to initial state
-  const handleResetSession = () => {
+  const handleResetSession = async () => {
+    try {
+      await AIService.resetSession();
+    } catch (e) {
+      console.warn("Gagal reset sesi backend:", e);
+    }
     setMessages([]);
     setInputPrompt("");
     toast.info("Sesi tanya jawab AI telah diatur ulang.");

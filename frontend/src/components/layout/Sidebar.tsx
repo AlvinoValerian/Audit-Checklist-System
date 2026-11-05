@@ -47,7 +47,11 @@ export default function Sidebar() {
   const handleLogout = () => {
     AuthService.logout();
     toast.info("Anda telah logout.");
-    router.push("/login");
+    if (typeof window !== "undefined") {
+      window.location.href = "/login";
+    } else {
+      router.push("/login");
+    }
   };
 
   // Determine if viewing Admin portal or Super Admin portal
