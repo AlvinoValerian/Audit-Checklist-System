@@ -1,419 +1,180 @@
 import { AuditReportItem } from "@/types/report";
+import { AuthService } from "@/lib/auth";
 
-export const defaultReports: AuditReportItem[] = [
-  {
-    id: "rep-001",
-    storeName: "Cabang Sudirman",
-    storeLocation: "Jakarta Pusat",
-    scheduleName: "Checklist Operasional Harian",
-    auditorName: "Budi Santoso",
-    auditorRole: "Auditor Lapangan",
-    submitDate: "18 Agustus 2024",
-    submitTime: "14:15 WIB",
-    month: "Agustus 2024",
-    status: "Masalah",
-    issueCount: 1,
-    complianceScore: 88,
-    summaryNote: "Ditemukan penumpukan nota transaksi manual di atas meja kasir tanpa validasi supervisor.",
-    findings: [
-      {
-        id: "f-1",
-        itemTitle: "Kerapian Meja Kasir & POS",
-        category: "Area Kasir",
-        hasIssue: true,
-        severity: "Tinggi",
-        issueNote: "Nota transaksi berserakan dan kabel EDC belum dirapikan.",
-      },
-      {
-        id: "f-2",
-        itemTitle: "Ketersediaan Uang Pecahan Kasir",
-        category: "Area Kasir",
-        hasIssue: false,
-      },
-      {
-        id: "f-3",
-        itemTitle: "Kondisi Scanner Barcode & Printer",
-        category: "Perangkat POS",
-        hasIssue: false,
-      },
-    ],
-  },
-  {
-    id: "rep-002",
-    storeName: "Cabang Kemang",
-    storeLocation: "Jakarta Selatan",
-    scheduleName: "Audit Display & Promosi",
-    auditorName: "Andi Wijaya",
-    auditorRole: "Auditor Lapangan",
-    submitDate: "20 Agustus 2024",
-    submitTime: "11:30 WIB",
-    month: "Agustus 2024",
-    status: "Masalah",
-    issueCount: 2,
-    complianceScore: 78,
-    summaryNote: "Label harga promo tidak sesuai sistem kasir dan banner promo entrance belum diganti.",
-    findings: [
-      {
-        id: "f-4",
-        itemTitle: "Sinkronisasi Tag Harga Promo",
-        category: "Promosi & POSM",
-        hasIssue: true,
-        severity: "Tinggi",
-        issueNote: "Harga tertera Rp 19.900, sistem POS Rp 24.500.",
-      },
-      {
-        id: "f-5",
-        itemTitle: "Pemasangan Banner POP Entrance",
-        category: "Promosi & POSM",
-        hasIssue: true,
-        severity: "Sedang",
-        issueNote: "Banner promo pekan lalu belum dicopot.",
-      },
-      {
-        id: "f-6",
-        itemTitle: "Kerapian Gondola Depan",
-        category: "Display",
-        hasIssue: false,
-      },
-    ],
-  },
-  {
-    id: "rep-003",
-    storeName: "Cabang Thamrin",
-    storeLocation: "Jakarta Pusat",
-    scheduleName: "Audit Kebersihan & K3",
-    auditorName: "Siti Rahmawati",
-    auditorRole: "Auditor Lapangan",
-    submitDate: "19 Agustus 2024",
-    submitTime: "16:45 WIB",
-    month: "Agustus 2024",
-    status: "Sesuai",
-    issueCount: 0,
-    complianceScore: 100,
-    summaryNote: "Semua aspek kebersihan lantai, sanitasi toilet, dan jalur evakuasi memenuhi standar SOP prima.",
-    findings: [
-      {
-        id: "f-7",
-        itemTitle: "Kebersihan Lantai Lorong Belanja",
-        category: "Sanitasi",
-        hasIssue: false,
-      },
-      {
-        id: "f-8",
-        itemTitle: "Akses Jalur Evakuasi & APAR",
-        category: "K3 & Fasilitas",
-        hasIssue: false,
-      },
-      {
-        id: "f-9",
-        itemTitle: "Kebersihan Toilet Pelanggan & Staff",
-        category: "Sanitasi",
-        hasIssue: false,
-      },
-    ],
-  },
-  {
-    id: "rep-004",
-    storeName: "Cabang Senayan",
-    storeLocation: "Jakarta Pusat",
-    scheduleName: "Audit Stok & Inventori",
-    auditorName: "Chandra",
-    auditorRole: "Auditor Lapangan",
-    submitDate: "21 Agustus 2024",
-    submitTime: "09:50 WIB",
-    month: "Agustus 2024",
-    status: "Sesuai",
-    issueCount: 0,
-    complianceScore: 98,
-    summaryNote: "Stok fisik barang fast moving dan produk premium bernilai tinggi akurat 100% dengan sistem ERP.",
-    findings: [
-      {
-        id: "f-10",
-        itemTitle: "Pemasangan Spider Tag Produk Bernilai Tinggi",
-        category: "Loss Prevention",
-        hasIssue: false,
-      },
-      {
-        id: "f-11",
-        itemTitle: "Rotasi FEFO Barang Kedaluwarsa",
-        category: "Manajemen Stok",
-        hasIssue: false,
-      },
-      {
-        id: "f-12",
-        itemTitle: "Kerapian Susunan Rak Gudang",
-        category: "Gudang Belakang",
-        hasIssue: false,
-      },
-    ],
-  },
-  {
-    id: "rep-005",
-    storeName: "Cabang PIK",
-    storeLocation: "Jakarta Utara",
-    scheduleName: "Checklist Fasilitas & Keamanan",
-    auditorName: "Dewi Lestari",
-    auditorRole: "Auditor Lapangan",
-    submitDate: "22 Agustus 2024",
-    submitTime: "17:10 WIB",
-    month: "Agustus 2024",
-    status: "Masalah",
-    issueCount: 1,
-    complianceScore: 85,
-    summaryNote: "Lampu penerangan lorong belakang mati 2 unit dan pintu darurat gudang sedikit terhalang palet.",
-    findings: [
-      {
-        id: "f-13",
-        itemTitle: "Kelayakan Pencahayaan LED Toko",
-        category: "Fasilitas",
-        hasIssue: true,
-        severity: "Sedang",
-        issueNote: "2 lampu LED lorong non-food padam.",
-      },
-      {
-        id: "f-14",
-        itemTitle: "Kondisi CCTV 4 Channel",
-        category: "Keamanan",
-        hasIssue: false,
-      },
-      {
-        id: "f-15",
-        itemTitle: "Fasilitas Genset Cadangan",
-        category: "Fasilitas",
-        hasIssue: false,
-      },
-    ],
-  },
-  {
-    id: "rep-006",
-    storeName: "Cabang Gandaria",
-    storeLocation: "Jakarta Selatan",
-    scheduleName: "Checklist Operasional Harian",
-    auditorName: "Budi Santoso",
-    auditorRole: "Auditor Lapangan",
-    submitDate: "23 Agustus 2024",
-    submitTime: "10:15 WIB",
-    month: "Agustus 2024",
-    status: "Sesuai",
-    issueCount: 0,
-    complianceScore: 96,
-    summaryNote: "Operasional pembukaan toko lancar sesuai SOP 5S.",
-    findings: [],
-  },
-  {
-    id: "rep-007",
-    storeName: "Cabang BSD City",
-    storeLocation: "Tangerang Selatan",
-    scheduleName: "Audit Display & Promosi",
-    auditorName: "Andi Wijaya",
-    auditorRole: "Auditor Lapangan",
-    submitDate: "24 Agustus 2024",
-    submitTime: "13:40 WIB",
-    month: "Agustus 2024",
-    status: "Masalah",
-    issueCount: 1,
-    complianceScore: 89,
-    summaryNote: "Facing botol minuman pada open chiller tidak simetris.",
-    findings: [],
-  },
-  {
-    id: "rep-008",
-    storeName: "Cabang Kelapa Gading",
-    storeLocation: "Jakarta Utara",
-    scheduleName: "Audit Kebersihan & K3",
-    auditorName: "Rian Hendrawan",
-    auditorRole: "Auditor Lapangan",
-    submitDate: "25 Agustus 2024",
-    submitTime: "15:20 WIB",
-    month: "Agustus 2024",
-    status: "Masalah",
-    issueCount: 2,
-    complianceScore: 80,
-    summaryNote: "Suhu open chiller melebihi toleransi SOP (9.8°C) dan kardus sisa restock di lorong.",
-    findings: [],
-  },
-  {
-    id: "rep-009",
-    storeName: "Cabang Bintaro",
-    storeLocation: "Tangerang Selatan",
-    scheduleName: "Audit Stok & Inventori",
-    auditorName: "Siti Nurhaliza",
-    auditorRole: "Auditor Lapangan",
-    submitDate: "26 Agustus 2024",
-    submitTime: "11:00 WIB",
-    month: "Agustus 2024",
-    status: "Sesuai",
-    issueCount: 0,
-    complianceScore: 100,
-    summaryNote: "Kerapian display dan akurasi stok cabang sempurna.",
-    findings: [],
-  },
-  {
-    id: "rep-010",
-    storeName: "Cabang Pondok Indah",
-    storeLocation: "Jakarta Selatan",
-    scheduleName: "Checklist Fasilitas & Keamanan",
-    auditorName: "Budi Santoso",
-    auditorRole: "Auditor Lapangan",
-    submitDate: "27 Agustus 2024",
-    submitTime: "14:30 WIB",
-    month: "Agustus 2024",
-    status: "Sesuai",
-    issueCount: 0,
-    complianceScore: 97,
-    summaryNote: "Seluruh fasilitas dan CCTV berfungsi dengan optimal.",
-    findings: [],
-  },
-  {
-    id: "rep-011",
-    storeName: "Cabang Kuningan",
-    storeLocation: "Jakarta Selatan",
-    scheduleName: "Checklist Operasional Harian",
-    auditorName: "Dewi Lestari",
-    auditorRole: "Auditor Lapangan",
-    submitDate: "28 Agustus 2024",
-    submitTime: "09:30 WIB",
-    month: "Agustus 2024",
-    status: "Masalah",
-    issueCount: 1,
-    complianceScore: 87,
-    summaryNote: "Antrean kasir menumpuk lebih dari 5 orang tanpa pembukaan kasir cadangan.",
-    findings: [],
-  },
-  {
-    id: "rep-012",
-    storeName: "Cabang Bekasi Cyber Park",
-    storeLocation: "Kota Bekasi",
-    scheduleName: "Audit Display & Promosi",
-    auditorName: "Andi Wijaya",
-    auditorRole: "Auditor Lapangan",
-    submitDate: "29 Agustus 2024",
-    submitTime: "16:00 WIB",
-    month: "Agustus 2024",
-    status: "Sesuai",
-    issueCount: 0,
-    complianceScore: 95,
-    summaryNote: "Gondola promo terisi penuh dan rapi.",
-    findings: [],
-  },
-  {
-    id: "rep-013",
-    storeName: "Cabang Depok Margonda",
-    storeLocation: "Kota Depok",
-    scheduleName: "Audit Kebersihan & K3",
-    auditorName: "Rian Hendrawan",
-    auditorRole: "Auditor Lapangan",
-    submitDate: "30 Agustus 2024",
-    submitTime: "10:45 WIB",
-    month: "Agustus 2024",
-    status: "Masalah",
-    issueCount: 1,
-    complianceScore: 84,
-    summaryNote: "Segel tabung APAR area gudang terputus.",
-    findings: [],
-  },
-  {
-    id: "rep-014",
-    storeName: "Cabang Bandung Dago",
-    storeLocation: "Kota Bandung",
-    scheduleName: "Audit Stok & Inventori",
-    auditorName: "Chandra",
-    auditorRole: "Auditor Lapangan",
-    submitDate: "31 Agustus 2024",
-    submitTime: "14:10 WIB",
-    month: "Agustus 2024",
-    status: "Sesuai",
-    issueCount: 0,
-    complianceScore: 99,
-    summaryNote: "Stok fisik dan planogram akurat.",
-    findings: [],
-  },
-  {
-    id: "rep-015",
-    storeName: "Cabang Surabaya Tunjungan",
-    storeLocation: "Kota Surabaya",
-    scheduleName: "Checklist Fasilitas & Keamanan",
-    auditorName: "Ahmad Fauzi",
-    auditorRole: "Auditor Lapangan",
-    submitDate: "15 Juli 2024",
-    submitTime: "11:20 WIB",
-    month: "Juli 2024",
-    status: "Masalah",
-    issueCount: 2,
-    complianceScore: 82,
-    summaryNote: "Palet kayu menumpuk di depan pintu darurat gudang.",
-    findings: [],
-  },
-  {
-    id: "rep-016",
-    storeName: "Cabang Medan Merdeka",
-    storeLocation: "Kota Medan",
-    scheduleName: "Checklist Operasional Harian",
-    auditorName: "Siti Nurhaliza",
-    auditorRole: "Auditor Lapangan",
-    submitDate: "20 Juli 2024",
-    submitTime: "09:15 WIB",
-    month: "Juli 2024",
-    status: "Sesuai",
-    issueCount: 0,
-    complianceScore: 98,
-    summaryNote: "Pelayanan kasir dan display prima.",
-    findings: [],
-  },
-  {
-    id: "rep-017",
-    storeName: "Cabang Semarang Simpang Lima",
-    storeLocation: "Kota Semarang",
-    scheduleName: "Audit Display & Promosi",
-    auditorName: "Dewi Lestari",
-    auditorRole: "Auditor Lapangan",
-    submitDate: "10 Juni 2024",
-    submitTime: "13:00 WIB",
-    month: "Juni 2024",
-    status: "Sesuai",
-    issueCount: 0,
-    complianceScore: 94,
-    summaryNote: "Display visual merchandising tertata rapi.",
-    findings: [],
-  },
-  {
-    id: "rep-018",
-    storeName: "Cabang Yogyakarta Malioboro",
-    storeLocation: "Kota Yogyakarta",
-    scheduleName: "Audit Kebersihan & K3",
-    auditorName: "Budi Santoso",
-    auditorRole: "Auditor Lapangan",
-    submitDate: "25 Juni 2024",
-    submitTime: "15:45 WIB",
-    month: "Juni 2024",
-    status: "Masalah",
-    issueCount: 1,
-    complianceScore: 86,
-    summaryNote: "Tempat sampah area kasir penuh saat jam sibuk.",
-    findings: [],
-  },
-];
+export interface ReportFilterParams {
+  workspaceId?: string;
+  storeName?: string;
+  scheduleName?: string;
+  month?: string;
+  status?: string;
+  search?: string;
+}
+
+export interface ReportMetaOptions {
+  stores: string[];
+  schedules: string[];
+  months: string[];
+}
+
+const getBackendUrl = (): string => {
+  if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
+  if (typeof window !== "undefined") return "";
+  return "http://127.0.0.1:5000";
+};
+const BACKEND_URL = getBackendUrl();
+
+const getAuthHeaders = (): Record<string, string> => {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  const token = AuthService.getToken();
+  const user = AuthService.getCurrentUser();
+
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
+  if (rawId && !rawId.startsWith("adm-")) {
+    headers["x-super-admin-id"] = rawId;
+    headers["x-user-id"] = rawId;
+  }
+  if (user?.email) {
+    headers["x-user-email"] = user.email;
+  }
+  const activeWs = AuthService.getActiveWorkspace();
+  if (activeWs?.id) {
+    headers["x-workspace-id"] = activeWs.id;
+  }
+  return headers;
+};
+
+const REPORT_CACHE_KEY = "audit_pro_report_items_cache";
 
 export const ReportService = {
   getAll(): AuditReportItem[] {
-    return defaultReports;
+    if (typeof window !== "undefined") {
+      try {
+        const cached = localStorage.getItem(REPORT_CACHE_KEY);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed)) {
+            return parsed;
+          }
+        }
+      } catch (e) {
+        console.warn("Error reading report cache:", e);
+      }
+    }
+    return [];
+  },
+
+  async fetchAll(params?: ReportFilterParams): Promise<AuditReportItem[]> {
+    try {
+      const query = new URLSearchParams();
+      if (params?.workspaceId) query.set("workspaceId", params.workspaceId);
+      if (params?.storeName && params.storeName !== "Semua Toko") query.set("storeName", params.storeName);
+      if (params?.scheduleName && params.scheduleName !== "Semua Jadwal") query.set("scheduleName", params.scheduleName);
+      if (params?.month && params.month !== "Semua Bulan" && params.month !== "Bulan Ini") query.set("month", params.month);
+      if (params?.status && params.status !== "Semua Status") query.set("status", params.status);
+      if (params?.search) query.set("search", params.search);
+
+      const qs = query.toString() ? `?${query.toString()}` : "";
+      const url = `${BACKEND_URL}/api/reports${qs}`;
+      const res = await fetch(url, {
+        headers: getAuthHeaders(),
+      });
+
+      if (!res.ok) {
+        throw new Error(`HTTP error ${res.status}`);
+      }
+
+      const json = await res.json();
+      if (json && (json.status === "success" || json.success) && Array.isArray(json.data)) {
+        if (typeof window !== "undefined") {
+          try {
+            localStorage.setItem(REPORT_CACHE_KEY, JSON.stringify(json.data));
+          } catch (e) {}
+        }
+        return json.data;
+      }
+    } catch (err) {
+      console.warn("ReportService.fetchAll failed, falling back to cache:", err);
+    }
+    return this.getAll();
+  },
+
+  async fetchById(id: string): Promise<AuditReportItem | null> {
+    try {
+      const url = `${BACKEND_URL}/api/reports/${encodeURIComponent(id)}`;
+      const res = await fetch(url, {
+        headers: getAuthHeaders(),
+      });
+
+      if (res.ok) {
+        const json = await res.json();
+        if (json && (json.status === "success" || json.success) && json.data) {
+          return json.data;
+        }
+      }
+    } catch (err) {
+      console.warn("ReportService.fetchById failed:", err);
+    }
+    const local = this.getAll().find((r) => r.id === id);
+    return local || null;
+  },
+
+  async fetchMeta(workspaceId?: string): Promise<ReportMetaOptions> {
+    try {
+      const query = new URLSearchParams();
+      if (workspaceId) query.set("workspaceId", workspaceId);
+      const qs = query.toString() ? `?${query.toString()}` : "";
+      const url = `${BACKEND_URL}/api/reports/meta${qs}`;
+      const res = await fetch(url, {
+        headers: getAuthHeaders(),
+      });
+
+      if (res.ok) {
+        const json = await res.json();
+        if (json && (json.status === "success" || json.success) && json.data) {
+          return {
+            stores: json.data.stores || [],
+            schedules: json.data.schedules || [],
+            months: json.data.months || [],
+          };
+        }
+      }
+    } catch (err) {
+      console.warn("ReportService.fetchMeta failed:", err);
+    }
+    return {
+      stores: this.getStores(),
+      schedules: this.getSchedules(),
+      months: this.getMonths(),
+    };
   },
 
   getStores(): string[] {
     const set = new Set<string>();
-    defaultReports.forEach((r) => set.add(r.storeName));
+    this.getAll().forEach((r) => {
+      if (r.storeName) set.add(r.storeName);
+    });
     return Array.from(set);
   },
 
   getSchedules(): string[] {
     const set = new Set<string>();
-    defaultReports.forEach((r) => set.add(r.scheduleName));
+    this.getAll().forEach((r) => {
+      if (r.scheduleName) set.add(r.scheduleName);
+    });
     return Array.from(set);
   },
 
   getMonths(): string[] {
     const set = new Set<string>();
-    defaultReports.forEach((r) => set.add(r.month));
+    this.getAll().forEach((r) => {
+      if (r.month) set.add(r.month);
+    });
     return Array.from(set);
   },
 };

@@ -42,7 +42,9 @@ export default function LoginPage() {
       toast.success(response.message || "Login berhasil! Mengalihkan ke dashboard...");
 
       setTimeout(() => {
-        if (user && user.role === "Admin") {
+        if (user && user.role === "Staff") {
+          router.push("/jadwal-staff");
+        } else if (user && user.role === "Admin") {
           router.push("/dashboard-monitoring");
         } else if (user && user.role === "Divisi Teknis") {
           router.push("/divisi-teknis");

@@ -20,6 +20,7 @@ app.use(cors({
     'x-super-admin-id',
     'x-user-id',
     'x-user-email',
+    'x-user-role',
     'x-workspace-id',
   ],
 }));
@@ -40,6 +41,8 @@ const scheduleRoutes = require('./src/routes/schedule.routes');
 const holidayRoutes = require('./src/routes/holiday.routes');
 const staffRoutes = require('./src/routes/staff.routes');
 const teknisRoutes = require('./src/routes/teknis.routes');
+const galleryRoutes = require('./src/routes/gallery.routes');
+const reportRoutes = require('./src/routes/report.routes');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/ai', aiRoutes);
@@ -60,6 +63,10 @@ app.use('/api/holiday', holidayRoutes);
 app.use('/api/staff', staffRoutes);
 app.use('/api/staffs', staffRoutes);
 app.use('/api/teknis', teknisRoutes);
+app.use('/api/gallery', galleryRoutes);
+app.use('/api/galeri', galleryRoutes);
+app.use('/api/reports', reportRoutes);
+app.use('/api/laporan', reportRoutes);
 
 // Base Route / Health Check
 app.get('/api/health', (req, res) => {

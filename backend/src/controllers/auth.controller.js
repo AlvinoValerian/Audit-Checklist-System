@@ -351,6 +351,80 @@ exports.login = async (req, res) => {
       });
     }
 
+    // 3. Jika bukan Super Admin dan bukan Admin, cek di tabel staff
+    const staff = await prisma.staff.findUnique({
+      where: { email: cleanEmail },
+      include: {
+        store: {
+          include: {
+            workspace: true,
+          },
+        },
+        admin: true,
+      },
+    });
+
+    if (staff) {
+      if (staff.status === 'inactive' || staff.status === 'Nonaktif') {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Akun staf Anda berstatus Nonaktif. Hubungi Admin untuk mengaktifkan kembali.',
+        });
+      }
+
+      let isMatch = false;
+      if (staff.password.startsWith('$2b$') || staff.password.startsWith('$2a$')) {
+        isMatch = await bcrypt.compare(password, staff.password);
+      } else {
+        isMatch = staff.password === password;
+      }
+
+      if (!isMatch) {
+        return res.status(401).json({
+          status: 'error',
+          message: 'Kata sandi salah. Silakan periksa kembali.',
+        });
+      }
+
+      const storeCode = staff.store ? `ST-${staff.store.store_id.toString()}` : 'ST-01';
+      const token = jwt.sign(
+        {
+          id: `staff-${staff.staff_id.toString()}`,
+          rawId: staff.staff_id.toString(),
+          email: staff.email,
+          role: 'Staff',
+          storeId: staff.store_id.toString(),
+          workspaceId: staff.store?.workspace_id?.toString() || staff.admin?.workspace_id?.toString() || '',
+        },
+        JWT_SECRET,
+        { expiresIn: '7d' }
+      );
+
+      return res.status(200).json({
+        status: 'success',
+        message: 'Login berhasil sebagai Staff Lapangan.',
+        data: {
+          token,
+          user: {
+            id: `staff-${staff.staff_id.toString()}`,
+            rawId: staff.staff_id.toString(),
+            fullName: staff.name,
+            email: staff.email,
+            phone: staff.phone_number || '-',
+            role: 'Staff',
+            storeId: staff.store_id.toString(),
+            storeName: staff.store ? staff.store.store_name : 'Toko Cabang',
+            storeLocation: staff.store ? (staff.store.address || staff.store.city || 'Cabang') : 'Cabang',
+            storeCode: storeCode,
+            workspaceId: staff.store?.workspace_id?.toString() || staff.admin?.workspace_id?.toString() || '',
+            workspaceName: staff.store?.workspace?.company_name || 'Workspace',
+            status: 'Aktif',
+            profilePicture: staff.photo || null,
+          },
+        },
+      });
+    }
+
     return res.status(404).json({
       status: 'error',
       message: 'Email tidak ditemukan. Pastikan email terdaftar atau lakukan pendaftaran terlebih dahulu.',
@@ -392,6 +466,43 @@ exports.getMe = async (req, res) => {
       return res.status(200).json({
         status: 'success',
         data: formatAuthSuperAdmin(sa, token),
+      });
+    }
+
+    if (decoded.role === 'Staff') {
+      const cleanStaffId = decoded.rawId || decoded.id?.toString().replace(/^staff-/, '');
+      const st = await prisma.staff.findUnique({
+        where: { staff_id: BigInt(cleanStaffId) },
+        include: {
+          store: {
+            include: { workspace: true },
+          },
+        },
+      });
+      if (!st) {
+        return res.status(404).json({ status: 'error', message: 'Staff tidak ditemukan' });
+      }
+      return res.status(200).json({
+        status: 'success',
+        data: {
+          token,
+          user: {
+            id: `staff-${st.staff_id.toString()}`,
+            rawId: st.staff_id.toString(),
+            fullName: st.name,
+            email: st.email,
+            phone: st.phone_number || '-',
+            role: 'Staff',
+            storeId: st.store_id.toString(),
+            storeName: st.store ? st.store.store_name : 'Toko Cabang',
+            storeLocation: st.store ? (st.store.address || st.store.city || 'Cabang') : 'Cabang',
+            storeCode: st.store ? `ST-${st.store.store_id.toString()}` : 'ST-01',
+            workspaceId: st.store?.workspace_id?.toString() || '',
+            workspaceName: st.store?.workspace?.company_name || 'Workspace',
+            status: st.status === 'inactive' || st.status === 'Nonaktif' ? 'Nonaktif' : 'Aktif',
+            profilePicture: st.photo || null,
+          },
+        },
       });
     }
 

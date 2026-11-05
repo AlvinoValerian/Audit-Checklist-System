@@ -1,9 +1,11 @@
 "use client";
 
-import React from "react";
+import React, { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { Toaster } from "sonner";
 import Sidebar from "./Sidebar";
 import TopBar from "./TopBar";
+import { AuthService } from "@/lib/auth";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -11,6 +13,17 @@ interface DashboardLayoutProps {
 }
 
 export default function DashboardLayout({ children, contentClassName }: DashboardLayoutProps) {
+  const router = useRouter();
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const user = AuthService.getCurrentUser();
+      if (user && user.role === "Staff") {
+        router.replace("/jadwal-staff");
+      }
+    }
+  }, [router]);
+
   return (
     <div className="min-h-screen md:h-screen md:overflow-hidden bg-[#f8fafc] text-slate-800 font-sans flex flex-col md:flex-row">
       <Toaster position="top-right" richColors />

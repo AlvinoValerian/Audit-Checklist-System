@@ -86,8 +86,12 @@ export default function StaffPage() {
 
   useEffect(() => {
     const init = async () => {
-      setIsLoading(true);
       const user = AuthService.getCurrentUser();
+      if (user?.role === "Staff") {
+        window.location.href = "/jadwal-staff";
+        return;
+      }
+      setIsLoading(true);
       const activeWs = AuthService.getActiveWorkspace();
       const isSA = user?.role === "Super Admin";
       setIsSuperAdmin(isSA);
@@ -429,11 +433,14 @@ export default function StaffPage() {
             <tbody className="divide-y divide-slate-100 text-xs">
               {isLoading ? (
                 <tr>
-                  <td colSpan={6} className="text-center py-14">
-                    <div className="flex flex-col items-center justify-center gap-2.5">
-                      <Loader2 className="w-6 h-6 animate-spin text-[#193f53]" />
-                      <span className="text-xs font-semibold text-slate-600">
-                        Memuat data staf dari backend PostgreSQL...
+                  <td colSpan={6} className="py-16 text-center text-slate-400">
+                    <div className="flex flex-col items-center justify-center gap-2">
+                      <Loader2 className="w-6 h-6 text-[#193f53] animate-spin" />
+                      <span className="text-xs font-semibold text-slate-700">
+                        Memuat data staff...
+                      </span>
+                      <span className="text-[11px] text-slate-400">
+                        Menghubungkan ke database
                       </span>
                     </div>
                   </td>
