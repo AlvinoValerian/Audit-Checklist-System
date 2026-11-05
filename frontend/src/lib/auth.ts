@@ -5,7 +5,8 @@ export interface AuthUser {
   fullName: string;
   phone?: string;
   companyName?: string;
-  role: "Super Admin" | "Divisi Teknis" | "Admin" | "Area Admin" | "Auditor Lapangan" | "Staff";
+  role: "Super Admin" | "Divisi Teknis" | "Admin" | "Area Admin" | "Auditor Lapangan" | "Staff" | "Teknis";
+  position?: string;
   workspaceId?: string;
   workspaceName?: string;
   storeId?: string;

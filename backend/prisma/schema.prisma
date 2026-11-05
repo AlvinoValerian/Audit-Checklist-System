@@ -277,6 +277,22 @@ model ai_audit_log {
   @@index([report_id], map: "idx_ai_log_report_id")
 }
 
+model ai_chat_session {
+  session_id   BigInt    @id @default(autoincrement())
+  user_id      String    @db.VarChar(100)
+  user_email   String?   @db.VarChar(255)
+  user_role    String?   @db.VarChar(100)
+  workspace_id String?   @db.VarChar(100)
+  title        String?   @default("Percakapan Baru") @db.VarChar(255)
+  messages     Json?     @default("[]")
+  is_active    Boolean?  @default(true)
+  created_at   DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@index([user_id, is_active], map: "idx_ai_chat_session_user")
+  @@index([user_email, is_active], map: "idx_ai_chat_session_email")
+}
+
 model store_holiday {
   holiday_id     BigInt    @id @default(autoincrement())
   store_id       BigInt?

@@ -18,8 +18,16 @@ export default function DashboardLayout({ children, contentClassName }: Dashboar
   useEffect(() => {
     if (typeof window !== "undefined") {
       const user = AuthService.getCurrentUser();
-      if (user && user.role === "Staff") {
-        router.replace("/jadwal-staff");
+      const isStaff =
+        user &&
+        (user.role === "Staff" ||
+         user.role === "Auditor Lapangan" ||
+         user.id?.toString().startsWith("staff-") ||
+         user.role?.toLowerCase().includes("staff") ||
+         user.role?.toLowerCase().includes("auditor"));
+
+      if (isStaff) {
+        window.location.href = "/jadwal-staff";
       }
     }
   }, [router]);

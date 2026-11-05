@@ -61,12 +61,13 @@ function ProfileContent() {
     }
   };
 
-  const displayName = currentUser?.fullName || "Siti Rahmawati";
-  const displayEmail = currentUser?.email || "staff.kendalsari2@gacoan.com";
-  const displayPhone = currentUser?.phone || "0813-7788-9904";
-  const displayStore = currentUser?.storeName || "Kopi Kenangan";
-  const displayLocation = currentUser?.storeLocation || "Mall Kelapa Gading 3";
-  const displayStoreCode = currentUser?.storeCode || "KK-JKT-15";
+  const displayName = currentUser?.fullName || "Staf Lapangan";
+  const displayEmail = currentUser?.email || "staff@gacoan.com";
+  const displayPhone = currentUser?.phone || "-";
+  const displayStore = currentUser?.storeName || "Mie Gacoan";
+  const displayLocation = currentUser?.storeLocation || "Malang";
+  const displayStoreCode = currentUser?.storeCode || "ST-01";
+  const displayRole = currentUser?.position || "Auditor Lapangan";
 
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center sm:py-6 p-0 sm:px-4 font-sans select-none antialiased">
@@ -148,12 +149,12 @@ function ProfileContent() {
               {displayName}
             </h2>
             <p className="text-xs font-semibold text-slate-500 mt-0.5">
-              Senior Barista • NIP: KK-8824
+              {displayRole} • ID: {currentUser?.id || "staff-01"}
             </p>
 
             <div className="flex items-center justify-center gap-1.5 mt-2.5">
               <span className="px-2.5 py-0.5 bg-blue-50 text-[#193f53] border border-blue-100 text-[10px] font-bold rounded-full">
-                Staff Auditor Lapangan
+                {currentUser?.role || "Staff Lapangan"}
               </span>
               <span className="px-2.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-semibold rounded-full">
                 Aktif Bertugas
@@ -196,13 +197,13 @@ function ProfileContent() {
               <div className="flex items-center justify-between">
                 <span className="text-slate-500">Shift Kerja:</span>
                 <span className="font-semibold text-emerald-600">
-                  Shift Pagi (06:30 - 15:00 WIB)
+                  Operasional Gerai (Shift Terjadwal)
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-slate-500">Store Manager:</span>
+                <span className="text-slate-500">Supervisor:</span>
                 <span className="font-semibold text-slate-800">
-                  Dimas Pratama (SPV Area)
+                  Store Manager Cabang
                 </span>
               </div>
             </div>

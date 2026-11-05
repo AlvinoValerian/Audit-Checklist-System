@@ -23,19 +23,48 @@ const extractUser = async (req) => {
   }
 
   // 2. Fallback jika token tidak dikirim: cari dari custom header atau query/body
-  const fallbackId =
-    req.headers['x-super-admin-id'] ||
-    req.headers['x-user-id'] ||
-    req.query.superAdminId ||
-    req.body?.superAdminId;
+  const roleHeader = req.headers['x-user-role'];
+  const saHeader = req.headers['x-super-admin-id'] || req.query.superAdminId || req.body?.superAdminId;
+  const rawUserId = req.headers['x-user-id'];
 
-  if (!user && fallbackId && !fallbackId.toString().startsWith('adm-')) {
-    const cleanId = fallbackId.toString().replace(/^sa-/, '');
+  if (!user && (roleHeader === 'Staff' || (rawUserId && rawUserId.toString().startsWith('staff-')))) {
+    const cleanId = (rawUserId || '').toString().replace(/^staff-/, '');
+    user = {
+      rawId: cleanId,
+      id: `staff-${cleanId}`,
+      role: 'Staff',
+    };
+  } else if (!user && saHeader) {
+    const cleanId = saHeader.toString().replace(/^sa-/, '');
     user = {
       rawId: cleanId,
       id: `sa-${cleanId}`,
       role: 'Super Admin',
     };
+  } else if (!user && rawUserId) {
+    const str = rawUserId.toString();
+    if (str.startsWith('staff-')) {
+      const cleanId = str.replace(/^staff-/, '');
+      user = {
+        rawId: cleanId,
+        id: `staff-${cleanId}`,
+        role: 'Staff',
+      };
+    } else if (str.startsWith('adm-')) {
+      const cleanId = str.replace(/^adm-/, '');
+      user = {
+        rawId: cleanId,
+        id: `adm-${cleanId}`,
+        role: 'Admin',
+      };
+    } else if (str.startsWith('sa-')) {
+      const cleanId = str.replace(/^sa-/, '');
+      user = {
+        rawId: cleanId,
+        id: `sa-${cleanId}`,
+        role: 'Super Admin',
+      };
+    }
   }
 
   // 3. Fallback jika ada email (dari token atau request header/query)
@@ -44,43 +73,98 @@ const extractUser = async (req) => {
     req.headers['x-user-email'] ||
     req.query.email;
 
-  if (candidateEmail) {
-    const cleanEmail = candidateEmail.trim().toLowerCase();
+  if (candidateEmail || (user && user.role === 'Staff')) {
+    const cleanEmail = candidateEmail ? candidateEmail.trim().toLowerCase() : '';
     try {
-      const sa = await prisma.super_admin.findUnique({
-        where: { email: cleanEmail },
-      });
-      if (sa) {
-        user = {
-          ...(user || {}),
-          rawId: sa.super_admin_id.toString(),
-          id: `sa-${sa.super_admin_id.toString()}`,
-          role: 'Super Admin',
-          email: sa.email,
-          fullName: sa.name,
-        };
-      } else {
-        const adm = await prisma.admin.findUnique({
-          where: { email: cleanEmail },
-        });
-        if (adm) {
-          let admRole = user?.role || 'Admin';
-          try {
-            const roleRes = await prisma.$queryRaw`SELECT role FROM admin WHERE admin_id = ${adm.admin_id} LIMIT 1`;
-            if (roleRes && roleRes[0]?.role) {
-              admRole = roleRes[0].role;
-            }
-          } catch (e) {}
-
+      // Prioritaskan Staf jika user sudah teridentifikasi sebagai Staff atau ada header staff
+      if (roleHeader === 'Staff' || (user && user.role === 'Staff')) {
+        let st = null;
+        if (cleanEmail) {
+          st = await prisma.staff.findUnique({
+            where: { email: cleanEmail },
+            include: { store: true },
+          });
+        }
+        if (!st && user?.rawId && !isNaN(Number(user.rawId))) {
+          st = await prisma.staff.findUnique({
+            where: { staff_id: BigInt(user.rawId) },
+            include: { store: true },
+          });
+        }
+        if (st) {
           user = {
             ...(user || {}),
-            rawId: adm.admin_id.toString(),
-            id: `adm-${adm.admin_id.toString()}`,
-            role: admRole,
-            email: adm.email,
-            fullName: adm.name,
-            workspaceId: adm.workspace_id.toString(),
+            rawId: st.staff_id.toString(),
+            id: `staff-${st.staff_id.toString()}`,
+            role: 'Staff',
+            email: st.email,
+            fullName: st.name,
+            storeId: st.store_id ? st.store_id.toString() : null,
+            storeName: st.store ? st.store.store_name : null,
+            storeLocation: st.store ? (st.store.address || st.store.city || 'Cabang') : 'Cabang',
+            storeCode: st.store ? `ST-${st.store.store_id.toString()}` : 'ST-01',
+            workspaceId: st.store?.workspace_id?.toString() || '',
           };
+          return user;
+        }
+      }
+
+      if (cleanEmail) {
+        const sa = await prisma.super_admin.findUnique({
+          where: { email: cleanEmail },
+        });
+        if (sa) {
+          user = {
+            ...(user || {}),
+            rawId: sa.super_admin_id.toString(),
+            id: `sa-${sa.super_admin_id.toString()}`,
+            role: 'Super Admin',
+            email: sa.email,
+            fullName: sa.name,
+          };
+        } else {
+          const adm = await prisma.admin.findUnique({
+            where: { email: cleanEmail },
+          });
+          if (adm) {
+            let admRole = user?.role || 'Admin';
+            try {
+              const roleRes = await prisma.$queryRaw`SELECT role FROM admin WHERE admin_id = ${adm.admin_id} LIMIT 1`;
+              if (roleRes && roleRes[0]?.role) {
+                admRole = roleRes[0].role;
+              }
+            } catch (e) {}
+
+            user = {
+              ...(user || {}),
+              rawId: adm.admin_id.toString(),
+              id: `adm-${adm.admin_id.toString()}`,
+              role: admRole,
+              email: adm.email,
+              fullName: adm.name,
+              workspaceId: adm.workspace_id.toString(),
+            };
+          } else {
+            const st = await prisma.staff.findUnique({
+              where: { email: cleanEmail },
+              include: { store: true },
+            });
+            if (st) {
+              user = {
+                ...(user || {}),
+                rawId: st.staff_id.toString(),
+                id: `staff-${st.staff_id.toString()}`,
+                role: 'Staff',
+                email: st.email,
+                fullName: st.name,
+                storeId: st.store_id ? st.store_id.toString() : null,
+                storeName: st.store ? st.store.store_name : null,
+                storeLocation: st.store ? (st.store.address || st.store.city || 'Cabang') : 'Cabang',
+                storeCode: st.store ? `ST-${st.store.store_id.toString()}` : 'ST-01',
+                workspaceId: st.store?.workspace_id?.toString() || '',
+              };
+            }
+          }
         }
       }
     } catch (err) {
