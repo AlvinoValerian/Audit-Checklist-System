@@ -467,7 +467,7 @@ export default function RegisterPage() {
               className="w-full mt-3.5 h-10.5 bg-[#193f53] hover:bg-[#143343] active:bg-[#0f2835] text-white font-semibold text-sm rounded-lg transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-75 active:scale-[0.99]"
             >
               {isLoading && <Loader2 className="w-4 h-4 animate-spin" />}
-              <span>Daftar Sekarang (Super Admin)</span>
+              <span>Daftar Sekarang</span>
             </button>
           </form>
 

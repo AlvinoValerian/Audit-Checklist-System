@@ -22,7 +22,7 @@ import {
   X,
   Building2,
 } from "lucide-react";
-import { ScheduleService, defaultSchedules, isScheduleInProgress } from "@/services/schedule.service";
+import { ScheduleService, defaultSchedules, isScheduleInProgress, to24HourString, calculateDuration } from "@/services/schedule.service";
 import { AuditSchedule, ScheduleStats, ScheduleStatus } from "@/types/schedule";
 import { toast } from "sonner";
 import ActionButtons from "@/components/ui/ActionButtons";
@@ -608,7 +608,7 @@ export default function JadwalAuditPage() {
                     <div className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">
                       Status Jadwal
                     </div>
-                    {(["Semua", "Terjadwal", "Selesai", "Dibatalkan"] as const).map((status) => (
+                    {(["Semua", "Terjadwal", "Sedang Berjalan", "Selesai", "Dibatalkan"] as const).map((status) => (
                       <button
                         key={status}
                         type="button"
@@ -621,6 +621,8 @@ export default function JadwalAuditPage() {
                           filterStatus === status
                             ? status === "Terjadwal"
                               ? "bg-purple-50 text-purple-700 font-semibold"
+                              : status === "Sedang Berjalan"
+                              ? "bg-amber-50 text-amber-700 font-semibold"
                               : "bg-sky-50 text-sky-600 font-semibold"
                             : "text-slate-600 hover:bg-slate-50"
                         }`}
@@ -755,11 +757,18 @@ export default function JadwalAuditPage() {
                         </div>
                       </td>
 
-                      {/* WAKTU */}
+                      {/* WAKTU (Format 24 Jam & Durasi) */}
                       <td className={`py-3.5 px-4 whitespace-nowrap text-slate-600 ${isCancelled ? "opacity-60" : ""}`}>
-                        <div className="flex items-center gap-1.5 text-xs">
-                          <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                          <span>{schedule.timeRange}</span>
+                        <div className="flex flex-col gap-0.5">
+                          <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-800">
+                            <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span>
+                              {to24HourString(schedule.startTime)} - {to24HourString(schedule.endTime)} WIB
+                            </span>
+                          </div>
+                          <span className="text-[10px] text-slate-400 font-medium pl-5">
+                            Durasi: {schedule.duration || calculateDuration(schedule.startTime, schedule.endTime, schedule.timeRange)}
+                          </span>
                         </div>
                       </td>
 
@@ -780,26 +789,22 @@ export default function JadwalAuditPage() {
 
                       {/* STATUS */}
                       <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                        {schedule.status === "Terjadwal" && (
-                          isScheduleInProgress(schedule) ? (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 animate-pulse" title="Audit sedang berlangsung di jam & hari ini">
-                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                              Sedang Berjalan
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-purple-50 text-purple-700 border border-purple-200">
-                              <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
-                              Terjadwal
-                            </span>
-                          )
-                        )}
-                        {schedule.status === "Selesai" && (
+                        {schedule.status === "Sedang Berjalan" ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 animate-pulse" title="Audit sedang berlangsung atau belum selesai dikerjakan staf">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                            Sedang Berjalan
+                          </span>
+                        ) : schedule.status === "Terjadwal" ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-purple-50 text-purple-700 border border-purple-200">
+                            <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+                            Terjadwal
+                          </span>
+                        ) : schedule.status === "Selesai" ? (
                           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-600 border border-emerald-200">
                             <Check className="w-3 h-3 stroke-[2.5]" />
                             Selesai
                           </span>
-                        )}
-                        {schedule.status === "Dibatalkan" && (
+                        ) : (
                           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-rose-50 text-rose-600 border border-rose-200">
                             <Ban className="w-3 h-3" />
                             Dibatalkan

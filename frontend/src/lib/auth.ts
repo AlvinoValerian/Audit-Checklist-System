@@ -13,6 +13,7 @@ export interface AuthUser {
   storeName?: string;
   storeLocation?: string;
   storeCode?: string;
+  storeAddress?: string;
   profilePicture?: string | null;
   token?: string;
 }

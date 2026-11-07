@@ -15,14 +15,12 @@ import {
   RotateCcw,
   Smartphone,
   Maximize2,
-  Wifi,
-  Battery,
-  Signal,
   X,
   Check,
 } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import { AuthService, AuthUser } from "@/lib/auth";
+import DecryptedImage from "@/components/DecryptedImage";
 
 interface QuestionItem {
   id: number;
@@ -42,7 +40,7 @@ interface StoredAudit {
   storeCode: string;
   templateName: string;
   questions: QuestionItem[];
-  selectedConditions: Record<number, "standard" | "na">;
+  selectedConditions: Record<number, "standard" | "issue" | "na">;
   photos: Record<number, string>;
   notes: Record<number, string>;
   startedAt?: string;
@@ -95,7 +93,7 @@ function ReviewContent() {
         .then((r) => r.json())
         .then((res) => {
           if (res.status === "success" && res.data) {
-            const initialConditions: Record<number, "standard" | "na"> = {};
+            const initialConditions: Record<number, "standard" | "issue" | "na"> = {};
             (res.data.tasks || []).forEach((t: QuestionItem) => {
               initialConditions[t.id] = "standard";
             });
@@ -132,9 +130,13 @@ function ReviewContent() {
   // Hitung jumlah butir yang lengkap
   const totalCount = questions.length;
   const completedQuestions = questions.filter((q) => {
+    const condition = selectedConditions[q.id] || "standard";
     const hasCondition = Boolean(selectedConditions[q.id]);
-    const photoValid = !q.isPhotoRequired || Boolean(photos[q.id]);
-    return hasCondition && photoValid;
+    const isPhotoNeeded = q.isPhotoRequired || condition === "issue";
+    const isNoteNeeded = condition === "issue";
+    const photoValid = !isPhotoNeeded || Boolean(photos[q.id]);
+    const noteValid = !isNoteNeeded || Boolean(notes[q.id] && notes[q.id].trim().length > 0);
+    return hasCondition && photoValid && noteValid;
   });
   const completedCount = completedQuestions.length;
   const incompleteCount = totalCount - completedCount;
@@ -147,7 +149,7 @@ function ReviewContent() {
   // Lanjut ke Halaman Konfirmasi & Serahkan
   const handleProceedToConfirmation = () => {
     if (!isAllComplete && totalCount > 0) {
-      toast.error("Masih ada pertanyaan yang membutuhkan foto bukti wajib. Harap lengkapi terlebih dahulu.");
+      toast.error("Masih ada butir checklist yang membutuhkan foto bukti kamera atau catatan temuan wajib!");
       return;
     }
     toast.success("Melanjutkan ke Konfirmasi & Serahkan Laporan...");
@@ -155,7 +157,7 @@ function ReviewContent() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center sm:py-6 p-0 sm:px-4 font-sans select-none antialiased">
+    <div className="fixed inset-0 flex flex-col overflow-hidden bg-slate-900 sm:relative sm:inset-auto sm:min-h-screen sm:bg-slate-900 sm:flex sm:items-center sm:justify-center sm:py-6 sm:px-4 font-sans antialiased">
       <Toaster position="top-center" richColors />
 
       {/* Floating Mode Toggle untuk Laptop / Desktop */}
@@ -175,30 +177,20 @@ function ReviewContent() {
 
       {/* Smartphone Device Frame Container */}
       <div
-        className={`w-full bg-[#f8fbff] text-slate-900 transition-all duration-300 relative flex flex-col ${
+        className={`w-full h-full flex flex-col bg-[#f8fbff] text-slate-900 transition-all duration-300 relative ${
           isFullscreenMode
-            ? "max-w-md min-h-screen sm:rounded-none sm:shadow-none"
-            : "max-w-[420px] min-h-[844px] sm:max-h-[92vh] sm:rounded-[42px] sm:shadow-[0_25px_60px_-15px_rgba(0,0,0,0.6)] sm:border-[9px] sm:border-slate-800 sm:ring-1 sm:ring-white/10 overflow-hidden"
+            ? "max-w-md sm:rounded-none sm:shadow-none sm:h-screen"
+            : "sm:h-[844px] sm:max-h-[92vh] sm:max-w-[420px] sm:rounded-[42px] sm:shadow-[0_25px_60px_-15px_rgba(0,0,0,0.6)] sm:border-[9px] sm:border-slate-800 sm:ring-1 sm:ring-white/10 overflow-hidden"
         }`}
       >
         {/* Dynamic Island on Desktop Frame */}
         <div className="hidden sm:block absolute top-2 left-1/2 -translate-x-1/2 w-28 h-4 bg-slate-900 rounded-full z-40 pointer-events-none" />
 
-        {/* 1. Mobile Status Bar */}
-        <div className="pt-3 px-6 pb-1 flex items-center justify-between text-slate-900 font-semibold text-xs tracking-tight z-20 shrink-0 select-none bg-white/70 backdrop-blur-md border-b border-slate-100/50">
-          <span className="text-sm font-bold tracking-tight">{currentTime}</span>
-          <div className="flex items-center gap-1.5 text-slate-800">
-            <Signal className="w-3.5 h-3.5 stroke-[2.2]" />
-            <Wifi className="w-3.5 h-3.5 stroke-[2.2]" />
-            <Battery className="w-4 h-4 stroke-[2.2]" />
-          </div>
-        </div>
-
         {/* 2. Top Navigation Header */}
-        <div className="px-4 py-2.5 bg-white border-b border-slate-100 flex items-center justify-between gap-2 shrink-0">
+        <div className="px-4 pt-3.5 sm:pt-3 pb-2.5 bg-white border-b border-slate-100 flex items-center justify-between gap-2 shrink-0">
           <button
             onClick={() => router.push(`/jadwal-staff/pengerjaan?id=${auditData?.scheduleId || scheduleId}`)}
-            className="w-9 h-9 rounded-xl hover:bg-slate-100 text-slate-700 flex items-center justify-center transition-colors cursor-pointer shrink-0"
+            className="w-9 h-9 rounded-xl hover:bg-slate-100 text-slate-700 flex items-center justify-center transition-colors cursor-pointer shrink-0 touch-manipulation active:scale-95"
             aria-label="Kembali"
           >
             <ArrowLeft className="w-5 h-5 stroke-[2.2]" />
@@ -215,7 +207,7 @@ function ReviewContent() {
 
           <button
             onClick={() => setShowHelpModal(true)}
-            className="w-8 h-8 rounded-full border border-slate-300 text-slate-600 hover:bg-slate-100 flex items-center justify-center transition-colors cursor-pointer shrink-0"
+            className="w-8 h-8 rounded-full border border-slate-300 text-slate-600 hover:bg-slate-100 flex items-center justify-center transition-colors cursor-pointer shrink-0 touch-manipulation active:scale-95"
             aria-label="Bantuan"
           >
             <HelpCircle className="w-4 h-4 stroke-[2.2]" />
@@ -223,7 +215,7 @@ function ReviewContent() {
         </div>
 
         {/* Scrollable Content */}
-        <div className="flex-1 overflow-y-auto px-4 py-3.5 space-y-3.5">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-3.5 space-y-3.5">
           {/* 3. Store Info Banner */}
           <div className="bg-[#eef4ff] border border-blue-100/90 rounded-2xl px-3.5 py-2.5 flex items-center gap-2.5 shadow-2xs">
             <div className="w-6 h-6 rounded-lg bg-blue-100 text-[#193f53] flex items-center justify-center shrink-0">
@@ -247,7 +239,7 @@ function ReviewContent() {
               {incompleteCount > 0 ? (
                 <div className="px-2.5 py-0.5 bg-rose-50 text-rose-700 border border-rose-200 text-xs font-semibold rounded-full flex items-center gap-1">
                   <AlertTriangle className="w-3 h-3 text-rose-600" />
-                  <span>{incompleteCount} Butuh Foto</span>
+                  <span>{incompleteCount} Butuh Foto / Catatan</span>
                 </div>
               ) : (
                 <div className="px-2.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold rounded-full flex items-center gap-1">
@@ -282,8 +274,13 @@ function ReviewContent() {
                 const itemNumber = idx + 1;
                 const condition = selectedConditions[q.id] || "standard";
                 const photo = photos[q.id];
-                const note = notes[q.id];
-                const isPhotoMissing = q.isPhotoRequired && !photo;
+                const note = (notes[q.id] || "").trim();
+                const isPhotoNeeded = q.isPhotoRequired || condition === "issue";
+                const isNoteNeeded = condition === "issue";
+                const isPhotoMissing = isPhotoNeeded && !photo;
+                const isNoteMissing = isNoteNeeded && !note;
+                const isIncomplete = isPhotoMissing || isNoteMissing;
+                const cleanTaskTitle = q.title.replace(/^\d+[\.\s\-]+/, "").trim();
 
                 return (
                   <div
@@ -293,8 +290,8 @@ function ReviewContent() {
                         `/jadwal-staff/pengerjaan?id=${auditData?.scheduleId || scheduleId}&q=${itemNumber}`
                       );
                     }}
-                    className={`rounded-2xl p-3.5 border transition-all cursor-pointer ${
-                      isPhotoMissing
+                    className={`rounded-2xl p-3.5 border transition-all cursor-pointer touch-manipulation active:scale-[0.99] ${
+                      isIncomplete
                         ? "bg-rose-50/30 border-rose-200 border-l-4 border-l-rose-500 shadow-2xs hover:shadow-md"
                         : "bg-white border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] hover:border-slate-200 hover:shadow-sm"
                     }`}
@@ -304,7 +301,7 @@ function ReviewContent() {
                       <div className="flex items-start gap-2.5 flex-1 min-w-0">
                         <div
                           className={`w-6 h-6 rounded-full font-bold text-xs flex items-center justify-center shrink-0 mt-0.5 ${
-                            isPhotoMissing
+                            isIncomplete
                               ? "bg-rose-100 text-rose-700"
                               : "bg-blue-50 text-blue-600"
                           }`}
@@ -316,17 +313,31 @@ function ReviewContent() {
                             {q.category}
                           </span>
                           <h3 className="text-xs sm:text-[13px] font-bold text-slate-900 leading-snug mt-0.5">
-                            {q.title}
+                            {itemNumber}. {cleanTaskTitle}
                           </h3>
                         </div>
                       </div>
 
                       {/* Status Badge */}
                       <div className="shrink-0">
-                        {isPhotoMissing ? (
+                        {isPhotoMissing && isNoteMissing ? (
+                          <span className="px-2 py-0.5 bg-rose-700 text-white text-[10px] font-bold rounded-md flex items-center gap-1">
+                            <Camera className="w-2.5 h-2.5" />
+                            <span>Butuh Foto & Catatan</span>
+                          </span>
+                        ) : isPhotoMissing ? (
                           <span className="px-2 py-0.5 bg-rose-700 text-white text-[10px] font-bold rounded-md flex items-center gap-1">
                             <Camera className="w-2.5 h-2.5" />
                             <span>Wajib Foto</span>
+                          </span>
+                        ) : isNoteMissing ? (
+                          <span className="px-2 py-0.5 bg-amber-600 text-white text-[10px] font-bold rounded-md flex items-center gap-1">
+                            <AlertTriangle className="w-2.5 h-2.5" />
+                            <span>Wajib Catatan</span>
+                          </span>
+                        ) : condition === "issue" ? (
+                          <span className="px-2 py-0.5 bg-rose-50 text-rose-700 border border-rose-200 text-[11px] font-semibold rounded-md">
+                            ⚠️ Masalah
                           </span>
                         ) : condition === "standard" ? (
                           <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-semibold rounded-md">
@@ -346,7 +357,7 @@ function ReviewContent() {
                         {photo ? (
                           <div className="flex items-center gap-2.5 flex-1 min-w-0">
                             <div className="relative w-12 h-12 rounded-xl overflow-hidden shrink-0 border border-slate-200 bg-slate-100">
-                              <img
+                              <DecryptedImage
                                 src={photo}
                                 alt="Bukti foto"
                                 className="w-full h-full object-cover"
@@ -391,7 +402,7 @@ function ReviewContent() {
         <div className="p-4 pb-6 bg-white border-t border-slate-100 shrink-0">
           <button
             onClick={handleProceedToConfirmation}
-            className="w-full py-3.5 px-4 bg-[#193f53] hover:bg-[#122f3e] text-white font-bold text-xs sm:text-sm rounded-xl flex items-center justify-center gap-2 shadow-sm hover:shadow-md transition-all active:scale-[0.98] cursor-pointer"
+            className="w-full py-3.5 px-4 bg-[#193f53] hover:bg-[#122f3e] text-white font-bold text-xs sm:text-sm rounded-xl flex items-center justify-center gap-2 shadow-sm hover:shadow-md transition-all active:scale-[0.98] cursor-pointer touch-manipulation"
           >
             <span>Lanjutkan ke Penyerahan</span>
             <ArrowRight className="w-4 h-4" />

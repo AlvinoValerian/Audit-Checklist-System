@@ -18,9 +18,6 @@ import {
   Check,
   Smartphone,
   Maximize2,
-  Wifi,
-  Battery,
-  Signal,
   RotateCcw,
   Sparkles,
 } from "lucide-react";
@@ -43,7 +40,6 @@ interface IssueItem {
 function IssuesContent() {
   const router = useRouter();
 
-  const [currentTime, setCurrentTime] = useState<string>("09:41");
   const [isFullscreenMode, setIsFullscreenMode] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [activeFilter, setActiveFilter] = useState<"semua" | "perlu-tindakan" | "selesai">("semua");
@@ -107,21 +103,11 @@ function IssuesContent() {
   useEffect(() => {
     const user = AuthService.getCurrentUser();
     setCurrentUser(user);
-
-    const updateClock = () => {
-      const now = new Date();
-      const hours = String(now.getHours()).padStart(2, "0");
-      const minutes = String(now.getMinutes()).padStart(2, "0");
-      setCurrentTime(`${hours}:${minutes}`);
-    };
-    updateClock();
-    const timer = setInterval(updateClock, 30000);
-    return () => clearInterval(timer);
   }, []);
 
-  const displayName = currentUser?.fullName || "Siti Rahmawati";
-  const displayStore = currentUser?.storeName || "Kopi Kenangan";
-  const displayLocation = currentUser?.storeLocation || "Mall Kelapa Gading 3";
+  const displayName = currentUser?.fullName || "Staf Lapangan";
+  const displayStore = currentUser?.storeName || "Toko Penugasan";
+  const displayLocation = currentUser?.storeLocation || "Cabang Gerai";
 
   const handleRefresh = () => {
     setIsRefreshing(true);
@@ -172,7 +158,7 @@ function IssuesContent() {
   const countResolved = issues.filter((i) => i.status === "Terselesaikan").length;
 
   return (
-    <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center sm:py-6 p-0 sm:px-4 font-sans select-none antialiased">
+    <div className="fixed inset-0 flex flex-col overflow-hidden bg-slate-900 sm:relative sm:inset-auto sm:min-h-screen sm:bg-slate-900 sm:flex sm:items-center sm:justify-center sm:py-6 sm:px-4 font-sans antialiased">
       <Toaster position="top-center" richColors />
 
       {/* Floating Mode Toggle untuk Layar Laptop / Desktop */}
@@ -192,27 +178,17 @@ function IssuesContent() {
 
       {/* Smartphone Device Frame Container */}
       <div
-        className={`w-full bg-[#f8fbff] text-slate-900 transition-all duration-300 relative flex flex-col ${
+        className={`w-full h-full flex flex-col bg-[#f8fbff] text-slate-900 transition-all duration-300 relative ${
           isFullscreenMode
-            ? "max-w-md min-h-screen sm:rounded-none sm:shadow-none"
-            : "max-w-[420px] min-h-[844px] sm:max-h-[92vh] sm:rounded-[42px] sm:shadow-[0_25px_60px_-15px_rgba(0,0,0,0.6)] sm:border-[9px] sm:border-slate-800 sm:ring-1 sm:ring-white/10 overflow-hidden"
+            ? "max-w-md sm:rounded-none sm:shadow-none sm:h-screen"
+            : "sm:h-[844px] sm:max-h-[92vh] sm:max-w-[420px] sm:rounded-[42px] sm:shadow-[0_25px_60px_-15px_rgba(0,0,0,0.6)] sm:border-[9px] sm:border-slate-800 sm:ring-1 sm:ring-white/10 overflow-hidden"
         }`}
       >
         {/* Dynamic Island / Speaker Pill on Desktop Frame */}
         <div className="hidden sm:block absolute top-2 left-1/2 -translate-x-1/2 w-28 h-4 bg-slate-900 rounded-full z-40 pointer-events-none" />
 
-        {/* 1. Mobile Status Bar */}
-        <div className="pt-3 px-6 pb-1 flex items-center justify-between text-slate-900 font-semibold text-xs tracking-tight z-20 shrink-0 select-none bg-white/70 backdrop-blur-md border-b border-slate-100/50">
-          <span className="text-sm font-bold tracking-tight">{currentTime}</span>
-          <div className="flex items-center gap-1.5 text-slate-800">
-            <Signal className="w-3.5 h-3.5 stroke-[2.2]" />
-            <Wifi className="w-3.5 h-3.5 stroke-[2.2]" />
-            <Battery className="w-4 h-4 stroke-[2.2]" />
-          </div>
-        </div>
-
         {/* 2. Top Header Bar */}
-        <div className="px-4 py-2.5 bg-white border-b border-slate-100 flex items-center justify-between gap-2 shrink-0">
+        <div className="px-4 pt-3.5 sm:pt-3 pb-2.5 bg-white border-b border-slate-100 flex items-center justify-between gap-2 shrink-0">
           <button
             onClick={() => router.push("/jadwal-staff")}
             className="w-9 h-9 rounded-xl hover:bg-slate-100 text-slate-700 flex items-center justify-center transition-colors cursor-pointer shrink-0"
@@ -247,7 +223,7 @@ function IssuesContent() {
         </div>
 
         {/* Scrollable Body */}
-        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3.5">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-3 space-y-3.5">
           {/* Outlet Info Box */}
           <div className="bg-[#eef4ff] border border-blue-100 rounded-2xl px-3.5 py-2.5 flex items-center gap-2.5 shadow-2xs">
             <div className="w-6 h-6 rounded-lg bg-blue-100 text-[#193f53] flex items-center justify-center shrink-0">
@@ -394,7 +370,7 @@ function IssuesContent() {
         </div>
 
         {/* 7. Bottom Navigation Bar */}
-        <StaffBottomNav activeTab="issues" />
+        <StaffBottomNav activeTab="issues" showIssues={true} />
       </div>
 
       {/* POPUP MODAL: DETAIL ISU */}

@@ -13,9 +13,11 @@ import {
   Check,
   FileCheck,
   Calendar,
+  AlertCircle,
 } from "lucide-react";
 import { AuditReportItem } from "@/types/report";
 import { toast } from "sonner";
+import DecryptedImage from "@/components/DecryptedImage";
 
 interface DetailLaporanViewProps {
   report: AuditReportItem;
@@ -145,10 +147,17 @@ export default function DetailLaporanView({ report, onBack }: DetailLaporanViewP
               </span>
             </div>
 
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10.5px] font-semibold bg-emerald-50/90 border border-emerald-200 text-emerald-700">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-              Verifikasi Lokasi Valid
-            </span>
+            {report.status === "Tidak Mengerjakan" ? (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10.5px] font-bold bg-rose-100 border border-rose-300 text-rose-800 shadow-2xs">
+                <AlertCircle className="w-3.5 h-3.5 text-rose-700" />
+                Audit Tidak Dikerjakan (Kedaluwarsa)
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10.5px] font-semibold bg-emerald-50/90 border border-emerald-200 text-emerald-700">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                Verifikasi Lokasi Valid
+              </span>
+            )}
           </div>
         </div>
 
@@ -176,7 +185,7 @@ export default function DetailLaporanView({ report, onBack }: DetailLaporanViewP
                       SESUAI
                     </span>
                     <span className="px-1.5 py-0.2 rounded text-[8px] font-bold uppercase bg-emerald-100 text-emerald-800">
-                      Priority Low
+                      Standar SOP
                     </span>
                   </div>
                   <div className="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
@@ -200,9 +209,11 @@ export default function DetailLaporanView({ report, onBack }: DetailLaporanViewP
                     <span className="text-[11px] font-bold text-rose-800 uppercase tracking-wider">
                       TEMUAN
                     </span>
-                    <span className="px-1.5 py-0.2 rounded text-[8px] font-extrabold uppercase bg-rose-200 text-rose-800">
-                      Priority High
-                    </span>
+                    {issueCount > 0 && (
+                      <span className="px-1.5 py-0.2 rounded text-[8px] font-extrabold uppercase bg-rose-200 text-rose-800">
+                        Perlu Perbaikan
+                      </span>
+                    )}
                   </div>
                   <div className="w-5 h-5 rounded-full bg-rose-100 flex items-center justify-center text-rose-600">
                     <XCircle className="w-3.5 h-3.5" />
@@ -300,25 +311,26 @@ export default function DetailLaporanView({ report, onBack }: DetailLaporanViewP
                     {/* Status & Priority Badge */}
                     <div className="shrink-0 flex items-center gap-1">
                       {item.hasIssue ? (
-                        <>
-                          <span className="inline-flex items-center gap-1 px-2 py-0.2 rounded-full text-[9px] font-bold bg-rose-50 border border-rose-200 text-rose-600">
-                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                            TEMUAN
-                          </span>
-                          <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[8px] font-extrabold uppercase tracking-wider bg-rose-100 text-rose-700 border border-rose-200">
-                            Priority High
-                          </span>
-                        </>
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-rose-50 border border-rose-200 text-rose-600">
+                          <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                          TEMUAN
+                        </span>
                       ) : (
-                        <>
-                          <span className="inline-flex items-center gap-1 px-2 py-0.2 rounded-full text-[9px] font-bold bg-emerald-50 border border-emerald-200 text-emerald-700">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                            SESUAI
-                          </span>
-                          <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[8px] font-semibold uppercase tracking-wider bg-slate-100 text-slate-600 border border-slate-200">
-                            Priority Low
-                          </span>
-                        </>
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 border border-emerald-200 text-emerald-700">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                          SESUAI
+                        </span>
+                      )}
+
+                      {/* Priority Badge murni ditentukan dari konfigurasi template checklist (wajib foto = High, tidak wajib foto = Low) */}
+                      {(item.priority === "High" || item.severity === "Tinggi" || item.isPhotoRequired) ? (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[8px] font-extrabold uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-200">
+                          Priority High
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[8px] font-semibold uppercase tracking-wider bg-slate-100 text-slate-600 border border-slate-200">
+                          Priority Low
+                        </span>
                       )}
                     </div>
                   </div>
@@ -363,8 +375,7 @@ export default function DetailLaporanView({ report, onBack }: DetailLaporanViewP
                     {item.photoUrl && (
                       <div className="lg:col-span-4 bg-slate-50 border border-slate-200 rounded-xl p-2 shrink-0">
                         <div className="relative aspect-4/3 rounded-lg overflow-hidden bg-slate-900">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
+                          <DecryptedImage
                             src={item.photoUrl}
                             alt={item.photoCaption || item.itemTitle}
                             className="w-full h-full object-cover"
@@ -388,9 +399,21 @@ export default function DetailLaporanView({ report, onBack }: DetailLaporanViewP
             })}
           </div>
         ) : (
-          <div className="bg-white border border-slate-200 rounded-xl p-8 text-center text-slate-500 text-xs">
-            Belum ada rincian butir checklist yang tersimpan untuk laporan ini.
-          </div>
+          report.status === "Tidak Mengerjakan" ? (
+            <div className="bg-rose-50/60 border border-rose-200 rounded-xl p-8 text-center space-y-2">
+              <AlertCircle className="w-8 h-8 text-rose-500 mx-auto stroke-[2]" />
+              <h4 className="text-xs sm:text-sm font-bold text-rose-900">
+                Audit Tidak Dikerjakan (Tidak Patuh)
+              </h4>
+              <p className="text-[11px] text-rose-700 max-w-md mx-auto leading-relaxed">
+                Jadwal audit ini ditutup secara otomatis oleh sistem karena melewati batas toleransi keterlambatan 1 jam tanpa ada pengerjaan checklist dari staf penugasan.
+              </p>
+            </div>
+          ) : (
+            <div className="bg-white border border-slate-200 rounded-xl p-8 text-center text-slate-500 text-xs">
+              Belum ada rincian butir checklist yang tersimpan untuk laporan ini.
+            </div>
+          )
         )}
       </div>
 
@@ -410,8 +433,7 @@ export default function DetailLaporanView({ report, onBack }: DetailLaporanViewP
           {/* Left: Auditor Selfie Verification Card */}
           <div className="md:col-span-4 bg-[#fffdfa] border border-[#f5ede4] rounded-xl p-3.5 flex flex-col items-center justify-center text-center">
             <div className="relative w-28 h-28 sm:w-32 sm:h-32 rounded-xl overflow-hidden shadow-2xs bg-slate-900 mx-auto">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
+              <DecryptedImage
                 src={report.auditorPhoto || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=500&auto=format&fit=crop"}
                 alt={report.auditorName}
                 className="w-full h-full object-cover"
@@ -443,11 +465,10 @@ export default function DetailLaporanView({ report, onBack }: DetailLaporanViewP
 
               <div className="relative border-2 border-dashed border-slate-200 rounded-xl bg-white p-3 h-28 sm:h-32 flex items-center justify-center">
                 {report.signatureUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
+                  <DecryptedImage
                     src={report.signatureUrl}
                     alt="Tanda Tangan Digital"
-                    className="max-h-20 object-contain"
+                    className="max-h-20 w-auto object-contain bg-white rounded-md"
                   />
                 ) : (
                   <svg

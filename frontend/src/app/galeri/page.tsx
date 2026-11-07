@@ -23,6 +23,7 @@ import { AuthService } from "@/lib/auth";
 import { WorkspaceService } from "@/services/workspace.service";
 import { Workspace } from "@/types/workspace";
 import { toast } from "sonner";
+import DecryptedImage from "@/components/DecryptedImage";
 
 export default function GaleriPage() {
   const [logs, setLogs] = useState<AuditGalleryLog[]>([]);
@@ -331,11 +332,10 @@ export default function GaleriPage() {
                     setIsStoreDropdownOpen(!isStoreDropdownOpen);
                     setIsStatusDropdownOpen(false);
                   }}
-                  className={`flex items-center justify-between gap-2 px-3 py-2 bg-white border ${
-                    selectedStore !== "Semua Toko"
+                  className={`flex items-center justify-between gap-2 px-3 py-2 bg-white border ${selectedStore !== "Semua Toko"
                       ? "border-blue-500 text-blue-600 bg-blue-50/40"
                       : "border-slate-200 text-slate-700"
-                  } rounded-lg text-xs font-semibold hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer min-w-[130px]`}
+                    } rounded-lg text-xs font-semibold hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer min-w-[130px]`}
                 >
                   <span className="truncate max-w-[120px]">{selectedStore}</span>
                   <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
@@ -357,11 +357,10 @@ export default function GaleriPage() {
                             setIsStoreDropdownOpen(false);
                             setCurrentPage(1);
                           }}
-                          className={`w-full text-left px-3.5 py-2 text-xs font-medium transition-colors ${
-                            selectedStore === store
+                          className={`w-full text-left px-3.5 py-2 text-xs font-medium transition-colors ${selectedStore === store
                               ? "bg-blue-50 text-blue-600 font-bold"
                               : "text-slate-700 hover:bg-slate-50"
-                          }`}
+                            }`}
                         >
                           {store}
                         </button>
@@ -375,11 +374,10 @@ export default function GaleriPage() {
               <button
                 type="button"
                 onClick={() => setIsFilterModalOpen(true)}
-                className={`flex items-center gap-1.5 px-3 py-2 bg-white border ${
-                  activeFilterCount > 0
+                className={`flex items-center gap-1.5 px-3 py-2 bg-white border ${activeFilterCount > 0
                     ? "border-blue-500 text-blue-600 bg-blue-50/40"
                     : "border-slate-200 text-slate-700"
-                } rounded-lg text-xs font-semibold hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer`}
+                  } rounded-lg text-xs font-semibold hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer`}
               >
                 <SlidersHorizontal className="w-3.5 h-3.5" />
                 <span>Filter</span>
@@ -398,11 +396,10 @@ export default function GaleriPage() {
                     setIsStatusDropdownOpen(!isStatusDropdownOpen);
                     setIsStoreDropdownOpen(false);
                   }}
-                  className={`flex items-center justify-between gap-2 px-3 py-2 bg-white border ${
-                    selectedStatus !== "Semua Status"
+                  className={`flex items-center justify-between gap-2 px-3 py-2 bg-white border ${selectedStatus !== "Semua Status"
                       ? "border-blue-500 text-blue-600 bg-blue-50/40"
                       : "border-slate-200 text-slate-700"
-                  } rounded-lg text-xs font-semibold hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer min-w-[130px]`}
+                    } rounded-lg text-xs font-semibold hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer min-w-[130px]`}
                 >
                   <span>{selectedStatus}</span>
                   <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
@@ -428,11 +425,10 @@ export default function GaleriPage() {
                             setIsStatusDropdownOpen(false);
                             setCurrentPage(1);
                           }}
-                          className={`w-full text-left px-3.5 py-2 text-xs font-medium transition-colors ${
-                            selectedStatus === status
+                          className={`w-full text-left px-3.5 py-2 text-xs font-medium transition-colors ${selectedStatus === status
                               ? "bg-blue-50 text-blue-600 font-bold"
                               : "text-slate-700 hover:bg-slate-50"
-                          }`}
+                            }`}
                         >
                           {status}
                         </button>
@@ -506,20 +502,17 @@ export default function GaleriPage() {
                     <div
                       key={photo.id}
                       onClick={() => handleOpenPhoto(log, photo, index)}
-                      className={`relative w-[76px] h-[76px] sm:w-[86px] sm:h-[86px] md:w-[92px] md:h-[92px] rounded-lg sm:rounded-xl overflow-hidden cursor-pointer group shrink-0 transition-all duration-200 hover:shadow-md hover:scale-[1.04] bg-slate-100 ${
-                        photo.hasIssue
+                      className={`relative w-[76px] h-[76px] sm:w-[86px] sm:h-[86px] md:w-[92px] md:h-[92px] rounded-lg sm:rounded-xl overflow-hidden cursor-pointer group shrink-0 transition-all duration-200 hover:shadow-md hover:scale-[1.04] bg-slate-100 ${photo.hasIssue
                           ? "border-2 border-rose-500 ring-2 ring-rose-100"
                           : "border border-slate-200 hover:border-slate-300"
-                      }`}
+                        }`}
                       title={`${photo.caption} - ${photo.checklistQuestion}`}
                     >
                       {/* Photo Image */}
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
+                      <DecryptedImage
                         src={photo.url}
                         alt={photo.caption}
                         referrerPolicy="no-referrer"
-                        onError={(e) => handleImageError(photo.category, e)}
                         className="w-full h-full object-cover group-hover:brightness-95 transition-all"
                         loading="lazy"
                       />
@@ -527,11 +520,10 @@ export default function GaleriPage() {
                       {/* Issue Tag on Image */}
                       {photo.hasIssue && (
                         <div
-                          className={`absolute top-1 left-1/2 -translate-x-1/2 z-10 px-1.5 py-0.5 rounded text-white font-extrabold text-[7.5px] sm:text-[8px] tracking-wider uppercase flex items-center gap-0.5 shadow-xs whitespace-nowrap ${
-                            photo.issueSeverity === "Tinggi"
+                          className={`absolute top-1 left-1/2 -translate-x-1/2 z-10 px-1.5 py-0.5 rounded text-white font-extrabold text-[7.5px] sm:text-[8px] tracking-wider uppercase flex items-center gap-0.5 shadow-xs whitespace-nowrap ${photo.issueSeverity === "Tinggi"
                               ? "bg-rose-600 shadow-rose-900/30"
                               : "bg-amber-600 shadow-amber-900/30"
-                          }`}
+                            }`}
                         >
                           <AlertTriangle className="w-2 h-2 shrink-0" />
                           <span>{photo.issueSeverity === "Tinggi" ? "ISSUE · HIGH" : "ISSUE · LOW"}</span>
@@ -593,11 +585,10 @@ export default function GaleriPage() {
               <button
                 onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
                 disabled={currentPage === 1}
-                className={`w-7 h-7 flex items-center justify-center rounded-md border border-slate-200 transition-colors ${
-                  currentPage === 1
+                className={`w-7 h-7 flex items-center justify-center rounded-md border border-slate-200 transition-colors ${currentPage === 1
                     ? "text-slate-300 border-slate-100 cursor-not-allowed"
                     : "text-slate-600 hover:bg-slate-50 cursor-pointer"
-                }`}
+                  }`}
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
@@ -607,11 +598,10 @@ export default function GaleriPage() {
                 <button
                   key={page}
                   onClick={() => setCurrentPage(page)}
-                  className={`w-7 h-7 rounded-md flex items-center justify-center font-bold text-xs transition-colors cursor-pointer ${
-                    currentPage === page
+                  className={`w-7 h-7 rounded-md flex items-center justify-center font-bold text-xs transition-colors cursor-pointer ${currentPage === page
                       ? "bg-[#193f53] text-white shadow-2xs"
                       : "border border-slate-200 text-slate-600 hover:bg-slate-50"
-                  }`}
+                    }`}
                 >
                   {page}
                 </button>
@@ -621,11 +611,10 @@ export default function GaleriPage() {
               <button
                 onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
                 disabled={currentPage === totalPages}
-                className={`px-3 h-7 flex items-center justify-center rounded-md border border-slate-200 font-bold ml-1 transition-colors ${
-                  currentPage === totalPages
+                className={`px-3 h-7 flex items-center justify-center rounded-md border border-slate-200 font-bold ml-1 transition-colors ${currentPage === totalPages
                     ? "text-slate-300 border-slate-100 cursor-not-allowed"
                     : "text-slate-600 hover:bg-slate-50 cursor-pointer"
-                }`}
+                  }`}
               >
                 Selanjutnya <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
               </button>
