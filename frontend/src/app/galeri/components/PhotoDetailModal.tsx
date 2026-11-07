@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { AuditGalleryLog, AuditPhoto } from "@/types/gallery";
 import { GalleryService } from "@/services/gallery.service";
+import DecryptedImage from "@/components/DecryptedImage";
 
 interface PhotoDetailModalProps {
   isOpen: boolean;
@@ -124,12 +125,10 @@ export default function PhotoDetailModal({
             {/* Main Photo Box */}
             <div className="relative aspect-[4/3] rounded-xl overflow-hidden bg-slate-900 flex items-center justify-center shadow-xs shrink-0 max-h-[260px]">
               {/* Photo Image */}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
+              <DecryptedImage
                 src={imageSrc}
                 alt={photo.caption}
                 referrerPolicy="no-referrer"
-                onError={() => setImageError(true)}
                 className="w-full h-full object-cover transition-all"
               />
 
@@ -232,15 +231,9 @@ export default function PhotoDetailModal({
                       }`}
                       title={`${p.caption} ${p.hasIssue ? "(Temuan Issue)" : "(Sesuai)"}`}
                     >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
+                      <DecryptedImage
                         src={p.url}
                         alt={p.caption}
-                        onError={(e) => {
-                          const target = e.currentTarget;
-                          const fallback = GalleryService.getFallbackForCategory(p.category);
-                          if (target.src !== fallback) target.src = fallback;
-                        }}
                         className="w-full h-full object-cover"
                       />
                       {p.hasIssue && (

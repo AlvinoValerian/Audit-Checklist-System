@@ -203,11 +203,17 @@ export default function DetailReportModal({
                       )}
                     </div>
 
-                    {item.severity && (
-                      <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 shrink-0">
-                        {item.severity}
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1 shrink-0">
+                      {(item.priority === "High" || item.severity === "Tinggi" || item.isPhotoRequired) ? (
+                        <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
+                          Priority High
+                        </span>
+                      ) : (
+                        <span className="text-[8px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                          Priority Low
+                        </span>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

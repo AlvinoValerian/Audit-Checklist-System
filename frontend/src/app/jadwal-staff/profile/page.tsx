@@ -3,81 +3,177 @@
 import React, { useState, useEffect, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import {
-  ArrowLeft,
-  User,
-  Mail,
-  Phone,
   Store as StoreIcon,
   MapPin,
-  Clock,
+  Mail,
+  Phone,
+  Building2,
   ShieldCheck,
-  Award,
-  KeyRound,
-  FileText,
   LogOut,
-  ChevronRight,
   Smartphone,
   Maximize2,
-  Wifi,
-  Battery,
-  Signal,
   RotateCcw,
-  Sparkles,
-  Info,
+  Camera,
+  Loader2,
 } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import { AuthService, AuthUser } from "@/lib/auth";
 import StaffBottomNav from "../components/StaffBottomNav";
+import DecryptedImage from "@/components/DecryptedImage";
+import { optimizeAndResizeImage, encryptImageData } from "@/lib/image-crypto";
 
 function ProfileContent() {
   const router = useRouter();
 
-  const [currentTime, setCurrentTime] = useState<string>("09:41");
   const [isFullscreenMode, setIsFullscreenMode] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState<boolean>(false);
+  const [logoutNotice, setLogoutNotice] = useState<{ show: boolean; message: string }>({
+    show: false,
+    message: "",
+  });
 
   useEffect(() => {
     const user = AuthService.getCurrentUser();
     setCurrentUser(user);
 
-    const updateClock = () => {
-      const now = new Date();
-      const hours = String(now.getHours()).padStart(2, "0");
-      const minutes = String(now.getMinutes()).padStart(2, "0");
-      setCurrentTime(`${hours}:${minutes}`);
+    // Ambil data profil staf terbaru langsung dari database PostgreSQL secara realtime
+    const fetchLatestProfile = async () => {
+      try {
+        const token = AuthService.getToken();
+        const headers: Record<string, string> = {};
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+
+        let res = await fetch("/api/auth/me", { headers });
+        if (!res.ok) {
+          res = await fetch("http://127.0.0.1:5000/api/auth/me", { headers });
+        }
+        if (res.ok) {
+          const json = await res.json();
+          if (json.status === "success" && json.data?.user) {
+            setCurrentUser(json.data.user);
+            AuthService.setCurrentUser(json.data.user);
+          }
+        }
+      } catch (e) {
+        console.warn("Gagal memuat profil terbaru:", e);
+      }
     };
-    updateClock();
-    const timer = setInterval(updateClock, 30000);
-    return () => clearInterval(timer);
+
+    fetchLatestProfile();
   }, []);
 
   const handleLogout = () => {
+    setLogoutNotice({
+      show: true,
+      message: "Anda telah berhasil keluar dari akun. Mengalihkan...",
+    });
     AuthService.logout();
-    toast.info("Anda telah logout dari aplikasi.");
-    if (typeof window !== "undefined") {
-      window.location.href = "/login";
-    } else {
-      router.push("/login");
+    setTimeout(() => {
+      if (typeof window !== "undefined") {
+        window.location.href = "/login";
+      } else {
+        router.push("/login");
+      }
+    }, 1100);
+  };
+
+  // Handler Ganti Foto Profil: Resize -> Encrypt AES-GCM -> Simpan ke Database
+  const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setIsUploadingPhoto(true);
+      toast.loading("Memproses & mengoptimasi foto profil...", { id: "profile-upload" });
+
+      // 1. Resize dan kompresi foto proporsional (max 512x512)
+      const optimizedBase64 = await optimizeAndResizeImage(file, 512, 512, 0.85);
+
+      // 2. Enkripsi foto profil menggunakan AES-256-GCM
+      const encryptedPhoto = await encryptImageData(optimizedBase64);
+
+      // 3. Simpan ke database PostgreSQL via endpoint API
+      const token = AuthService.getToken();
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      if (currentUser?.id) headers["x-user-id"] = currentUser.id;
+      if (currentUser?.email) headers["x-user-email"] = currentUser.email;
+
+      let res = await fetch("/api/auth/profile", {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({
+          profilePicture: encryptedPhoto,
+        }),
+      });
+
+      if (!res.ok) {
+        res = await fetch("http://127.0.0.1:5000/api/auth/profile", {
+          method: "PUT",
+          headers,
+          body: JSON.stringify({
+            profilePicture: encryptedPhoto,
+          }),
+        });
+      }
+
+      if (res.ok) {
+        const json = await res.json();
+        const updatedUser = {
+          ...currentUser!,
+          profilePicture: encryptedPhoto,
+        };
+        setCurrentUser(updatedUser);
+        AuthService.setCurrentUser(updatedUser);
+        toast.success("Foto profil berhasil diperbarui & dienkripsi dengan aman!", { id: "profile-upload" });
+      } else {
+        const errJson = await res.json().catch(() => null);
+        toast.error(errJson?.message || "Gagal memperbarui foto profil ke server.", { id: "profile-upload" });
+      }
+    } catch (err: any) {
+      console.error("Error updating profile photo:", err);
+      toast.error("Terjadi kesalahan saat memproses foto profil.", { id: "profile-upload" });
+    } finally {
+      setIsUploadingPhoto(false);
+      e.target.value = "";
     }
   };
 
-  const displayName = currentUser?.fullName || "Staf Lapangan";
-  const displayEmail = currentUser?.email || "staff@gacoan.com";
-  const displayPhone = currentUser?.phone || "-";
-  const displayStore = currentUser?.storeName || "Mie Gacoan";
-  const displayLocation = currentUser?.storeLocation || "Malang";
-  const displayStoreCode = currentUser?.storeCode || "ST-01";
-  const displayRole = currentUser?.position || "Auditor Lapangan";
+  // Data murni dari akun & database PostgreSQL (Hapus semua data statis)
+  const displayName = currentUser?.fullName || "Memuat...";
+  const displayRole =
+    currentUser?.position ||
+    (currentUser?.role === "Staff" ? "Auditor Lapangan" : currentUser?.role) ||
+    "Auditor Lapangan";
+  const displayEmail = currentUser?.email || "-";
+  const displayPhone = currentUser?.phone && currentUser.phone !== "-" ? currentUser.phone : "-";
+  const displayStore = currentUser?.storeName || "Belum Ditugaskan";
+  const displayStoreCode = currentUser?.storeCode || "-";
+  const displayAddress =
+    currentUser?.storeAddress && currentUser.storeAddress !== "-"
+      ? currentUser.storeAddress
+      : "Alamat gerai belum diatur di database";
+  const displayWorkspace = currentUser?.workspaceName || "Mie Gacoan";
+
+  const getInitials = (name: string) => {
+    if (!name || name === "Memuat...") return "ST";
+    const parts = name.trim().split(" ");
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  };
 
   return (
-    <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center sm:py-6 p-0 sm:px-4 font-sans select-none antialiased">
+    <div className="fixed inset-0 flex flex-col overflow-hidden bg-[#f4f6fc] sm:relative sm:inset-auto sm:min-h-screen sm:bg-[#f3f4fa] sm:flex sm:items-center sm:justify-center sm:py-6 sm:px-4 font-sans antialiased">
       <Toaster position="top-center" richColors />
 
       {/* Floating Mode Toggle untuk Layar Laptop / Desktop */}
       <div className="hidden sm:flex items-center gap-2 mb-3 bg-slate-800/80 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-slate-700/60 shadow-lg z-30">
         <Smartphone className="w-4 h-4 text-emerald-400" />
         <span className="text-xs font-medium text-slate-300">
-          Profil Staff (Mobile View)
+          Profil Pengguna (Tampilan Mobile HP)
         </span>
         <button
           onClick={() => setIsFullscreenMode(!isFullscreenMode)}
@@ -90,203 +186,203 @@ function ProfileContent() {
 
       {/* Smartphone Device Frame Container */}
       <div
-        className={`w-full bg-[#f8fbff] text-slate-900 transition-all duration-300 relative flex flex-col ${
+        className={`w-full h-full flex flex-col bg-[#f4f6fc] text-slate-900 transition-all duration-300 relative ${
           isFullscreenMode
-            ? "max-w-md min-h-screen sm:rounded-none sm:shadow-none"
-            : "max-w-[420px] min-h-[844px] sm:max-h-[92vh] sm:rounded-[42px] sm:shadow-[0_25px_60px_-15px_rgba(0,0,0,0.6)] sm:border-[9px] sm:border-slate-800 sm:ring-1 sm:ring-white/10 overflow-hidden"
+            ? "max-w-md sm:rounded-none sm:shadow-none sm:h-screen"
+            : "sm:h-[844px] sm:max-h-[92vh] sm:max-w-[420px] sm:rounded-[42px] sm:shadow-[0_25px_60px_-15px_rgba(0,0,0,0.5)] sm:border-[9px] sm:border-slate-800 sm:ring-1 sm:ring-white/10 overflow-hidden"
         }`}
       >
         {/* Dynamic Island / Speaker Pill on Desktop Frame */}
         <div className="hidden sm:block absolute top-2 left-1/2 -translate-x-1/2 w-28 h-4 bg-slate-900 rounded-full z-40 pointer-events-none" />
 
-        {/* 1. Mobile Status Bar */}
-        <div className="pt-3 px-6 pb-1 flex items-center justify-between text-slate-900 font-semibold text-xs tracking-tight z-20 shrink-0 select-none bg-white/70 backdrop-blur-md border-b border-slate-100/50">
-          <span className="text-sm font-bold tracking-tight">{currentTime}</span>
-          <div className="flex items-center gap-1.5 text-slate-800">
-            <Signal className="w-3.5 h-3.5 stroke-[2.2]" />
-            <Wifi className="w-3.5 h-3.5 stroke-[2.2]" />
-            <Battery className="w-4 h-4 stroke-[2.2]" />
+        {/* NOTIFIKASI LOGOUT DI DALAM LAYAR HP */}
+        <div
+          className={`absolute top-3 inset-x-3 z-50 transition-all duration-300 ease-out transform pointer-events-none ${
+            logoutNotice.show
+              ? "translate-y-0 opacity-100 scale-100 pointer-events-auto"
+              : "-translate-y-16 opacity-0 scale-95"
+          }`}
+        >
+          <div className="bg-white/95 backdrop-blur-md border border-rose-200/90 rounded-2xl p-3.5 shadow-[0_10px_30px_-5px_rgba(225,29,72,0.25)] flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-rose-50 border border-rose-100 flex items-center justify-center shrink-0 text-rose-600">
+              <LogOut className="w-4 h-4 stroke-[2.3]" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h4 className="text-xs font-bold text-slate-900 leading-tight">
+                Berhasil Logout
+              </h4>
+              <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+                {logoutNotice.message}
+              </p>
+            </div>
           </div>
         </div>
 
-        {/* 2. Top Header Bar */}
-        <div className="px-4 py-2.5 bg-white border-b border-slate-100 flex items-center justify-between gap-2 shrink-0">
-          <button
-            onClick={() => router.push("/jadwal-staff")}
-            className="w-9 h-9 rounded-xl hover:bg-slate-100 text-slate-700 flex items-center justify-center transition-colors cursor-pointer shrink-0"
-            aria-label="Kembali"
-          >
-            <ArrowLeft className="w-5 h-5 stroke-[2.2]" />
-          </button>
-
-          <h1 className="text-base font-bold text-slate-900 flex-1 px-1">
-            Profil Saya
+        {/* 2. Top Header Bar (Profil Pengguna) */}
+        <div className="px-6 pt-3.5 sm:pt-4 pb-3 bg-transparent flex items-center justify-between shrink-0">
+          <h1 className="text-lg sm:text-[20px] font-bold text-slate-900 tracking-tight">
+            Profil Pengguna
           </h1>
-
-          <div className="w-8 h-8 rounded-full bg-blue-50 text-[#193f53] flex items-center justify-center shrink-0">
-            <ShieldCheck className="w-4 h-4 text-[#193f53]" />
-          </div>
         </div>
 
-        {/* Scrollable Body */}
-        <div className="flex-1 overflow-y-auto px-4 py-3.5 space-y-3.5">
-          {/* 3. User Identity Card */}
-          <div className="bg-white rounded-3xl p-5 border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.03)] text-center relative overflow-hidden">
-            <div className="absolute top-0 left-0 right-0 h-2 bg-[#193f53]" />
-
-            <div className="relative inline-block mt-2">
-              <div className="w-20 h-20 rounded-full overflow-hidden border-2 border-slate-200 mx-auto shadow-sm">
-                <img
-                  src="https://images.unsplash.com/photo-1595278069441-2cf29f8005a4?w=400&fit=crop"
-                  alt="Avatar"
-                  className="w-full h-full object-cover"
-                />
+        {/* Scrollable Body Content */}
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 pt-1 pb-6 space-y-4">
+          {/* 3. User Identity Card (Nama + Posisi Auditor Lapangan sesuai database) */}
+          <div className="bg-white rounded-3xl p-5 border border-slate-100/90 shadow-[0_2px_10px_rgba(0,0,0,0.02)] flex items-center gap-4">
+            {/* Avatar Lingkaran dengan Fitur Ganti Foto (Resize & AES-GCM Encrypted) */}
+            <div className="relative shrink-0">
+              <div className="w-16 h-16 rounded-full bg-[#eff4ff] text-[#193f53] flex items-center justify-center font-bold text-lg border border-blue-100/80 shadow-2xs overflow-hidden relative">
+                {currentUser?.profilePicture ? (
+                  <DecryptedImage
+                    src={currentUser.profilePicture}
+                    alt={displayName}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <span>{getInitials(displayName)}</span>
+                )}
               </div>
-              <span className="w-4 h-4 bg-emerald-500 rounded-full border-2 border-white absolute bottom-0 right-1 shadow-xs" />
+
+              {/* Status Online Dot */}
+              <span className="w-3.5 h-3.5 bg-emerald-500 rounded-full border-2 border-white absolute top-0 right-0 shadow-2xs" />
+
+              {/* Tombol Kamera Ganti Foto Profil */}
+              <label
+                htmlFor="profile-photo-upload"
+                className={`w-6 h-6 bg-[#193f53] hover:bg-[#122f3e] text-white rounded-full border-2 border-white absolute -bottom-1 -right-1 flex items-center justify-center shadow-md cursor-pointer transition-transform active:scale-90 ${
+                  isUploadingPhoto ? "opacity-75 pointer-events-none" : ""
+                }`}
+                title="Ganti Foto Profil"
+              >
+                {isUploadingPhoto ? (
+                  <Loader2 className="w-3 h-3 animate-spin text-white" />
+                ) : (
+                  <Camera className="w-3 h-3" />
+                )}
+              </label>
+              <input
+                id="profile-photo-upload"
+                type="file"
+                accept="image/*"
+                className="hidden"
+                disabled={isUploadingPhoto}
+                onChange={handlePhotoChange}
+              />
             </div>
 
-            <h2 className="text-lg font-bold text-slate-900 mt-2 leading-tight">
-              {displayName}
-            </h2>
-            <p className="text-xs font-semibold text-slate-500 mt-0.5">
-              {displayRole} • ID: {currentUser?.id || "staff-01"}
-            </p>
-
-            <div className="flex items-center justify-center gap-1.5 mt-2.5">
-              <span className="px-2.5 py-0.5 bg-blue-50 text-[#193f53] border border-blue-100 text-[10px] font-bold rounded-full">
-                {currentUser?.role || "Staff Lapangan"}
-              </span>
-              <span className="px-2.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-semibold rounded-full">
-                Aktif Bertugas
-              </span>
-            </div>
-
-            {/* Contact Details */}
-            <div className="mt-4 pt-3 border-t border-slate-100 text-xs space-y-1.5 text-left text-slate-600">
-              <div className="flex items-center gap-2">
-                <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                <span className="truncate">{displayEmail}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                <span>{displayPhone}</span>
-              </div>
+            {/* Nama & Posisi Auditor Lapangan */}
+            <div className="min-w-0 flex-1">
+              <h2 className="text-base sm:text-[17px] font-bold text-slate-900 leading-snug truncate">
+                {displayName}
+              </h2>
+              <p className="text-xs font-semibold text-slate-500 mt-0.5 truncate">
+                {displayRole}
+              </p>
+              <p className="text-[11px] text-blue-600 font-medium mt-0.5">
+                Ketuk ikon kamera untuk ubah foto
+              </p>
             </div>
           </div>
 
-          {/* 4. Store Assignment Card */}
-          <div className="bg-white rounded-2xl p-4 border border-slate-100 shadow-2xs space-y-2.5 text-xs">
-            <h3 className="font-bold text-xs uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-              <StoreIcon className="w-3.5 h-3.5 text-slate-500" />
-              <span>Penugasan Gerai</span>
-            </h3>
-
-            <div className="space-y-2 pt-0.5">
-              <div className="flex items-start justify-between gap-2">
-                <span className="text-slate-500">Outlet Aktif:</span>
-                <span className="font-bold text-slate-900 text-right truncate">
-                  {displayStore} — {displayLocation}
-                </span>
+          {/* 4. Card Outlet Tugas & Alamat Lengkap (Tampil Penuh, Tidak Kepotong) */}
+          <div className="bg-white rounded-3xl p-5 border border-slate-100/90 shadow-[0_2px_10px_rgba(0,0,0,0.02)] space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-blue-50 text-[#193f53] flex items-center justify-center shrink-0">
+                  <StoreIcon className="w-4 h-4 stroke-[2]" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-medium text-slate-400 uppercase tracking-wider leading-none">
+                    Outlet Penugasan
+                  </p>
+                  <h3 className="text-sm font-bold text-slate-900 leading-snug mt-0.5">
+                    {displayStore}
+                  </h3>
+                </div>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-500">Kode Store:</span>
-                <span className="font-mono font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded text-[11px]">
+              {displayStoreCode !== "-" && (
+                <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
                   {displayStoreCode}
                 </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-500">Shift Kerja:</span>
-                <span className="font-semibold text-emerald-600">
-                  Operasional Gerai (Shift Terjadwal)
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-500">Supervisor:</span>
-                <span className="font-semibold text-slate-800">
-                  Store Manager Cabang
-                </span>
+              )}
+            </div>
+
+            {/* Alamat Lengkap Outlet di Bawahnya (Tanpa Terpotong) */}
+            <div className="p-3 bg-[#f8fafc] rounded-2xl border border-slate-100/90 flex items-start gap-2.5">
+              <MapPin className="w-4 h-4 text-[#193f53] shrink-0 mt-0.5" />
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] font-medium text-slate-400 leading-none">
+                  Alamat Lengkap Gerai
+                </p>
+                <p className="text-xs font-medium text-slate-700 leading-relaxed mt-1 break-words">
+                  {displayAddress}
+                </p>
               </div>
             </div>
           </div>
 
-          {/* 5. Performance Stats Summary */}
-          <div className="grid grid-cols-2 gap-2 text-center text-xs">
-            <div className="bg-white rounded-2xl p-3 border border-slate-100 shadow-2xs">
-              <Award className="w-5 h-5 text-amber-500 mx-auto mb-1" />
-              <span className="text-[10px] text-slate-400 font-semibold uppercase block">
-                Total Audit Selesai
-              </span>
-              <span className="text-base font-bold text-slate-900 block mt-0.5">
-                78 Laporan
+          {/* 5. Card Informasi Kontak & Penugasan Staf (Realtime Dari Database) */}
+          <div className="bg-white rounded-3xl p-5 border border-slate-100/90 shadow-[0_2px_10px_rgba(0,0,0,0.02)] space-y-3.5 divide-y divide-slate-100">
+            {/* Email Staf */}
+            <div className="flex items-center justify-between pt-0 text-xs">
+              <div className="flex items-center gap-2.5 text-slate-500">
+                <Mail className="w-4 h-4 text-slate-400 shrink-0" />
+                <span className="font-medium text-[11px]">Email Akun</span>
+              </div>
+              <span className="font-semibold text-slate-800 text-xs truncate max-w-[190px]">
+                {displayEmail}
               </span>
             </div>
-            <div className="bg-white rounded-2xl p-3 border border-slate-100 shadow-2xs">
-              <ShieldCheck className="w-5 h-5 text-emerald-500 mx-auto mb-1" />
-              <span className="text-[10px] text-slate-400 font-semibold uppercase block">
-                Kepatuhan SOP
+
+            {/* Nomor Telepon */}
+            <div className="flex items-center justify-between pt-3.5 text-xs">
+              <div className="flex items-center gap-2.5 text-slate-500">
+                <Phone className="w-4 h-4 text-slate-400 shrink-0" />
+                <span className="font-medium text-[11px]">Nomor Telepon</span>
+              </div>
+              <span className="font-semibold text-slate-800 text-xs">
+                {displayPhone}
               </span>
-              <span className="text-base font-bold text-emerald-600 block mt-0.5">
-                99.2%
+            </div>
+
+            {/* Perusahaan / Workspace */}
+            <div className="flex items-center justify-between pt-3.5 text-xs">
+              <div className="flex items-center gap-2.5 text-slate-500">
+                <Building2 className="w-4 h-4 text-slate-400 shrink-0" />
+                <span className="font-medium text-[11px]">Perusahaan / Brand</span>
+              </div>
+              <span className="font-semibold text-slate-800 text-xs truncate max-w-[170px]">
+                {displayWorkspace}
               </span>
+            </div>
+
+            {/* Status Penugasan */}
+            <div className="flex items-center justify-between pt-3.5 text-xs">
+              <div className="flex items-center gap-2.5 text-slate-500">
+                <ShieldCheck className="w-4 h-4 text-slate-400 shrink-0" />
+                <span className="font-medium text-[11px]">Status Akun</span>
+              </div>
+              <div className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200/80 rounded-full text-[10px] font-bold flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span>Aktif Bertugas</span>
+              </div>
             </div>
           </div>
 
-          {/* 6. Settings & Quick Menus */}
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-2xs overflow-hidden text-xs">
-            <button
-              onClick={() => toast.info("Fitur ubah kata sandi dapat diajukan ke Admin Workspace.")}
-              className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 border-b border-slate-50 transition-colors cursor-pointer text-left"
-            >
-              <div className="flex items-center gap-2.5 font-medium text-slate-800">
-                <KeyRound className="w-4 h-4 text-slate-400" />
-                <span>Keamanan & Kata Sandi</span>
-              </div>
-              <ChevronRight className="w-4 h-4 text-slate-400" />
-            </button>
-
-            <button
-              onClick={() => toast.info("Sinkronisasi otomatis aktif dengan cache offline.")}
-              className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 border-b border-slate-50 transition-colors cursor-pointer text-left"
-            >
-              <div className="flex items-center gap-2.5 font-medium text-slate-800">
-                <Smartphone className="w-4 h-4 text-slate-400" />
-                <span>Mode Offline & Sinkronisasi Draf</span>
-              </div>
-              <span className="text-[10px] bg-emerald-50 text-emerald-700 font-semibold px-2 py-0.5 rounded-full">
-                Aktif
-              </span>
-            </button>
-
-            <button
-              onClick={() => toast.info("Panduan SOP resmi terhubung dengan Store Ops Portal V3.3.")}
-              className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 transition-colors cursor-pointer text-left"
-            >
-              <div className="flex items-center gap-2.5 font-medium text-slate-800">
-                <FileText className="w-4 h-4 text-slate-400" />
-                <span>Panduan SOP Operasional Barista</span>
-              </div>
-              <ChevronRight className="w-4 h-4 text-slate-400" />
-            </button>
-          </div>
-
-          {/* 7. Logout Button */}
-          <div className="pt-1 pb-2">
+          {/* 6. Tombol Keluar dari Akun */}
+          <div className="pt-2">
             <button
               onClick={handleLogout}
-              className="w-full py-3 px-4 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 font-bold text-xs sm:text-sm rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer shadow-2xs active:scale-[0.98]"
+              className="w-full py-3.5 px-4 bg-[#fff1f0] hover:bg-[#ffe4e1] border border-[#ffdcd9] text-[#c2410c] font-semibold text-sm rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-[0.98] cursor-pointer shadow-2xs"
             >
-              <LogOut className="w-4 h-4" />
-              <span>Keluar dari Akun (Logout)</span>
+              <LogOut className="w-4 h-4 stroke-[2.2]" />
+              <span>Keluar dari Akun</span>
             </button>
-
-            <p className="text-[10px] text-slate-400 text-center font-mono mt-3 uppercase tracking-wider">
-              OPS FIELD SYSTEM V3.3 • STORE #{displayStoreCode}
-            </p>
           </div>
         </div>
 
-        {/* 8. Bottom Navigation Bar */}
-        <StaffBottomNav activeTab="profile" />
+        {/* 7. Bottom Navigation Bar (Checklist, Riwayat, Profile Aktif) */}
+        <StaffBottomNav activeTab="profile" showIssues={false} />
       </div>
     </div>
   );
@@ -296,10 +392,10 @@ export default function ProfilePage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">
-          <div className="flex items-center gap-2 text-sm">
-            <RotateCcw className="w-4 h-4 animate-spin text-blue-400" />
-            <span>Memuat profil staff...</span>
+        <div className="min-h-screen bg-[#f3f4fa] flex items-center justify-center text-slate-800">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <RotateCcw className="w-4 h-4 animate-spin text-[#193f53]" />
+            <span>Memuat profil pengguna...</span>
           </div>
         </div>
       }

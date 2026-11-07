@@ -63,11 +63,62 @@ const getDayNameOffset = (offsetDays: number = 0) => {
 };
 
 /**
+ * Konversi string waktu format apapun (termasuk jika ada AM/PM) menjadi format 24 jam "HH:mm"
+ */
+export const to24HourString = (str?: string): string => {
+  if (!str) return "09:00";
+  const s = String(str).trim();
+  const match = s.match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?$/i);
+  if (!match) return s.substring(0, 5);
+  let h = parseInt(match[1], 10);
+  const m = match[2];
+  const ampm = match[3] ? match[3].toUpperCase() : null;
+  if (ampm === "PM" && h < 12) h += 12;
+  if (ampm === "AM" && h === 12) h = 0;
+  return `${String(h).padStart(2, "0")}:${m}`;
+};
+
+/**
+ * Hitung durasi jam dan menit dari jam awal dan jam berakhir
+ */
+export const calculateDuration = (
+  startStr?: string,
+  endStr?: string,
+  timeRange?: string
+): string => {
+  let s = startStr;
+  let e = endStr;
+  if ((!s || !e) && timeRange) {
+    const parts = timeRange.replace(/WIB/gi, "").split("-");
+    if (parts.length >= 2) {
+      if (!s) s = parts[0].trim();
+      if (!e) e = parts[1].trim();
+    }
+  }
+  const cleanStart = to24HourString(s);
+  const cleanEnd = to24HourString(e);
+  const [sH, sM] = cleanStart.split(":").map((v) => parseInt(v, 10));
+  const [eH, eM] = cleanEnd.split(":").map((v) => parseInt(v, 10));
+  if (isNaN(sH) || isNaN(eH)) return "0 Jam";
+
+  let startMin = sH * 60 + (isNaN(sM) ? 0 : sM);
+  let endMin = eH * 60 + (isNaN(eM) ? 0 : eM);
+  if (endMin < startMin) endMin += 24 * 60;
+  const diff = endMin - startMin;
+  const hours = Math.floor(diff / 60);
+  const minutes = diff % 60;
+
+  if (minutes === 0) return `${hours} Jam`;
+  if (hours === 0) return `${minutes} Menit`;
+  return `${hours} Jam ${minutes} Menit`;
+};
+
+/**
  * Resolves the realtime status of a schedule:
  * - If cancelled ("Dibatalkan"), it remains "Dibatalkan".
- * - If past date (< today), it becomes "Selesai".
- * - If future date (> today), it is "Terjadwal".
- * - If today: if current time (now) has passed endTime, it automatically becomes "Selesai".
+ * - If completed by staff ("Selesai"), it is "Selesai".
+ * - If not yet completed by staff, and time has reached/passed startTime (even past endTime), it is "Sedang Berjalan".
+ * - If before startTime, it is "Terjadwal".
  */
 export const resolveScheduleStatus = (
   schedule: AuditSchedule,
@@ -77,6 +128,11 @@ export const resolveScheduleStatus = (
     return "Dibatalkan";
   }
 
+  // Cek apakah sudah dikerjakan oleh staff langsung dari database
+  if (schedule.isCompletedByStaff) {
+    return "Selesai";
+  }
+
   const y = now.getFullYear();
   const m = String(now.getMonth() + 1).padStart(2, "0");
   const d = String(now.getDate()).padStart(2, "0");
@@ -84,6 +140,11 @@ export const resolveScheduleStatus = (
   const dayOfWeekShort = DAY_NAMES_SHORT[now.getDay()];
 
   const scheduleDateStr = schedule.date || todayStr;
+
+  // Jika tanggal jadwal lampau (< today) dan bukan pengulangan berulang, maka sudah selesai:
+  if (scheduleDateStr < todayStr && schedule.recurrence !== "Setiap Hari" && schedule.recurrence !== "Hari Tertentu") {
+    return "Selesai";
+  }
 
   // Cek apakah jadwal ini aktif/berlaku pada hari ini (today):
   const runsToday =
@@ -94,32 +155,65 @@ export const resolveScheduleStatus = (
       schedule.selectedDays.includes(dayOfWeekShort));
 
   if (runsToday) {
-    let endTimeStr = schedule.endTime;
-    if (!endTimeStr && schedule.timeRange) {
-      const parts = schedule.timeRange.split("-");
-      if (parts.length > 1) {
-        endTimeStr = parts[1].trim();
+    let startStr = schedule.startTime;
+    let endStr = schedule.endTime;
+    if ((!startStr || !endStr) && schedule.timeRange) {
+      const parts = schedule.timeRange.replace(/WIB/gi, "").split("-");
+      if (parts.length >= 2) {
+        if (!startStr) startStr = parts[0].trim();
+        if (!endStr) endStr = parts[1].trim();
       }
     }
 
-    if (endTimeStr) {
-      const timeParts = endTimeStr.split(":");
-      if (timeParts.length >= 2) {
-        const endH = parseInt(timeParts[0], 10);
-        const endM = parseInt(timeParts[1], 10);
-        if (!isNaN(endH) && !isNaN(endM)) {
-          const scheduleEnd = new Date(
-            now.getFullYear(),
-            now.getMonth(),
-            now.getDate(),
-            endH,
-            endM,
-            0,
-            0
-          );
-          // Jika waktu saat ini sudah melebihi jam selesai jadwal:
-          if (now.getTime() >= scheduleEnd.getTime()) {
-            return "Selesai";
+    if (startStr && endStr) {
+      const cleanStart = to24HourString(startStr);
+      const cleanEnd = to24HourString(endStr);
+      const sParts = cleanStart.split(":");
+      const eParts = cleanEnd.split(":");
+      if (sParts.length >= 2 && eParts.length >= 2) {
+        const startH = parseInt(sParts[0], 10);
+        const startM = parseInt(sParts[1], 10);
+        const endH = parseInt(eParts[0], 10);
+        const endM = parseInt(eParts[1], 10);
+
+        if (!isNaN(startH) && !isNaN(endH)) {
+          const currentMinutes = now.getHours() * 60 + now.getMinutes();
+          const startMinutes = startH * 60 + (isNaN(startM) ? 0 : startM);
+          const endMinutes = endH * 60 + (isNaN(endM) ? 0 : endM);
+
+          if (endMinutes >= startMinutes) {
+            // Normal shift dalam hari yang sama (misal 09:00 - 12:00)
+            if (currentMinutes < startMinutes) {
+              return "Terjadwal";
+            } else if (currentMinutes <= endMinutes) {
+              return "Sedang Berjalan";
+            } else {
+              // Jam akhir sudah selesai / terlewati jam sekarang!
+              return "Selesai";
+            }
+          } else {
+            // Shift malam lintas hari (misal 22:00 - 02:00)
+            if (currentMinutes >= startMinutes || currentMinutes <= endMinutes) {
+              return "Sedang Berjalan";
+            } else {
+              return "Terjadwal";
+            }
+          }
+        }
+      }
+    } else if (startStr) {
+      const cleanStart = to24HourString(startStr);
+      const sParts = cleanStart.split(":");
+      if (sParts.length >= 2) {
+        const startH = parseInt(sParts[0], 10);
+        const startM = parseInt(sParts[1], 10);
+        if (!isNaN(startH)) {
+          const currentMinutes = now.getHours() * 60 + now.getMinutes();
+          const startMinutes = startH * 60 + (isNaN(startM) ? 0 : startM);
+          if (currentMinutes < startMinutes) {
+            return "Terjadwal";
+          } else {
+            return "Sedang Berjalan";
           }
         }
       }
@@ -127,7 +221,7 @@ export const resolveScheduleStatus = (
     return "Terjadwal";
   }
 
-  // Jika bukan hari ini:
+  // Jika tanggal lampau (< today):
   if (scheduleDateStr < todayStr) {
     return "Selesai";
   }
@@ -137,60 +231,12 @@ export const resolveScheduleStatus = (
 
 /**
  * Helper: Cek apakah suatu jadwal sedang berjalan saat ini
- * (bertepatan pada hari pelaksanaan dan sedang berada di dalam rentang jam audit)
  */
 export const isScheduleInProgress = (
   schedule: AuditSchedule,
   now: Date = new Date()
 ): boolean => {
-  if (schedule.status === "Dibatalkan" || schedule.status === "Selesai") {
-    return false;
-  }
-
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  const todayStr = `${y}-${m}-${d}`;
-  const dayOfWeekShort = DAY_NAMES_SHORT[now.getDay()];
-
-  const scheduleDateStr = schedule.date || todayStr;
-
-  // Cek apakah jadwal berlangsung hari ini
-  const runsToday =
-    scheduleDateStr === todayStr ||
-    schedule.recurrence === "Setiap Hari" ||
-    (schedule.recurrence === "Hari Tertentu" &&
-      Array.isArray(schedule.selectedDays) &&
-      schedule.selectedDays.includes(dayOfWeekShort));
-
-  if (!runsToday) return false;
-
-  let startStr = schedule.startTime;
-  let endStr = schedule.endTime;
-
-  if ((!startStr || !endStr) && schedule.timeRange) {
-    const parts = schedule.timeRange.split("-").map((p) => p.trim());
-    if (parts.length >= 2) {
-      if (!startStr) startStr = parts[0];
-      if (!endStr) endStr = parts[1];
-    }
-  }
-
-  if (!startStr || !endStr) return false;
-
-  const currentH = now.getHours();
-  const currentM = now.getMinutes();
-  const currentMinutes = currentH * 60 + currentM;
-
-  const [sH, sM] = startStr.split(":").map((v) => parseInt(v, 10));
-  const [eH, eM] = endStr.split(":").map((v) => parseInt(v, 10));
-
-  if (isNaN(sH) || isNaN(eH)) return false;
-
-  const startMinutes = sH * 60 + (isNaN(sM) ? 0 : sM);
-  const endMinutes = eH * 60 + (isNaN(eM) ? 0 : eM);
-
-  return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
+  return resolveScheduleStatus(schedule, now) === "Sedang Berjalan";
 };
 
 /**
@@ -473,11 +519,16 @@ export const ScheduleService = {
 
       const json = await res.json();
       if (json.status === "success" && Array.isArray(json.data)) {
-        this.cachedSchedules = json.data;
+        const now = new Date();
+        const mapped = json.data.map((item: AuditSchedule) => ({
+          ...item,
+          status: resolveScheduleStatus(item, now),
+        }));
+        this.cachedSchedules = mapped;
         if (typeof window !== "undefined") {
-          localStorage.setItem(SCHEDULE_STORAGE_KEY, JSON.stringify(json.data));
+          localStorage.setItem(SCHEDULE_STORAGE_KEY, JSON.stringify(mapped));
         }
-        return json.data;
+        return mapped;
       }
       return [];
     } catch (err) {
@@ -744,11 +795,11 @@ export const ScheduleService = {
   getStats(schedules?: AuditSchedule[]): ScheduleStats {
     const list = schedules || this.getAll();
     const total = list.length;
-    const active = list.filter((s) => s.status === "Terjadwal" || s.status === "Selesai").length;
+    const active = list.filter((s) => s.status === "Terjadwal" || s.status === "Sedang Berjalan" || s.status === "Selesai").length;
     const inactive = list.filter((s) => s.status === "Dibatalkan").length;
     const activePercentage = total > 0 ? Math.round((active / total) * 100) : 0;
     const completed = list.filter((s) => s.status === "Selesai").length;
-    const scheduled = list.filter((s) => s.status === "Terjadwal").length;
+    const scheduled = list.filter((s) => s.status === "Terjadwal" || s.status === "Sedang Berjalan").length;
     const cancelled = list.filter((s) => s.status === "Dibatalkan").length;
 
     return {

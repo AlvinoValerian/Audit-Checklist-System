@@ -12,7 +12,7 @@ import {
   Pencil,
 } from "lucide-react";
 import { AuditSchedule } from "@/types/schedule";
-import { isScheduleInProgress } from "@/services/schedule.service";
+import { isScheduleInProgress, to24HourString, calculateDuration } from "@/services/schedule.service";
 
 interface DetailScheduleProps {
   schedule: AuditSchedule;
@@ -65,14 +65,14 @@ export default function DetailSchedule({
       : [];
 
   // Time formatting
-  const startTime = schedule.startTime || "09:00";
-  const endTime = schedule.endTime || "12:00";
+  const startTime = to24HourString(schedule.startTime || "09:00");
+  const endTime = to24HourString(schedule.endTime || "12:00");
   const timeDisplay = `${startTime} - ${endTime} WIB`;
 
   // Calculate duration
   const startHour = parseInt(startTime.split(":")[0], 10) || 9;
   const endHour = parseInt(endTime.split(":")[0], 10) || 12;
-  const durationHours = Math.max(1, endHour - startHour);
+  const durationText = schedule.duration || calculateDuration(startTime, endTime, schedule.timeRange);
 
   // Notes
   const displayNotes =
@@ -124,11 +124,21 @@ export default function DetailSchedule({
 
         {/* Content Body */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5 bg-white">
-          {isScheduleInProgress(schedule) && (
+          {schedule.status === "Sedang Berjalan" && (
             <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs flex items-center gap-2.5">
               <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping shrink-0" />
               <span className="font-medium">
-                <strong>Audit Sedang Berlangsung:</strong> Jadwal audit ini sedang berjalan pada jam dan hari ini ({schedule.timeRange || ""}). Jadwal tidak dapat diedit selama audit berlangsung demi integritas data.
+                <strong>Audit Sedang Berjalan:</strong> Jadwal audit ini sedang berjalan atau belum diselesaikan oleh staf ({timeDisplay}).
+              </span>
+            </div>
+          )}
+          {schedule.status === "Selesai" && (
+            <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2.5">
+              <div className="w-4 h-4 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0 text-[10px] font-bold">
+                ✓
+              </div>
+              <span className="font-medium">
+                <strong>Audit Selesai:</strong> Tugas audit ini telah berhasil dikerjakan dan diselesaikan oleh staf.
               </span>
             </div>
           )}
@@ -221,7 +231,7 @@ export default function DetailSchedule({
                 </div>
               </div>
               <div className="px-3 py-1 bg-sky-50 text-sky-600 border border-sky-100 rounded-full text-[11px] font-semibold shrink-0">
-                Durasi: {durationHours} jam
+                Durasi: {durationText}
               </div>
             </div>
           </div>

@@ -8,11 +8,17 @@ router.get('/', staffController.getAllStaff);
 // GET /api/staff/my-schedules - Ambil jadwal audit harian staff (Mobile UI)
 router.get('/my-schedules', staffController.getMySchedules);
 
+// GET /api/staff/history - Ambil riwayat audit checklist staff realtime dari database
+router.get('/history', staffController.getMyHistory);
+
 // GET /api/staff/schedules/:id - Ambil detail jadwal & butir pertanyaan checklist
 router.get('/schedules/:id', staffController.getStaffScheduleDetail);
 
 // POST /api/staff/schedules/:id/submit - Serahkan laporan audit checklist staf
 router.post('/schedules/:id/submit', staffController.submitStaffAudit);
+
+// GET /api/staff/reports/:id - Ambil detail laporan audit checklist yang telah diserahkan
+router.get('/reports/:id', staffController.getReportDetail);
 
 // GET /api/staff/:id - Ambil detail staf
 router.get('/:id', staffController.getStaffById);

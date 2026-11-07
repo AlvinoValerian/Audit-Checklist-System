@@ -1,16 +1,15 @@
 const prisma = require('../config/prisma');
 const { extractUser } = require('../middlewares/auth.middleware');
+const { decryptImageData } = require('../utils/imageCrypto');
 const { decryptImage, isEncrypted } = require('../utils/crypto.utils');
 
 /**
- * Helper untuk dekripsi attachment URL yang tersimpan dalam format bytes/encrypted
+ * Helper untuk dekripsi attachment URL yang tersimpan dalam format bytes/encrypted (ENC:v1 atau enc:v1)
  */
 const decryptAttachmentUrl = (file_url) => {
   if (!file_url) return '';
   let raw = '';
-  if (Buffer.isBuffer(file_url)) {
-    raw = file_url.toString('utf-8');
-  } else if (file_url instanceof Uint8Array || Array.isArray(file_url)) {
+  if (Buffer.isBuffer(file_url) || file_url instanceof Uint8Array || Array.isArray(file_url)) {
     raw = Buffer.from(file_url).toString('utf-8');
   } else if (typeof file_url === 'string') {
     if (/^\d+(,\d+)+$/.test(file_url)) {
@@ -19,11 +18,52 @@ const decryptAttachmentUrl = (file_url) => {
     } else {
       raw = file_url;
     }
-  } else if (file_url.data && Array.isArray(file_url.data)) {
+  } else if (file_url.data && (Array.isArray(file_url.data) || Buffer.isBuffer(file_url.data))) {
     raw = Buffer.from(file_url.data).toString('utf-8');
   }
 
-  return isEncrypted(raw) ? decryptImage(raw) : raw;
+  if (!raw || typeof raw !== 'string') return '';
+  raw = raw.trim();
+
+  if (raw.startsWith('ENC:v1:')) {
+    try {
+      const dec = decryptImageData(raw);
+      if (dec && dec.length > 0) return dec;
+    } catch (e) {
+      console.warn('⚠️ Gagal decrypt ENC:v1:', e.message);
+    }
+  }
+
+  if (raw.startsWith('enc:v1:') || isEncrypted(raw)) {
+    try {
+      const dec = decryptImage(raw);
+      if (dec && dec.length > 0) return dec;
+    } catch (e) {
+      console.warn('⚠️ Gagal decrypt enc:v1:', e.message);
+    }
+  }
+
+  return raw;
+};
+
+const formatDateString = (dateObj) => {
+  if (!dateObj) return '';
+  const d = new Date(dateObj);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+const formatTimeString = (timeVal) => {
+  if (!timeVal) return '--:--';
+  if (typeof timeVal === 'string') {
+    const timeMatch = timeVal.match(/(\d{2}):(\d{2})/);
+    if (timeMatch) return `${timeMatch[1]}:${timeMatch[2]}`;
+  }
+  const date = new Date(timeVal);
+  if (isNaN(date.getTime())) return '--:--';
+  return date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false });
 };
 
 const INDONESIAN_MONTHS = [
@@ -73,18 +113,34 @@ const formatReportItem = (report) => {
       if (Array.isArray(ans.attachment) && ans.attachment.length > 0) {
         photoUrl = decryptAttachmentUrl(ans.attachment[0].file_url);
         photoCaption = ans.attachment[0].caption || '';
-      } else if (Array.isArray(report.attachment) && report.attachment[idx]) {
-        photoUrl = decryptAttachmentUrl(report.attachment[idx].file_url);
-        photoCaption = report.attachment[idx].caption || '';
+      } else if (Array.isArray(report.attachment) && report.attachment.length > 0) {
+        // Hanya kaitkan attachment yang memang terhubung secara eksplisit via answer_id
+        const taskAtt = report.attachment.find(
+          (a) => a.answer_id && ans.answer_id && a.answer_id.toString() === ans.answer_id.toString()
+        );
+
+        if (taskAtt) {
+          photoUrl = decryptAttachmentUrl(taskAtt.file_url);
+          photoCaption = taskAtt.caption || '';
+        }
       }
+
+      // Priority ditentukan DARI WAKTU CHECKLIST DIBUAT:
+      // Aturan: Wajib foto (is_photo_required = true) => Priority High ('Tinggi')
+      //         Tidak wajib foto (is_photo_required = false) => Priority Low ('Rendah')
+      const isPhotoRequired = Boolean(task.is_photo_required);
+      const priority = isPhotoRequired || task.priority === 'High' ? 'High' : 'Low';
+      const severity = priority === 'High' ? 'Tinggi' : 'Rendah';
 
       findings.push({
         id: `finding-${ans.answer_id ? ans.answer_id.toString() : idx + 1}`,
         itemTitle: task.task_description || `Pemeriksaan Butir ${idx + 1}`,
         category: cat.category_name || 'Operasional Toko',
         hasIssue: isIssue,
+        isPhotoRequired,
+        priority, // 'High' | 'Low'
+        severity, // 'Tinggi' | 'Rendah'
         issueNote: ans.comment || (isIssue ? 'Ditemukan ketidaksesuaian butir checklist saat inspeksi lapangan.' : undefined),
-        severity: isIssue ? (task.priority === 'High' ? 'Tinggi' : task.priority === 'Medium' ? 'Sedang' : 'Rendah') : undefined,
         photoUrl: photoUrl || undefined,
         photoCaption: photoCaption || undefined,
         photoTimestamp: submitTimeStr,
@@ -94,7 +150,8 @@ const formatReportItem = (report) => {
     });
   } else if (Array.isArray(report.attachment) && report.attachment.length > 0) {
     // 2. Jika jawaban butir belum ada di tabel jawaban, ambil temuan dari attachment metadata
-    report.attachment.forEach((att, idx) => {
+    const taskPhotos = report.attachment.filter((a) => a.file_type === 'task_photo' || !a.file_type);
+    (taskPhotos.length > 0 ? taskPhotos : report.attachment).forEach((att, idx) => {
       let caption = att.caption || '';
       let parsed = {};
       if (caption.startsWith('{')) {
@@ -106,13 +163,19 @@ const formatReportItem = (report) => {
       const isIssue = Boolean(parsed.hasIssue);
       if (isIssue) issueCount++;
 
+      const isPhotoRequired = Boolean(parsed.isPhotoRequired ?? parsed.requirePhoto ?? true);
+      const priority = isPhotoRequired || parsed.priority === 'High' || parsed.issueSeverity === 'Tinggi' ? 'High' : 'Low';
+      const severity = priority === 'High' ? 'Tinggi' : 'Rendah';
+
       findings.push({
         id: `finding-att-${att.attachment_id ? att.attachment_id.toString() : idx + 1}`,
         itemTitle: parsed.checklistQuestion || parsed.caption || att.caption || `Pemeriksaan Area ${idx + 1}`,
         category: parsed.category || 'Area Toko & Operasional',
         hasIssue: isIssue,
+        isPhotoRequired,
+        priority,
+        severity,
         issueNote: parsed.issueDescription || parsed.description || att.caption,
-        severity: isIssue ? (parsed.issueSeverity || 'Tinggi') : undefined,
         photoUrl: decryptAttachmentUrl(att.file_url),
         photoCaption: parsed.caption || att.caption || `Foto_Audit_${idx + 1}.jpg`,
         photoTimestamp: submitTimeStr,
@@ -136,12 +199,17 @@ const formatReportItem = (report) => {
     summaryNote = 'Seluruh aspek operasional, kebersihan, dan keselamatan gerai memenuhi standar SOP prima.';
   }
 
-  // Ambil tanda tangan digital jika ada attachment dengan file_type 'signature'
+  // Ambil tanda tangan digital & foto selfie verifikasi auditor jika ada
   let signatureUrl = '';
+  let selfieUrl = '';
   if (Array.isArray(report.attachment)) {
     const sig = report.attachment.find((a) => a.file_type === 'signature');
     if (sig) signatureUrl = decryptAttachmentUrl(sig.file_url);
+
+    const selfie = report.attachment.find((a) => a.file_type === 'report_photo');
+    if (selfie) selfieUrl = decryptAttachmentUrl(selfie.file_url);
   }
+  const auditorPhoto = selfieUrl || (staff.photo ? decryptAttachmentUrl(staff.photo) : undefined);
 
   return {
     id: `rep-${report.report_id.toString()}`,
@@ -159,7 +227,7 @@ const formatReportItem = (report) => {
     summaryNote,
     findings,
     signatureUrl: signatureUrl || undefined,
-    auditorPhoto: staff.photo || undefined,
+    auditorPhoto: auditorPhoto || undefined,
     workspaceName: workspace.company_name || 'Workspace',
   };
 };
@@ -251,6 +319,102 @@ exports.getAllReports = async (req, res) => {
 
     let formatted = reports.map(formatReportItem);
 
+    // 4b. Sertakan jadwal aktif yang tidak dikerjakan (melewati batas toleransi 1 jam tanpa penyerahan laporan)
+    const schedules = await prisma.schedule.findMany({
+      where: {
+        deleted_at: null,
+        status: { not: 'cancelled' },
+        ...(where.schedule?.store?.workspace_id ? { store: { workspace_id: where.schedule.store.workspace_id } } : {}),
+      },
+      include: {
+        store: { include: { workspace: true } },
+        checklist_template: true,
+        checklist_report: true,
+        schedule_staff: { include: { staff: true } },
+      },
+    });
+
+    const now = new Date();
+    const wibTimestamp = now.getTime() + 7 * 60 * 60 * 1000;
+    const wibDate = new Date(wibTimestamp);
+    const todayWibStr = `${wibDate.getUTCFullYear()}-${String(wibDate.getUTCMonth() + 1).padStart(2, '0')}-${String(wibDate.getUTCDate()).padStart(2, '0')}`;
+    const dayOfWeekShort = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'][wibDate.getUTCDay()];
+    const curWibMinutes = ((now.getUTCHours() + 7) % 24) * 60 + now.getUTCMinutes();
+
+    for (const s of schedules) {
+      // 1. Cek apakah jadwal ini berlaku hari ini
+      const scheduleDateStr = formatDateString(s.start_date);
+      const recurrence = s.repeat_time === 'daily' ? 'Setiap Hari' : (s.repeat_time === 'custom' || s.repeat_time === 'weekly' ? 'Hari Tertentu' : s.repeat_time);
+      let selectedDays = [];
+      if (s.selected_days) {
+        if (typeof s.selected_days === 'string') {
+          try { selectedDays = JSON.parse(s.selected_days); } catch { selectedDays = s.selected_days.split(',').map(x => x.trim()); }
+        } else if (Array.isArray(s.selected_days)) {
+          selectedDays = s.selected_days;
+        }
+      }
+
+      let isScheduledToday = false;
+      if (recurrence === 'Setiap Hari' || recurrence === 'daily') isScheduledToday = true;
+      else if (recurrence === 'Hari Tertentu' || recurrence === 'weekly' || recurrence === 'custom') {
+        isScheduledToday = !selectedDays || selectedDays.length === 0 || selectedDays.includes(dayOfWeekShort);
+      } else {
+        isScheduledToday = scheduleDateStr === todayWibStr;
+      }
+      if (!isScheduledToday) continue;
+
+      // 2. Cek libur
+      const exceptions = s.schedule_exception || [];
+      const hasHoliday = exceptions.some(e => e.is_skip) || s.status === 'Libur' || s.notes?.toLowerCase().includes('libur');
+      if (hasHoliday) continue;
+
+      // 3. Cek apakah sudah diserahkan hari ini
+      const isRecurring = s.repeat_time === 'daily' || s.repeat_time === 'custom' || s.repeat_time === 'weekly';
+      const hasReportToday = (s.checklist_report || []).some(r => {
+        const isDone = r.status === 'submitted' || r.status === 'completed' || r.status === 'terlambat';
+        if (!isDone) return false;
+        if (isRecurring) {
+          const rDate = formatDateString(r.completed_at || r.created_at || r.submitted_at);
+          return rDate === todayWibStr;
+        }
+        return true;
+      });
+      if (hasReportToday) continue;
+
+      // 4. Hitung toleransi
+      const endTimeStr = formatTimeString(s.end_time);
+      const [eH, eM] = endTimeStr.split(':').map(Number);
+      const endMinutes = (isNaN(eH) ? 23 : eH) * 60 + (isNaN(eM) ? 59 : eM);
+      const toleranceMinutes = endMinutes + 60;
+
+      if (curWibMinutes > toleranceMinutes) {
+        const assignedStaff = s.schedule_staff?.[0]?.staff;
+        const d = wibDate;
+        const submitDateStr = `${d.getUTCDate()} ${INDONESIAN_MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+        const monthStr = `${INDONESIAN_MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+
+        formatted.push({
+          id: `rep-uncompleted-${s.schedule_id}`,
+          storeName: s.store?.store_name || 'Outlet Ritel Audit',
+          storeLocation: s.store?.city || s.store?.address || 'Indonesia',
+          scheduleName: s.title || s.checklist_template?.template_name || 'Checklist Operasional Harian',
+          auditorName: assignedStaff?.name || 'Staf Lapangan',
+          auditorRole: assignedStaff?.position || 'Auditor Lapangan',
+          submitDate: submitDateStr,
+          submitTime: `${endTimeStr} WIB`,
+          month: monthStr,
+          status: 'Tidak Mengerjakan',
+          issueCount: 0,
+          complianceScore: 0,
+          summaryNote: 'Tugas audit ini ditutup otomatis oleh sistem karena staf melewati batas toleransi keterlambatan 1 jam tanpa penyerahan checklist (Tidak Mengerjakan / Tidak Patuh).',
+          findings: [],
+          signatureUrl: undefined,
+          auditorPhoto: undefined,
+          workspaceName: s.store?.workspace?.company_name || 'Workspace',
+        });
+      }
+    }
+
     // 5. In-Memory Filters (Search, Month, Status)
     if (search && search.trim()) {
       const q = search.trim().toLowerCase();
@@ -272,6 +436,8 @@ exports.getAllReports = async (req, res) => {
         formatted = formatted.filter((r) => r.status === 'Masalah');
       } else if (status === 'Sesuai') {
         formatted = formatted.filter((r) => r.status === 'Sesuai');
+      } else if (status === 'Tidak Mengerjakan' || status === 'Tidak Patuh') {
+        formatted = formatted.filter((r) => r.status === 'Tidak Mengerjakan');
       }
     }
 
@@ -368,6 +534,52 @@ exports.getReportMeta = async (req, res) => {
 exports.getReportById = async (req, res) => {
   try {
     const rawId = req.params.id.replace(/^rep-/, '');
+
+    // Tangani laporan jadwal yang tidak dikerjakan
+    if (rawId.startsWith('uncompleted-')) {
+      const schedId = BigInt(rawId.replace(/^uncompleted-/, ''));
+      const s = await prisma.schedule.findUnique({
+        where: { schedule_id: schedId },
+        include: {
+          store: { include: { workspace: true } },
+          checklist_template: true,
+          schedule_staff: { include: { staff: true } },
+        },
+      });
+      if (s) {
+        const assignedStaff = s.schedule_staff?.[0]?.staff;
+        const now = new Date();
+        const wibTimestamp = now.getTime() + 7 * 60 * 60 * 1000;
+        const wibDate = new Date(wibTimestamp);
+        const submitDateStr = `${wibDate.getUTCDate()} ${INDONESIAN_MONTHS[wibDate.getUTCMonth()]} ${wibDate.getUTCFullYear()}`;
+        const submitTimeStr = `${formatTimeString(s.end_time)} WIB`;
+        const monthStr = `${INDONESIAN_MONTHS[wibDate.getUTCMonth()]} ${wibDate.getUTCFullYear()}`;
+
+        return res.status(200).json({
+          status: 'success',
+          data: {
+            id: `rep-uncompleted-${s.schedule_id}`,
+            storeName: s.store?.store_name || 'Outlet Ritel Audit',
+            storeLocation: s.store?.city || s.store?.address || 'Indonesia',
+            scheduleName: s.title || s.checklist_template?.template_name || 'Checklist Operasional Harian',
+            auditorName: assignedStaff?.name || 'Staf Lapangan',
+            auditorRole: assignedStaff?.position || 'Auditor Lapangan',
+            submitDate: submitDateStr,
+            submitTime: submitTimeStr,
+            month: monthStr,
+            status: 'Tidak Mengerjakan',
+            issueCount: 0,
+            complianceScore: 0,
+            summaryNote: 'Tugas audit ini ditutup otomatis oleh sistem karena staf melewati batas toleransi keterlambatan 1 jam tanpa penyerahan checklist (Tidak Mengerjakan / Tidak Patuh).',
+            findings: [],
+            signatureUrl: undefined,
+            auditorPhoto: undefined,
+            workspaceName: s.store?.workspace?.company_name || 'Workspace',
+          },
+        });
+      }
+    }
+
     const reportId = BigInt(rawId);
 
     const report = await prisma.checklist_report.findUnique({

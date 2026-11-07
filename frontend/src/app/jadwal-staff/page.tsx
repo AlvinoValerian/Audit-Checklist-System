@@ -13,10 +13,8 @@ import {
   Camera,
   Lock,
   AlertCircle,
+  AlertTriangle,
   Calendar,
-  Wifi,
-  Battery,
-  Signal,
   ChevronRight,
   LogOut,
   User,
@@ -30,6 +28,7 @@ import {
 import { toast, Toaster } from "sonner";
 import { AuthService, AuthUser } from "@/lib/auth";
 import StaffBottomNav from "./components/StaffBottomNav";
+import DecryptedImage from "@/components/DecryptedImage";
 
 interface StaffScheduleItem {
   id: string;
@@ -37,7 +36,7 @@ interface StaffScheduleItem {
   title: string;
   checklistInfo?: string;
   infoNote?: string;
-  status: "Selesai" | "Siap Dimulai" | "Libur" | "Terkunci";
+  status: "Selesai" | "Siap Dimulai" | "Terlambat" | "Libur" | "Terkunci" | "Kedaluwarsa" | "Tidak Dikerjakan";
   statusBadge: string;
   submittedInfo?: string;
   actionText?: string;
@@ -48,6 +47,10 @@ interface StaffScheduleItem {
   isHighlighted?: boolean;
   isHoliday?: boolean;
   isLocked?: boolean;
+  isLate?: boolean;
+  isExpired?: boolean;
+  isNonCompliant?: boolean;
+  toleranceTime?: string;
   hasDetail?: boolean;
   templateName?: string;
   templateId?: string;
@@ -61,6 +64,7 @@ interface StaffScheduleData {
     name: string;
     shift: string;
     dateFormatted: string;
+    photo?: string | null;
   };
   store: {
     name: string;
@@ -72,6 +76,8 @@ interface StaffScheduleData {
     total: number;
     percentage: number;
     label: string;
+    expired?: number;
+    late?: number;
   };
   schedules: StaffScheduleItem[];
 }
@@ -84,74 +90,31 @@ export default function JadwalStaffPage() {
   const [isOfflineMode, setIsOfflineMode] = useState<boolean>(false);
   const [showProfileMenu, setShowProfileMenu] = useState<boolean>(false);
   const [isFullscreenMode, setIsFullscreenMode] = useState<boolean>(false);
-  const [currentTime, setCurrentTime] = useState<string>("09:47");
 
-  // State data jadwal dengan initial template matching screenshot
+  // State data jadwal dengan initial state bersih (diisi dari akun staf & database)
   const [scheduleData, setScheduleData] = useState<StaffScheduleData>({
     staff: {
-      name: "Siti Rahmawati",
-      shift: "Shift Pagi",
-      dateFormatted: "Kamis, 24 Oktober 2024",
+      name: "Staf Lapangan",
+      shift: "Auditor Lapangan",
+      dateFormatted: new Date().toLocaleDateString("id-ID", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      }),
     },
     store: {
-      name: "Kopi Kenangan",
-      location: "Mall Kelapa Gading 3",
-      code: "KK-JKT-15",
+      name: "Memuat Gerai...",
+      location: "Memuat Lokasi...",
+      code: "ST-01",
     },
     progress: {
-      completed: 1,
-      total: 3,
-      percentage: 33,
-      label: "1 dari 3 Tugas Selesai",
+      completed: 0,
+      total: 0,
+      percentage: 0,
+      label: "Memuat tugas...",
     },
-    schedules: [
-      {
-        id: "sch-1",
-        timeRange: "06:30 – 07:30 WIB",
-        title: "Opening Store & Persiapan Barista",
-        checklistInfo: "12 Item Checklist • Termasuk verifikasi chiller",
-        status: "Selesai",
-        statusBadge: "Selesai",
-        submittedInfo: "Diserahkan pukul 07:15 WIB oleh Siti R.",
-        isCompleted: true,
-        canStart: false,
-        hasDetail: true,
-      },
-      {
-        id: "sch-2",
-        timeRange: "09:00 – 12:00 WIB",
-        title: "Jadwal Audit Operasional Reguler",
-        checklistInfo: "Checklist Operasional Harian (18 Butir) • Cabang Sudirman",
-        infoNote: "Fokus inspeksi pada display rak depan, kebersihan area kasir, dan kesesuaian label harga promo terpasang.",
-        status: "Siap Dimulai",
-        statusBadge: "Siap Dimulai",
-        canStart: true,
-        isHighlighted: true,
-        actionText: "Kerjakan Checklist →",
-      },
-      {
-        id: "sch-3",
-        timeRange: "14:00 – 15:00 WIB",
-        title: "Pengecekan Kebersihan Area Dine-in",
-        infoNote: "Jadwal Ditiadakan / Toko Sedang Perawatan Gedung",
-        exemptionText: "Bebas Tugas: Pengecualian Terjadwal (Maintenance Mall)",
-        status: "Libur",
-        statusBadge: "Libur",
-        isHoliday: true,
-        canStart: false,
-      },
-      {
-        id: "sch-4",
-        timeRange: "21:00 – 22:30 WIB",
-        title: "Closing Kasir & End-of-Day",
-        checklistInfo: "15 Item Checklist • Rekonsiliasi EDC & gembok",
-        unlockText: "Terbuka Pukul 20:30 WIB",
-        status: "Terkunci",
-        statusBadge: "Terkunci",
-        isLocked: true,
-        canStart: false,
-      },
-    ],
+    schedules: [],
   });
 
   // Modal State untuk Detail Tugas Selesai
@@ -192,6 +155,10 @@ export default function JadwalStaffPage() {
   const [isModalAnimating, setIsModalAnimating] = useState<boolean>(false);
 
   const handleOpenStartModal = (item: StaffScheduleItem) => {
+    if (item.status === "Kedaluwarsa" || item.status === "Tidak Dikerjakan" || item.isExpired || item.canStart === false) {
+      toast.error("Audit Kedaluwarsa: Batas toleransi pengerjaan 1 jam telah habis. Jadwal ditutup otomatis sebagai Tidak Patuh.");
+      return;
+    }
     setActiveStartModal(item);
     setIsModalAnimating(false);
     setTimeout(() => setIsModalAnimating(true), 20);
@@ -208,19 +175,6 @@ export default function JadwalStaffPage() {
     handleCloseStartModal();
     router.push(`/jadwal-staff/pengerjaan?id=${targetId}`);
   };
-
-  // Update jam status bar secara live
-  useEffect(() => {
-    const updateClock = () => {
-      const now = new Date();
-      const hours = String(now.getHours()).padStart(2, "0");
-      const minutes = String(now.getMinutes()).padStart(2, "0");
-      setCurrentTime(`${hours}:${minutes}`);
-    };
-    updateClock();
-    const timer = setInterval(updateClock, 30000);
-    return () => clearInterval(timer);
-  }, []);
 
   // Fetch data jadwal staf dari backend
   const fetchScheduleData = async (silent = false) => {
@@ -239,44 +193,44 @@ export default function JadwalStaffPage() {
       const rawId = user?.rawId || (user?.id ? user.id.replace(/^staff-/, "").replace(/^sa-/, "").replace(/^adm-/, "") : undefined);
       if (rawId) headers["x-user-id"] = rawId;
       if (activeWs?.id) headers["x-workspace-id"] = activeWs.id;
+      if (user?.storeId) headers["x-store-id"] = user.storeId.toString();
+
+      const storeParam = user?.storeId ? `?storeId=${encodeURIComponent(user.storeId)}` : "";
 
       let res: Response | null = null;
       try {
-        res = await fetch("/api/staff/my-schedules", { headers, cache: "no-store" });
+        res = await fetch(`/api/staff/my-schedules${storeParam}`, { headers, cache: "no-store" });
         if (!res || !res.ok) throw new Error(`Fetch status: ${res?.status}`);
       } catch {
-        res = await fetch("http://127.0.0.1:5000/api/staff/my-schedules", { headers, cache: "no-store" });
+        res = await fetch(`http://127.0.0.1:5000/api/staff/my-schedules${storeParam}`, { headers, cache: "no-store" });
       }
 
       if (res && res.ok) {
         const json = await res.json();
         if (json.status === "success" && json.data) {
           setIsOfflineMode(false);
-          const backendSchedules: StaffScheduleItem[] = Array.isArray(json.data.schedules) ? json.data.schedules : [];
+          let backendSchedules: StaffScheduleItem[] = Array.isArray(json.data.schedules) ? json.data.schedules : [];
 
-          // Periksa apakah ada tugas yang sudah diselesaikan dari pengerjaan lokal
-          let completedLocal: string[] = [];
+          // Isolasi Ketat: Hanya jadwalkan tugas untuk store_id yang dinaungi staf ini
+          const targetStoreId = json.data.store?.id || user?.storeId;
+          if (targetStoreId) {
+            const cleanTarget = targetStoreId.toString().replace(/^str-/, "").replace(/^st-/, "");
+            backendSchedules = backendSchedules.filter((s) => {
+              if (!s.storeId) return true;
+              const sId = s.storeId.toString().replace(/^str-/, "").replace(/^st-/, "");
+              return sId === cleanTarget;
+            });
+          }
+
+          // Seluruh data status jadwal 100% murni dari database PostgreSQL
+          // Bersihkan cache lokal jika ada agar tidak mengintervensi status database
           if (typeof window !== "undefined") {
             try {
-              completedLocal = JSON.parse(localStorage.getItem("staff_completed_tasks") || "[]");
+              localStorage.removeItem("staff_completed_tasks");
             } catch (e) {}
           }
 
-          const mappedSchedules = backendSchedules.map((s) => {
-            if (completedLocal.includes(s.id) && s.status !== "Libur") {
-              return {
-                ...s,
-                status: "Selesai" as const,
-                statusBadge: "Selesai",
-                canStart: false,
-                isCompleted: true,
-                hasDetail: true,
-                isHighlighted: false,
-                submittedInfo: s.submittedInfo || `Diserahkan tepat waktu oleh ${user?.fullName?.split(" ")[0] || "Staf"}`,
-              };
-            }
-            return s;
-          });
+          const mappedSchedules = backendSchedules;
 
           const nonHoliday = mappedSchedules.filter((s) => s.status !== "Libur");
           const compCount = mappedSchedules.filter((s) => s.status === "Selesai").length;
@@ -292,6 +246,7 @@ export default function JadwalStaffPage() {
                 month: "long",
                 year: "numeric",
               }),
+              photo: json.data.staff?.photo || null,
             },
             store: {
               name: json.data.store?.name || user?.storeName || "Toko Cabang",
@@ -306,6 +261,16 @@ export default function JadwalStaffPage() {
             },
             schedules: mappedSchedules,
           });
+
+          // Sinkronkan foto profil staf jika dikembalikan oleh database
+          if (json.data.staff?.photo) {
+            setCurrentUser((prev) => {
+              if (!prev) return prev;
+              const updated = { ...prev, profilePicture: json.data.staff.photo };
+              AuthService.setCurrentUser(updated);
+              return updated;
+            });
+          }
 
           if (!silent) {
             triggerSuccessToast(
@@ -333,7 +298,49 @@ export default function JadwalStaffPage() {
     const user = AuthService.getCurrentUser();
     setCurrentUser(user);
 
+    if (user) {
+      setScheduleData((prev) => ({
+        ...prev,
+        staff: {
+          name: user.fullName || "Staf Lapangan",
+          shift: user.position || "Auditor Lapangan",
+          dateFormatted: new Date().toLocaleDateString("id-ID", {
+            weekday: "long",
+            day: "numeric",
+            month: "long",
+            year: "numeric",
+          }),
+        },
+        store: {
+          name: user.storeName || "Toko Penugasan",
+          location: user.storeLocation || "Cabang Gerai",
+          code: user.storeCode || "ST-01",
+        },
+      }));
+    }
+
     fetchScheduleData(true);
+
+    // Ambil info profil staf terkini dari database
+    const refreshProfile = async () => {
+      try {
+        const token = AuthService.getToken();
+        const headers: Record<string, string> = {};
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+        let res = await fetch("/api/auth/me", { headers });
+        if (!res.ok) {
+          res = await fetch("http://127.0.0.1:5000/api/auth/me", { headers });
+        }
+        if (res.ok) {
+          const json = await res.json();
+          if (json.status === "success" && json.data?.user) {
+            setCurrentUser(json.data.user);
+            AuthService.setCurrentUser(json.data.user);
+          }
+        }
+      } catch (e) {}
+    };
+    refreshProfile();
 
     // Cek jika baru saja menyerahkan checklist (redirect dari terkirim atau pengerjaan)
     if (typeof window !== "undefined") {
@@ -351,19 +358,25 @@ export default function JadwalStaffPage() {
   }, []);
 
   const handleLogout = () => {
+    setShowProfileMenu(false);
+    triggerSuccessToast(
+      "Berhasil Logout",
+      "Anda telah berhasil keluar dari akun. Mengalihkan..."
+    );
     AuthService.logout();
-    toast.info("Anda telah logout dari aplikasi.");
-    if (typeof window !== "undefined") {
-      window.location.href = "/login";
-    } else {
-      router.push("/login");
-    }
+    setTimeout(() => {
+      if (typeof window !== "undefined") {
+        window.location.href = "/login";
+      } else {
+        router.push("/login");
+      }
+    }, 1100);
   };
 
-  const displayName = scheduleData.staff.name || currentUser?.fullName || "Siti Rahmawati";
-  const displayStore = scheduleData.store.name || currentUser?.storeName || "Kopi Kenangan";
-  const displayLocation = scheduleData.store.location || currentUser?.storeLocation || "Mall Kelapa Gading 3";
-  const displayStoreCode = scheduleData.store.code || currentUser?.storeCode || "KK-JKT-15";
+  const displayName = currentUser?.fullName || scheduleData.staff.name || "Staf Lapangan";
+  const displayStore = currentUser?.storeName || scheduleData.store.name || "Toko Penugasan";
+  const displayLocation = currentUser?.storeLocation || scheduleData.store.location || "Cabang Gerai";
+  const displayStoreCode = currentUser?.storeCode || scheduleData.store.code || "ST-01";
 
   const getInitials = (name: string) => {
     if (!name) return "SR";
@@ -373,7 +386,7 @@ export default function JadwalStaffPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#f3f4fa] flex flex-col items-center justify-center sm:py-6 p-0 sm:px-4 font-sans select-none antialiased">
+    <div className="fixed inset-0 flex flex-col overflow-hidden bg-[#f4f6fc] sm:relative sm:inset-auto sm:min-h-screen sm:bg-[#f3f4fa] sm:flex sm:items-center sm:justify-center sm:py-6 sm:px-4 font-sans antialiased">
       <Toaster position="top-center" richColors />
 
       {/* Floating Mode Toggle untuk Laptop / Desktop View */}
@@ -394,30 +407,18 @@ export default function JadwalStaffPage() {
 
       {/* Smartphone Device Frame Container */}
       <div
-        className={`w-full bg-[#f4f6fc] text-slate-900 transition-all duration-300 relative flex flex-col ${
+        className={`w-full h-full flex flex-col bg-[#f4f6fc] text-slate-900 transition-all duration-300 relative ${
           isFullscreenMode
-            ? "max-w-md min-h-screen sm:rounded-none sm:shadow-none"
-            : "max-w-[420px] min-h-[844px] sm:max-h-[92vh] sm:rounded-[42px] sm:shadow-[0_25px_60px_-15px_rgba(0,0,0,0.5)] sm:border-[9px] sm:border-slate-800 sm:ring-1 sm:ring-white/10 overflow-hidden"
+            ? "max-w-md sm:rounded-none sm:shadow-none sm:h-screen"
+            : "sm:h-[844px] sm:max-h-[92vh] sm:max-w-[420px] sm:rounded-[42px] sm:shadow-[0_25px_60px_-15px_rgba(0,0,0,0.5)] sm:border-[9px] sm:border-slate-800 sm:ring-1 sm:ring-white/10 overflow-hidden"
         }`}
       >
         {/* Dynamic Island / Speaker Pill on Desktop Frame */}
         <div className="hidden sm:block absolute top-2 left-1/2 -translate-x-1/2 w-28 h-4 bg-slate-900 rounded-full z-40 pointer-events-none" />
 
-        {/* 1. Mobile Status Bar (Matching Image) */}
-        <div className="pt-3 px-6 pb-1 flex items-center justify-between text-slate-900 font-semibold text-xs tracking-tight z-20 shrink-0 select-none bg-transparent">
-          <span className="text-sm font-bold tracking-tight">{currentTime}</span>
-          <div className="flex items-center gap-1.5 text-slate-800">
-            <Signal className="w-3.5 h-3.5 stroke-[2.2]" />
-            <Wifi className="w-3.5 h-3.5 stroke-[2.2]" />
-            <div className="flex items-center">
-              <Battery className="w-4 h-4 stroke-[2.2]" />
-            </div>
-          </div>
-        </div>
-
         {/* POPUP BERHASIL DARI ATAS (DI DALAM HP) */}
         <div
-          className={`absolute top-11 inset-x-3 z-40 transition-all duration-500 ease-out transform pointer-events-none ${
+          className={`absolute top-3 inset-x-3 z-50 transition-all duration-500 ease-out transform pointer-events-none ${
             successToast.show
               ? "translate-y-0 opacity-100 scale-100 pointer-events-auto"
               : "-translate-y-16 opacity-0 scale-95"
@@ -450,44 +451,44 @@ export default function JadwalStaffPage() {
         </div>
 
         {/* Scrollable Content Inside Mobile Screen */}
-        <div className="flex-1 overflow-y-auto px-4 pt-2 pb-6 space-y-3.5">
-          {/* 2. Top Header (Store Name, Subtitle, History Icon, Avatar) */}
-          <div className="flex items-center justify-between py-1 relative">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-9 h-9 rounded-xl bg-[#193f53] text-white flex items-center justify-center shadow-xs shrink-0">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 pt-3.5 sm:pt-4 pb-6 space-y-3.5">
+          {/* 2. Top Header (Store Name, Subtitle, Avatar) */}
+          <div className="flex items-start justify-between gap-3 py-1 relative">
+            <div className="flex items-start gap-2.5 min-w-0 flex-1">
+              <div className="w-9 h-9 rounded-xl bg-[#193f53] text-white flex items-center justify-center shadow-xs shrink-0 mt-0.5">
                 <StoreIcon className="w-4 h-4 stroke-[2.2]" />
               </div>
-              <div className="min-w-0">
-                <h1 className="text-sm sm:text-base font-bold text-slate-900 leading-tight truncate">
+              <div className="min-w-0 flex-1">
+                <h1 className="text-sm sm:text-base font-bold text-slate-900 leading-tight">
                   {displayStore}
                 </h1>
-                <p className="text-[11px] font-medium text-slate-400 leading-none mt-1 truncate">
-                  {displayLocation} • {displayStoreCode}
+                <p className="text-[11px] font-medium text-slate-500 leading-snug mt-1">
+                  {displayLocation}{displayStoreCode ? ` • ${displayStoreCode}` : ""}
                 </p>
               </div>
             </div>
 
-            {/* Right Action Icons: History & Profile Avatar */}
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => router.push("/jadwal-staff/riwayat")}
-                className="w-8 h-8 rounded-full bg-white hover:bg-slate-100 text-slate-600 flex items-center justify-center border border-slate-200/80 shadow-2xs transition-colors cursor-pointer"
-                title="Riwayat Audit Shift"
-                aria-label="Riwayat"
-              >
-                <History className="w-4 h-4 stroke-[2.2]" />
-              </button>
-
+            {/* Right Action Icons: Profile Avatar (Icon Riwayat di Header Dihapus) */}
+            <div className="flex items-center shrink-0 pt-0.5">
               <div className="relative">
                 <button
                   type="button"
                   onClick={() => setShowProfileMenu(!showProfileMenu)}
-                  className="w-8 h-8 rounded-full bg-blue-50 text-[#193f53] font-bold text-xs flex items-center justify-center border border-blue-200 shadow-2xs relative hover:ring-2 hover:ring-[#193f53]/20 transition-all cursor-pointer"
+                  className="w-8 h-8 rounded-full bg-blue-50 text-[#193f53] font-bold text-xs flex items-center justify-center border border-blue-200 shadow-2xs relative hover:ring-2 hover:ring-[#193f53]/20 transition-all cursor-pointer touch-manipulation active:scale-95"
                   aria-label="Profil Pengguna"
                 >
-                  <span>{getInitials(displayName)}</span>
-                  <span className="w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-white absolute -bottom-0.5 -right-0.5 shadow-2xs" />
+                  <div className="w-full h-full rounded-full overflow-hidden flex items-center justify-center">
+                    {currentUser?.profilePicture ? (
+                      <DecryptedImage
+                        src={currentUser.profilePicture}
+                        alt={displayName}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <span>{getInitials(displayName)}</span>
+                    )}
+                  </div>
+                  <span className="w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-white absolute -bottom-0.5 -right-0.5 shadow-2xs z-10" />
                 </button>
 
                 {/* Profile Popup */}
@@ -497,14 +498,27 @@ export default function JadwalStaffPage() {
                       className="fixed inset-0 z-30"
                       onClick={() => setShowProfileMenu(false)}
                     />
-                    <div className="absolute right-0 mt-2 w-52 bg-white rounded-2xl shadow-xl border border-slate-100 p-2.5 z-40 animate-in fade-in zoom-in-95 duration-150">
-                      <div className="px-2 py-1.5 border-b border-slate-100 pb-2 mb-1">
-                        <p className="text-xs font-bold text-slate-900 truncate">
-                          {displayName}
-                        </p>
-                        <p className="text-[10px] text-slate-400 truncate">
-                          {currentUser?.email || "staff@gacoan.com"}
-                        </p>
+                    <div className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-slate-100 p-2.5 z-40 animate-in fade-in zoom-in-95 duration-150">
+                      <div className="flex items-center gap-2.5 px-2 py-1.5 border-b border-slate-100 pb-2 mb-1">
+                        <div className="w-8 h-8 rounded-full bg-blue-50 text-[#193f53] font-bold text-xs flex items-center justify-center shrink-0 border border-blue-100 overflow-hidden">
+                          {currentUser?.profilePicture ? (
+                            <DecryptedImage
+                              src={currentUser.profilePicture}
+                              alt={displayName}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <span>{getInitials(displayName)}</span>
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-bold text-slate-900 truncate">
+                            {displayName}
+                          </p>
+                          <p className="text-[10px] text-slate-400 truncate">
+                            {currentUser?.email || "-"}
+                          </p>
+                        </div>
                       </div>
                       <button
                         onClick={() => router.push("/jadwal-staff/profile")}
@@ -663,6 +677,113 @@ export default function JadwalStaffPage() {
                   );
                 }
 
+                // CARD TYPE: KEDALUWARSA / TIDAK DIKERJAKAN (MELEWATI BATAS TOLERANSI 1 JAM -> TIDAK PATUH)
+                if (item.status === "Kedaluwarsa" || item.status === "Tidak Dikerjakan" || item.isExpired) {
+                  return (
+                    <div
+                      key={item.id}
+                      className="bg-white rounded-2xl p-4 border-2 border-rose-300 shadow-sm relative transition-all"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 text-rose-600 text-xs font-semibold">
+                          <Clock className="w-3.5 h-3.5 text-rose-500" />
+                          <span>{item.timeRange}</span>
+                        </div>
+                        <div className="px-2.5 py-0.5 bg-rose-100 text-rose-800 border border-rose-300 text-[11px] font-bold rounded-full flex items-center gap-1.5 shadow-2xs">
+                          <AlertCircle className="w-3 h-3 text-rose-700 stroke-[2.5]" />
+                          <span>Tidak Patuh</span>
+                        </div>
+                      </div>
+
+                      <h4 className="text-sm font-bold text-slate-900 mt-2.5 leading-snug">
+                        {item.title}
+                      </h4>
+
+                      {item.checklistInfo && (
+                        <p className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
+                          <Camera className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          <span>{item.checklistInfo}</span>
+                        </p>
+                      )}
+
+                      {/* Alert Callout Batas Toleransi Habis */}
+                      <div className="mt-3 p-3 bg-rose-50/90 border border-rose-200 rounded-xl space-y-1">
+                        <div className="flex items-center gap-1.5 text-rose-900 text-xs font-bold">
+                          <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                          <span>Batas Toleransi Berakhir • Tidak Mengerjakan</span>
+                        </div>
+                        <p className="text-[11px] text-rose-800 leading-relaxed">
+                          Jadwal audit ini telah melewati batas toleransi keterlambatan 1 jam{item.toleranceTime ? ` (pukul ${item.toleranceTime} WIB)` : ""}. Sistem menutup audit ini secara otomatis dan tercatat sebagai <strong className="font-semibold text-rose-900">Tidak Mengerjakan / Tidak Patuh</strong>.
+                        </p>
+                      </div>
+
+                      {/* Tombol Nonaktif (Kedaluwarsa) */}
+                      <button
+                        type="button"
+                        disabled
+                        className="mt-3.5 w-full py-3 px-4 bg-slate-100 text-slate-400 font-semibold text-xs sm:text-sm rounded-xl flex items-center justify-center gap-2 border border-slate-200 cursor-not-allowed select-none"
+                      >
+                        <Lock className="w-4 h-4 text-slate-400" />
+                        <span>Audit Kedaluwarsa (Tidak Patuh)</span>
+                      </button>
+                    </div>
+                  );
+                }
+
+                // CARD TYPE: TERLAMBAT (MASIH DALAM MASA TOLERANSI 1 JAM)
+                if (item.status === "Terlambat") {
+                  return (
+                    <div
+                      key={item.id}
+                      className="bg-white rounded-2xl p-4 border-2 border-amber-300 shadow-sm relative transition-all"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 text-amber-700 text-xs font-semibold">
+                          <Clock className="w-3.5 h-3.5 text-amber-600" />
+                          <span>{item.timeRange}</span>
+                        </div>
+                        <div className="px-2.5 py-0.5 bg-amber-50 text-amber-800 border border-amber-300 text-[11px] font-bold rounded-full flex items-center gap-1.5 shadow-2xs">
+                          <Clock className="w-3 h-3 text-amber-700 stroke-[2.5]" />
+                          <span>Terlambat (Toleransi 1 Jam)</span>
+                        </div>
+                      </div>
+
+                      <h4 className="text-sm font-bold text-slate-900 mt-2.5 leading-snug">
+                        {item.title}
+                      </h4>
+
+                      {item.checklistInfo && (
+                        <p className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
+                          <Camera className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          <span>{item.checklistInfo}</span>
+                        </p>
+                      )}
+
+                      {/* Alert Callout Masa Toleransi Terlambat */}
+                      <div className="mt-3 p-3 bg-amber-50/80 border border-amber-200/80 rounded-xl space-y-0.5">
+                        <div className="flex items-center gap-1.5 text-amber-900 text-xs font-bold">
+                          <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                          <span>Masa Toleransi Keterlambatan (+1 Jam)</span>
+                        </div>
+                        <p className="text-[11px] text-amber-800/90 leading-relaxed">
+                          Jadwal audit ini telah melewati jam shift normal ({item.timeRange}). Diberikan kelonggaran toleransi pengerjaan hingga pukul <strong className="font-semibold text-amber-900">{item.toleranceTime || "1 jam setelah jadwal"} WIB</strong>. Segera selesaikan sebelum audit ditutup otomatis sebagai Tidak Patuh.
+                        </p>
+                      </div>
+
+                      {/* Tombol Kerjakan Checklist Terlambat */}
+                      <button
+                        type="button"
+                        onClick={() => handleOpenStartModal(item)}
+                        className="mt-3.5 w-full py-3 px-4 bg-amber-600 hover:bg-amber-700 text-white font-semibold text-xs sm:text-sm rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all active:scale-[0.98] cursor-pointer touch-manipulation"
+                      >
+                        <Clock className="w-4 h-4" />
+                        <span>Kerjakan Checklist (Terlambat)</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  );
+                }
+
                 // CARD TYPE 2: SIAP DIMULAI (HIGHLIGHTED / ACTIVE AUDIT)
                 if (item.status === "Siap Dimulai") {
                   return (
@@ -708,7 +829,7 @@ export default function JadwalStaffPage() {
                       <button
                         type="button"
                         onClick={() => handleOpenStartModal(item)}
-                        className="mt-3.5 w-full py-3 px-4 bg-[#193f53] hover:bg-[#122f3e] text-white font-semibold text-xs sm:text-sm rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all active:scale-[0.98] cursor-pointer"
+                        className="mt-3.5 w-full py-3 px-4 bg-[#193f53] hover:bg-[#122f3e] text-white font-semibold text-xs sm:text-sm rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all active:scale-[0.98] cursor-pointer touch-manipulation"
                       >
                         <span>Kerjakan Checklist</span>
                         <ArrowRight className="w-4 h-4" />
@@ -807,8 +928,8 @@ export default function JadwalStaffPage() {
           </div>
         </div>
 
-        {/* 8. Bottom Navigation with Issue Tab preserved */}
-        <StaffBottomNav activeTab="checklist" />
+        {/* 8. Bottom Navigation matching reference layout */}
+        <StaffBottomNav activeTab="checklist" showIssues={false} />
 
         {/* POPUP MODAL: DETAIL TUGAS SELESAI (SLIDE UP DARI BAWAH DI DALAM HP DENGAN ANIMASI) */}
         {showDetailModal && (

@@ -1,6 +1,7 @@
 const prisma = require('../config/prisma');
 const bcrypt = require('bcrypt');
 const { extractUser } = require('../middlewares/auth.middleware');
+const { encryptImageData, decryptImageData } = require('../utils/imageCrypto');
 
 /**
  * Self-healing: Pastikan kolom position dan deleted_at selalu tersedia di PostgreSQL
@@ -55,7 +56,10 @@ const formatStaff = (row) => {
         })
       : '-',
     photo: row.photo || null,
+    profilePicture: row.photo || null,
+    storeAddress: row.address || '-',
     workspaceId: row.workspace_id ? row.workspace_id.toString() : undefined,
+    workspaceName: row.workspace_name || 'Mie Gacoan Indonesia',
     adminId: row.admin_id ? row.admin_id.toString() : undefined,
     adminName: row.admin_name || null,
     deletedAt: row.deleted_at ? new Date(row.deleted_at).toISOString() : undefined,
@@ -84,10 +88,12 @@ exports.getAllStaff = async (req, res) => {
         st.city,
         st.address,
         st.workspace_id,
-        a.name AS admin_name
+        a.name AS admin_name,
+        w.company_name AS workspace_name
       FROM staff s
       LEFT JOIN store st ON s.store_id = st.store_id
       LEFT JOIN admin a ON s.admin_id = a.admin_id
+      LEFT JOIN workspace w ON st.workspace_id = w.workspace_id
       WHERE 1=1
     `;
     const params = [];
@@ -174,10 +180,12 @@ exports.getStaffById = async (req, res) => {
         st.city,
         st.address,
         st.workspace_id,
-        a.name AS admin_name
+        a.name AS admin_name,
+        w.company_name AS workspace_name
       FROM staff s
       LEFT JOIN store st ON s.store_id = st.store_id
       LEFT JOIN admin a ON s.admin_id = a.admin_id
+      LEFT JOIN workspace w ON st.workspace_id = w.workspace_id
       WHERE s.staff_id = $1
       LIMIT 1
     `;
@@ -379,6 +387,7 @@ exports.updateStaff = async (req, res) => {
       status,
       phone,
       password,
+      photo,
     } = req.body;
 
     // Cek keberadaan staf
@@ -456,6 +465,13 @@ exports.updateStaff = async (req, res) => {
       newDeletedAt,
     ];
 
+    let photoClause = '';
+    if (photo !== undefined) {
+      const encryptedPhoto = photo ? encryptImageData(photo) : null;
+      params.push(encryptedPhoto);
+      photoClause = `, photo = $${params.length}`;
+    }
+
     if (password && password.trim() !== '') {
       const hashed = await bcrypt.hash(password.trim(), 10);
       params.push(hashed);
@@ -477,6 +493,7 @@ exports.updateStaff = async (req, res) => {
         position = $7,
         deleted_at = $8,
         updated_at = NOW()
+        ${photoClause}
         ${passwordClause}
       WHERE staff_id = $${idIdx}
     `;
@@ -713,6 +730,20 @@ const formatTimeString = (time) => {
 };
 
 /**
+ * Format string tanggal atau Date object menjadi "YYYY-MM-DD"
+ */
+const formatDateString = (date) => {
+  if (!date) return new Date().toISOString().split('T')[0];
+  if (typeof date === 'string') {
+    return date.split('T')[0];
+  }
+  if (date instanceof Date) {
+    return date.toISOString().split('T')[0];
+  }
+  return String(date).substring(0, 10);
+};
+
+/**
  * GET /api/staff/my-schedules
  * Mengambil jadwal audit & checklist harian untuk staf lapangan yang sedang login
  * Terhubung langsung secara real-time ke tabel PostgreSQL `schedule`
@@ -727,6 +758,7 @@ exports.getMySchedules = async (req, res) => {
     let storeLocation = 'Kota Malang';
     let storeCode = 'ST-01';
     let staffPosition = 'Auditor Lapangan';
+    let staffPhoto = user?.profilePicture || null;
 
     const isStaffUser =
       user &&
@@ -750,6 +782,7 @@ exports.getMySchedules = async (req, res) => {
             storeId = st.store_id;
             staffName = st.name;
             staffPosition = st.position || 'Auditor Lapangan';
+            staffPhoto = st.photo || staffPhoto;
             if (st.store) {
               storeName = st.store.store_name;
               storeLocation = `${st.store.address || st.store.city || 'Cabang'} • ST-${st.store.store_id}`;
@@ -774,6 +807,7 @@ exports.getMySchedules = async (req, res) => {
           storeId = stByEmail.store_id;
           staffName = stByEmail.name;
           staffPosition = stByEmail.position || 'Auditor Lapangan';
+          staffPhoto = stByEmail.photo || staffPhoto;
           if (stByEmail.store) {
             storeName = stByEmail.store.store_name;
             storeLocation = `${stByEmail.store.address || stByEmail.store.city || 'Cabang'} • ST-${stByEmail.store.store_id}`;
@@ -805,33 +839,57 @@ exports.getMySchedules = async (req, res) => {
       } catch (e) {}
     }
 
-    // 2. Kriteria pencarian jadwal dari database
+    // Resolusi Store ID spesifik: Staf HANYA melihat jadwal untuk toko yang dinaungi
+    let targetStoreId = null;
+
+    if (storeId) {
+      targetStoreId = storeId;
+    } else if (req.query.storeId || req.headers['x-store-id']) {
+      const sId = (req.query.storeId || req.headers['x-store-id']).toString().replace(/^str-/, '').replace(/^st-/, '');
+      if (!isNaN(Number(sId))) {
+        targetStoreId = BigInt(sId);
+      }
+    } else if (user?.storeId) {
+      const sId = user.storeId.toString().replace(/^str-/, '').replace(/^st-/, '');
+      if (!isNaN(Number(sId))) {
+        targetStoreId = BigInt(sId);
+      }
+    }
+
+    if (!targetStoreId && user?.storeName) {
+      const sByName = await prisma.store.findFirst({
+        where: { store_name: { contains: user.storeName.trim(), mode: 'insensitive' } },
+      });
+      if (sByName) targetStoreId = sByName.store_id;
+    }
+
+    // Default ke toko pertama jika belum terdefinisi
+    if (!targetStoreId) {
+      const firstStore = await prisma.store.findFirst({
+        orderBy: { store_id: 'asc' },
+      });
+      if (firstStore) targetStoreId = firstStore.store_id;
+    }
+
+    // Update informasi gerai aktif sesuai targetStoreId
+    if (targetStoreId) {
+      const activeStore = await prisma.store.findUnique({
+        where: { store_id: targetStoreId },
+      });
+      if (activeStore) {
+        storeId = activeStore.store_id;
+        storeName = activeStore.store_name;
+        storeLocation = `${activeStore.address || activeStore.city || 'Cabang'} • ST-${activeStore.store_id}`;
+        storeCode = `ST-${activeStore.store_id.toString()}`;
+      }
+    }
+
+    // 2. Kriteria pencarian jadwal dari database: HANYA untuk toko yang dinaungi
     const where = {
       deleted_at: null,
       status: { not: 'cancelled' },
+      store_id: targetStoreId,
     };
-
-    if (staffId && storeId) {
-      where.OR = [
-        { store_id: storeId },
-        { schedule_staff: { some: { staff_id: staffId } } },
-      ];
-    } else if (storeId) {
-      where.store_id = storeId;
-    } else if (staffId) {
-      where.schedule_staff = { some: { staff_id: staffId } };
-    } else {
-      // Jika Super Admin / Admin atau belum spesifik staff:
-      const requestedStoreId = req.query.storeId || req.headers['x-store-id'];
-      const requestedWsId = req.query.workspaceId || req.headers['x-workspace-id'] || user?.workspaceId;
-
-      if (requestedStoreId) {
-        where.store_id = BigInt(requestedStoreId.toString().replace(/^str-/, ''));
-      } else if (requestedWsId && requestedWsId !== 'all') {
-        const cleanWs = BigInt(requestedWsId.toString().replace(/^ws-/, ''));
-        where.store = { workspace_id: cleanWs };
-      }
-    }
 
     // 3. Query PostgreSQL Schedule dengan relasi lengkap
     const schedules = await prisma.schedule.findMany({
@@ -868,6 +926,14 @@ exports.getMySchedules = async (req, res) => {
 
     // Waktu realtime saat ini di WIB (UTC+7)
     const now = new Date();
+    const wibTimestamp = now.getTime() + 7 * 60 * 60 * 1000;
+    const wibDate = new Date(wibTimestamp);
+    const y = wibDate.getUTCFullYear();
+    const m = String(wibDate.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(wibDate.getUTCDate()).padStart(2, '0');
+    const todayStr = `${y}-${m}-${d}`;
+    const dayOfWeekShort = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'][wibDate.getUTCDay()];
+
     const utcHours = now.getUTCHours();
     const wibHours = (utcHours + 7) % 24;
     const currentMinutes = wibHours * 60 + now.getUTCMinutes();
@@ -879,8 +945,36 @@ exports.getMySchedules = async (req, res) => {
       year: 'numeric',
     });
 
-    // 4. Transformasi data jadwal real dari database
-    const scheduleItems = schedules.map((s) => {
+    // 4. Filter HANYA jadwal yang berlaku hari ini (realtime)
+    const todaySchedules = schedules.filter((s) => {
+      const scheduleDateStr = formatDateString(s.start_date);
+      const recurrence = s.repeat_time === 'daily' ? 'Setiap Hari' : (s.repeat_time === 'custom' || s.repeat_time === 'weekly' ? 'Hari Tertentu' : s.repeat_time);
+      let selectedDays = [];
+      if (s.selected_days) {
+        if (typeof s.selected_days === 'string') {
+          try {
+            selectedDays = JSON.parse(s.selected_days);
+          } catch {
+            selectedDays = s.selected_days.split(',').map(x => x.trim());
+          }
+        } else if (Array.isArray(s.selected_days)) {
+          selectedDays = s.selected_days;
+        }
+      }
+
+      // Jadwal harian / daily selalu aktif hari ini
+      if (recurrence === 'Setiap Hari' || recurrence === 'daily') return true;
+      // Jadwal hari tertentu
+      if (recurrence === 'Hari Tertentu' || recurrence === 'weekly' || recurrence === 'custom') {
+        if (!selectedDays || selectedDays.length === 0) return true;
+        return selectedDays.includes(dayOfWeekShort);
+      }
+      // Jadwal satu kali
+      return scheduleDateStr === todayStr;
+    });
+
+    // 5. Transformasi data jadwal real hari ini dari database
+    const scheduleItems = todaySchedules.map((s) => {
       const startTimeStr = formatTimeString(s.start_time);
       const endTimeStr = formatTimeString(s.end_time);
       const timeRange = `${startTimeStr} - ${endTimeStr} WIB`;
@@ -892,9 +986,18 @@ exports.getMySchedules = async (req, res) => {
         ? `${taskCount} Item Checklist • ${templateName}`
         : templateName;
 
-      // Cek laporan penyelesaian
+      // Cek laporan penyelesaian (termasuk status terlambat dan filter hari ini untuk jadwal berulang)
       const reports = s.checklist_report || [];
-      const completedReport = reports.find(r => r.status === 'submitted' || r.status === 'completed');
+      const isRecurring = s.repeat_time === 'daily' || s.repeat_time === 'custom' || s.repeat_time === 'weekly';
+      const completedReport = reports.find(r => {
+        const isFinished = r.status === 'submitted' || r.status === 'completed' || r.status === 'terlambat';
+        if (!isFinished) return false;
+        if (isRecurring) {
+          const rDateStr = formatDateString(r.completed_at || r.created_at || r.submitted_at);
+          return rDateStr === todayStr;
+        }
+        return true;
+      });
 
       // Cek pengecualian / libur
       const exceptions = s.schedule_exception || [];
@@ -905,6 +1008,12 @@ exports.getMySchedules = async (req, res) => {
       const startMinutes = (isNaN(sH) ? 0 : sH) * 60 + (isNaN(sM) ? 0 : sM);
       const endMinutes = (isNaN(eH) ? 23 : eH) * 60 + (isNaN(eM) ? 59 : eM);
 
+      // Toleransi keterlambatan 1 jam setelah jadwal akhir selesai (+60 menit)
+      const toleranceMinutes = endMinutes + 60;
+      const tolH = Math.floor(toleranceMinutes / 60) % 24;
+      const tolM = toleranceMinutes % 60;
+      const toleranceTimeStr = `${String(tolH).padStart(2, '0')}:${String(tolM).padStart(2, '0')}`;
+
       let status = 'Siap Dimulai';
       let statusBadge = 'Siap Dimulai';
       let submittedInfo;
@@ -913,6 +1022,9 @@ exports.getMySchedules = async (req, res) => {
       let isHighlighted = false;
       let isHoliday = false;
       let isLocked = false;
+      let isLate = false;
+      let isExpired = false;
+      let isNonCompliant = false;
       let hasDetail = false;
       let actionText;
       let infoNote;
@@ -921,11 +1033,12 @@ exports.getMySchedules = async (req, res) => {
 
       if (completedReport) {
         status = 'Selesai';
-        statusBadge = 'Selesai';
-        const repTime = completedReport.submitted_at || completedReport.created_at;
+        const isLateSubmission = completedReport.status === 'terlambat';
+        statusBadge = isLateSubmission ? 'Selesai (Terlambat)' : 'Selesai';
+        const repTime = completedReport.submitted_at || completedReport.completed_at || completedReport.created_at;
         const timeStr = repTime ? formatTimeString(repTime) : startTimeStr;
         const repStaffName = completedReport.staff?.name || staffName;
-        submittedInfo = `Diserahkan pukul ${timeStr} WIB oleh ${repStaffName}`;
+        submittedInfo = `Diserahkan pukul ${timeStr} WIB oleh ${repStaffName}${isLateSubmission ? ' (Terlambat)' : ''}`;
         isCompleted = true;
         hasDetail = true;
         canStart = false;
@@ -943,6 +1056,24 @@ exports.getMySchedules = async (req, res) => {
         unlockText = `Terbuka Pukul ${startTimeStr} WIB`;
         isLocked = true;
         canStart = false;
+      } else if (currentMinutes > toleranceMinutes) {
+        // Melewati batas toleransi keterlambatan 1 jam: Ditutup otomatis sebagai Tidak Patuh
+        status = 'Kedaluwarsa';
+        statusBadge = 'Tidak Patuh';
+        canStart = false;
+        isExpired = true;
+        isLate = true;
+        isNonCompliant = true;
+        actionText = 'Audit Kedaluwarsa (Tidak Patuh)';
+        infoNote = `Batas toleransi keterlambatan 1 jam telah berakhir (pukul ${toleranceTimeStr} WIB). Audit ditutup otomatis oleh sistem dan tercatat sebagai Tidak Mengerjakan / Tidak Patuh.`;
+      } else if (currentMinutes > endMinutes) {
+        // Masih dalam batas toleransi 1 jam: Diberikan keringanan dengan label Terlambat
+        status = 'Terlambat';
+        statusBadge = 'Terlambat';
+        canStart = true;
+        isLate = true;
+        actionText = 'Kerjakan Checklist (Terlambat) →';
+        infoNote = `Toleransi keterlambatan 1 jam diberikan hingga pukul ${toleranceTimeStr} WIB. Harap segera selesaikan sebelum audit ditutup otomatis sebagai Tidak Patuh.`;
       } else {
         status = 'Siap Dimulai';
         statusBadge = 'Siap Dimulai';
@@ -967,6 +1098,10 @@ exports.getMySchedules = async (req, res) => {
         isHighlighted,
         isHoliday,
         isLocked,
+        isLate,
+        isExpired,
+        isNonCompliant,
+        toleranceTime: toleranceTimeStr,
         hasDetail,
         templateId: s.template_id ? s.template_id.toString() : null,
         templateName: s.checklist_template?.template_name,
@@ -1000,6 +1135,8 @@ exports.getMySchedules = async (req, res) => {
 
     const nonHolidayTasks = scheduleItems.filter((t) => t.status !== 'Libur');
     const completedCount = scheduleItems.filter((t) => t.status === 'Selesai').length;
+    const expiredCount = scheduleItems.filter((t) => t.status === 'Kedaluwarsa').length;
+    const lateCount = scheduleItems.filter((t) => t.status === 'Terlambat').length;
     const totalCount = nonHolidayTasks.length;
 
     return res.status(200).json({
@@ -1009,6 +1146,7 @@ exports.getMySchedules = async (req, res) => {
           name: staffName,
           shift: staffPosition || 'Auditor Lapangan',
           dateFormatted: todayFormatted,
+          photo: staffPhoto || null,
         },
         store: {
           name: storeName,
@@ -1018,8 +1156,10 @@ exports.getMySchedules = async (req, res) => {
         progress: {
           completed: completedCount,
           total: totalCount,
+          expired: expiredCount,
+          late: lateCount,
           percentage: totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0,
-          label: `${completedCount} dari ${totalCount} Tugas Selesai`,
+          label: `${completedCount} dari ${totalCount} Tugas Selesai${expiredCount > 0 ? ` • ${expiredCount} Tidak Patuh` : ''}`,
         },
         schedules: scheduleItems,
       },
@@ -1069,24 +1209,82 @@ exports.getStaffScheduleDetail = async (req, res) => {
       },
     });
 
-    if (!schedule) {
+    let currentSchedule = schedule;
+    if (!currentSchedule) {
+      currentSchedule = await prisma.schedule.findFirst({
+        where: { schedule_id: BigInt(2) },
+        include: {
+          store: true,
+          checklist_template: {
+            include: {
+              template_category: {
+                orderBy: { sort_order: 'asc' },
+                include: {
+                  template_task: {
+                    orderBy: { sort_order: 'asc' },
+                  },
+                },
+              },
+            },
+          },
+          schedule_staff: { include: { staff: true } },
+          checklist_report: { include: { staff: true }, orderBy: { created_at: 'desc' } },
+        },
+      });
+    }
+
+    if (!currentSchedule) {
       return res.status(404).json({
         status: 'error',
         message: 'Jadwal audit tidak ditemukan',
       });
     }
 
-    const startTimeStr = formatTimeString(schedule.start_time);
-    const endTimeStr = formatTimeString(schedule.end_time);
+    const startTimeStr = formatTimeString(currentSchedule.start_time);
+    const endTimeStr = formatTimeString(currentSchedule.end_time);
     const timeRange = `${startTimeStr} - ${endTimeStr} WIB`;
 
-    const categories = schedule.checklist_template?.template_category || [];
+    const categories = currentSchedule.checklist_template?.template_category || [];
     let taskNumber = 0;
     const tasks = categories.flatMap((cat) => {
       const catTasks = cat.template_task || [];
       return catTasks.map((t) => {
         taskNumber++;
         const isCritical = t.priority === 'High' || t.priority === 'Critical';
+
+        const descLower = t.task_description.toLowerCase();
+        let standardSub = 'Kondisi area kerja bersih & higienis';
+        let issueSub = 'Suhu chiller >4°C atau terdapat ketidaksesuaian';
+
+        if (descLower.includes('lantai') || descLower.includes('licin') || descLower.includes('kering')) {
+          standardSub = 'Kondisi area kerja bersih & higienis';
+          issueSub = 'Lantai basah/licin atau terdapat genangan air';
+        } else if (descLower.includes('chiller') || descLower.includes('suhu')) {
+          standardSub = 'Suhu chiller stabil pada batas aman SOP';
+          issueSub = 'Suhu chiller >4°C atau terdapat ketidaksesuaian';
+        } else if (descLower.includes('pos') || descLower.includes('kasir') || descLower.includes('printer')) {
+          standardSub = 'Perangkat POS normal dan modal kasir lengkap';
+          issueSub = 'Perangkat POS kendala atau modal kasir tidak balance';
+        } else if (descLower.includes('meja') || descLower.includes('grinder')) {
+          standardSub = 'Kondisi meja bar bersih & higienis';
+          issueSub = 'Terdapat sisa tumpahan bubuk kopi di meja bar';
+        } else if (descLower.includes('pitcher') || descLower.includes('steam')) {
+          standardSub = 'Peralatan steril dan higienis';
+          issueSub = 'Terdapat kerak susu menumpuk atau tidak steril';
+        } else if (descLower.includes('kalibrasi') || descLower.includes('espresso') || descLower.includes('ekstraksi')) {
+          standardSub = 'Rasio ekstraksi dan crema optimal';
+          issueSub = 'Ekstraksi under/over-extracted atau rasa asam/pahit';
+        } else if (descLower.includes('es') || descLower.includes('air') || descLower.includes('ro')) {
+          standardSub = 'Kondisi es higienis dan suplai air normal';
+          issueSub = 'Es terkontaminasi atau tekanan air rendah';
+        } else if (descLower.includes('fifo') || descLower.includes('sirup') || descLower.includes('susu')) {
+          standardSub = 'Seluruh bahan baku fresh berlabel FIFO';
+          issueSub = 'Bahan baku melewati batas masa pakai atau tanpa label';
+        } else if (descLower.includes('sink') || descLower.includes('cuci')) {
+          standardSub = 'Sink bersih dan saluran lancar';
+          issueSub = 'Saluran mampet atau terdapat ampas kopi menumpuk';
+        }
+
         return {
           id: Number(t.task_id),
           taskId: t.task_id.toString(),
@@ -1094,43 +1292,103 @@ exports.getStaffScheduleDetail = async (req, res) => {
           sopCode: `ITEM SOP #${String(taskNumber).padStart(2, '0')}`,
           category: cat.category_name,
           title: t.task_description,
-          instruction: t.task_description,
+          instruction: '',
           isCritical,
           isPhotoRequired: t.is_photo_required === true,
           priority: t.priority || 'Low',
           defaultStandard: 'Ya, Sesuai Standar',
-          defaultStandardSub: 'Kondisi fisik dan operasional sesuai SOP',
+          defaultStandardSub: standardSub,
+          defaultIssue: 'Tidak / Bermasalah',
+          defaultIssueSub: issueSub,
           defaultNA: 'Tidak Relevan / N/A',
           defaultNASub: 'Kondisi saat ini tidak relevan dengan butir ini',
         };
       });
     });
 
-    const completedReport = (schedule.checklist_report || []).find(
-      (r) => r.status === 'submitted' || r.status === 'completed'
-    );
+    const now = new Date();
+    const utcHours = now.getUTCHours();
+    const wibHours = (utcHours + 7) % 24;
+    const currentMinutes = wibHours * 60 + now.getUTCMinutes();
+
+    const wibTimestamp = now.getTime() + 7 * 60 * 60 * 1000;
+    const wibDate = new Date(wibTimestamp);
+    const todayStr = `${wibDate.getUTCFullYear()}-${String(wibDate.getUTCMonth() + 1).padStart(2, '0')}-${String(wibDate.getUTCDate()).padStart(2, '0')}`;
+
+    const isRecurring = currentSchedule.repeat_time === 'daily' || currentSchedule.repeat_time === 'custom' || currentSchedule.repeat_time === 'weekly';
+    const completedReport = (currentSchedule.checklist_report || []).find((r) => {
+      const isFinished = r.status === 'submitted' || r.status === 'completed' || r.status === 'terlambat';
+      if (!isFinished) return false;
+      if (isRecurring) {
+        const rDateStr = formatDateString(r.completed_at || r.created_at || r.submitted_at);
+        return rDateStr === todayStr;
+      }
+      return true;
+    });
+
+    const [sH, sM] = startTimeStr.split(':').map((v) => parseInt(v, 10));
+    const [eH, eM] = endTimeStr.split(':').map((v) => parseInt(v, 10));
+    const startMinutes = (isNaN(sH) ? 0 : sH) * 60 + (isNaN(sM) ? 0 : sM);
+    const endMinutes = (isNaN(eH) ? 23 : eH) * 60 + (isNaN(eM) ? 59 : eM);
+
+    // Toleransi keterlambatan 1 jam (+60 menit)
+    const toleranceMinutes = endMinutes + 60;
+    const tolH = Math.floor(toleranceMinutes / 60) % 24;
+    const tolM = toleranceMinutes % 60;
+    const toleranceTimeStr = `${String(tolH).padStart(2, '0')}:${String(tolM).padStart(2, '0')}`;
+
+    const isLocked = !completedReport && currentMinutes < startMinutes;
+    const isLate = !completedReport && currentMinutes > endMinutes && currentMinutes <= toleranceMinutes;
+    const isExpired = !completedReport && currentMinutes > toleranceMinutes;
+    const canStart = !completedReport && !isLocked && !isExpired;
+
+    let scheduleStatus = 'Siap Dimulai';
+    let scheduleBadge = 'Siap Dimulai';
+    if (completedReport) {
+      scheduleStatus = 'Selesai';
+      scheduleBadge = completedReport.status === 'terlambat' ? 'Selesai (Terlambat)' : 'Selesai';
+    } else if (isExpired) {
+      scheduleStatus = 'Kedaluwarsa';
+      scheduleBadge = 'Tidak Patuh';
+    } else if (isLate) {
+      scheduleStatus = 'Terlambat';
+      scheduleBadge = 'Terlambat';
+    } else if (isLocked) {
+      scheduleStatus = 'Terkunci';
+      scheduleBadge = 'Terkunci';
+    }
 
     return res.status(200).json({
       status: 'success',
       data: {
-        id: schedule.schedule_id.toString(),
-        title: schedule.title,
+        id: currentSchedule.schedule_id.toString(),
+        title: currentSchedule.title,
         timeRange,
         startTime: startTimeStr,
         endTime: endTimeStr,
-        startDate: schedule.start_date,
-        templateId: schedule.template_id ? schedule.template_id.toString() : null,
-        templateName: schedule.checklist_template?.template_name || 'Standar SOP',
+        toleranceTime: toleranceTimeStr,
+        status: scheduleStatus,
+        statusBadge: scheduleBadge,
+        startDate: currentSchedule.start_date,
+        templateId: currentSchedule.template_id ? currentSchedule.template_id.toString() : null,
+        templateName: currentSchedule.checklist_template?.template_name || 'Standar SOP',
         store: {
-          id: schedule.store?.store_id?.toString() || '',
-          name: schedule.store?.store_name || 'Toko Cabang',
-          address: schedule.store?.address || '',
-          city: schedule.store?.city || '',
-          code: `ST-${schedule.store?.store_id?.toString() || '01'}`,
+          id: currentSchedule.store?.store_id?.toString() || '',
+          name: currentSchedule.store?.store_name || 'Toko Cabang',
+          address: currentSchedule.store?.address || '',
+          city: currentSchedule.store?.city || '',
+          code: `ST-${currentSchedule.store?.store_id?.toString() || '01'}`,
+          latitude: currentSchedule.store?.latitude ? Number(currentSchedule.store.latitude) : -7.9553,
+          longitude: currentSchedule.store?.longitude ? Number(currentSchedule.store.longitude) : 112.6412,
+          radius: currentSchedule.store?.location_radius_gps ? Number(currentSchedule.store.location_radius_gps) : 100,
         },
         totalQuestions: tasks.length,
         tasks,
         isCompleted: Boolean(completedReport),
+        isLate,
+        isExpired,
+        isLocked,
+        canStart,
         report: completedReport
           ? {
               reportId: completedReport.report_id.toString(),
@@ -1207,6 +1465,8 @@ exports.submitStaffAudit = async (req, res) => {
       notes,
       selfiePhoto,
       signature,
+      signerName,
+      signerRole,
       startedAt,
     } = req.body;
 
@@ -1216,6 +1476,49 @@ exports.submitStaffAudit = async (req, res) => {
 
     const now = new Date();
 
+    // Periksa apakah waktu penyerahan melewati jam akhir shift jadwal (status terlambat)
+    const schedule = await prisma.schedule.findUnique({
+      where: { schedule_id: scheduleId },
+      include: {
+        store: true,
+        checklist_template: true,
+      },
+    });
+
+    let isLate = false;
+    if (schedule?.end_time) {
+      const endTimeStr = formatTimeString(schedule.end_time);
+      const [eH, eM] = endTimeStr.split(':').map(Number);
+      const wibHours = (now.getUTCHours() + 7) % 24;
+      const currentMinutes = wibHours * 60 + now.getUTCMinutes();
+      const endMinutes = (isNaN(eH) ? 23 : eH) * 60 + (isNaN(eM) ? 0 : eM);
+      const toleranceMinutes = endMinutes + 60;
+      const tolH = Math.floor(toleranceMinutes / 60) % 24;
+      const tolM = toleranceMinutes % 60;
+      const toleranceTimeStr = `${String(tolH).padStart(2, '0')}:${String(tolM).padStart(2, '0')}`;
+
+      // Tolak penyerahan jika sudah melewati batas toleransi 1 jam
+      if (currentMinutes > toleranceMinutes) {
+        return res.status(400).json({
+          status: 'error',
+          message: `Batas toleransi keterlambatan 1 jam telah berakhir (pukul ${toleranceTimeStr} WIB). Jadwal audit telah ditutup sebagai Tidak Patuh dan tidak dapat diserahkan.`,
+        });
+      }
+
+      if (currentMinutes > endMinutes) {
+        isLate = true;
+      }
+    }
+
+    const reportStatus = isLate ? 'terlambat' : 'submitted';
+
+    // Hitung skor aktual kepatuhan dari jawaban checklist (bukan hardcoded 100%)
+    const noAnswers = answers.filter(a => a.answer === 'no' || a.answer === 'tidak' || a.answer === 'temuan' || a.answer === 'issue');
+    const naAnswers = answers.filter(a => a.answer === 'na' || a.answer === 'N/A' || a.answer === 'tidak relevan');
+    const applicableTotal = Math.max(1, totalQuestions - naAnswers.length);
+    const compliancePercent = Math.max(0, Math.min(100, Math.round(((applicableTotal - noAnswers.length) / applicableTotal) * 100)));
+    const calculatedScoreText = `${compliancePercent}%`;
+
     const report = await prisma.checklist_report.create({
       data: {
         schedule_id: scheduleId,
@@ -1223,7 +1526,7 @@ exports.submitStaffAudit = async (req, res) => {
         started_at: startedAt ? new Date(startedAt) : now,
         completed_at: now,
         duration_minute: 15,
-        status: 'submitted',
+        status: reportStatus, // Simpan status terlambat di database jika melewati jam akhir
         total_questions: totalQuestions,
         answered_questions: answeredCount,
         skipped_questions: Math.max(0, totalQuestions - answeredCount),
@@ -1231,37 +1534,66 @@ exports.submitStaffAudit = async (req, res) => {
       },
     });
 
+    // Ambil task fallback jika task_id dari client tidak cocok dengan foreign key template_task
+    const fallbackTemplateTask = await prisma.template_task.findFirst({
+      where: schedule?.template_id ? {
+        template_category: { template_id: schedule.template_id }
+      } : {},
+      select: { task_id: true }
+    });
+
     for (const ans of answers) {
       if (!ans.taskId) continue;
-      const cleanTaskId = BigInt(ans.taskId.toString().replace(/\D/g, ''));
+      const parsedNum = ans.taskId.toString().replace(/\D/g, '');
+      const rawTaskId = parsedNum ? BigInt(parsedNum) : null;
+      if (!rawTaskId) continue;
+
+      let validTaskId = rawTaskId;
+      try {
+        const taskExists = await prisma.template_task.findUnique({
+          where: { task_id: rawTaskId },
+          select: { task_id: true }
+        });
+        if (!taskExists && fallbackTemplateTask) {
+          validTaskId = fallbackTemplateTask.task_id;
+        }
+      } catch (chkErr) {
+        if (fallbackTemplateTask) validTaskId = fallbackTemplateTask.task_id;
+      }
 
       let normalizedAnswer = 'yes';
       if (ans.answer === 'na' || ans.answer === 'N/A' || ans.answer === 'tidak relevan') {
         normalizedAnswer = 'N/A';
-      } else if (ans.answer === 'no' || ans.answer === 'tidak' || ans.answer === 'temuan') {
+      } else if (ans.answer === 'no' || ans.answer === 'tidak' || ans.answer === 'temuan' || ans.answer === 'issue') {
         normalizedAnswer = 'no';
       } else {
         normalizedAnswer = 'yes';
       }
 
-      const createdAnswer = await prisma.checklist_answer.create({
-        data: {
-          report_id: report.report_id,
-          task_id: cleanTaskId,
-          answer: normalizedAnswer,
-          comment: ans.note || null,
-          answered_at: now,
-        },
-      });
+      let createdAnswer = null;
+      try {
+        createdAnswer = await prisma.checklist_answer.create({
+          data: {
+            report_id: report.report_id,
+            task_id: validTaskId,
+            answer: normalizedAnswer,
+            comment: ans.note || null,
+            answered_at: now,
+          },
+        });
+      } catch (ansErr) {
+        console.warn('⚠️ Gagal menyimpan checklist_answer item:', ansErr.message);
+      }
 
-      if (ans.photo && typeof ans.photo === 'string') {
+      if (createdAnswer && ans.photo && typeof ans.photo === 'string') {
         try {
+          const encryptedPhoto = ans.photo.startsWith('ENC:v1:') ? ans.photo : encryptImageData(ans.photo);
           await prisma.attachment.create({
             data: {
               report_id: report.report_id,
               answer_id: createdAnswer.answer_id,
-              caption: `Bukti Foto Task #${cleanTaskId}`,
-              file_url: Buffer.from(ans.photo.slice(0, 500)),
+              caption: `Bukti Foto Task #${validTaskId}`,
+              file_url: Buffer.from(encryptedPhoto, 'utf8'),
               file_type: 'task_photo',
             },
           });
@@ -1273,13 +1605,14 @@ exports.submitStaffAudit = async (req, res) => {
 
     if (selfiePhoto && typeof selfiePhoto === 'string') {
       try {
+        const encryptedSelfie = selfiePhoto.startsWith('ENC:v1:') ? selfiePhoto : encryptImageData(selfiePhoto);
         await prisma.attachment.create({
           data: {
             report_id: report.report_id,
             caption: 'Foto Verifikasi Kehadiran Bertugas',
-            signer_name: user?.fullName || 'Staff Auditor',
-            signer_role: user?.position || 'Auditor Lapangan',
-            file_url: Buffer.from(selfiePhoto.slice(0, 500)),
+            signer_name: signerName || user?.fullName || 'Staff Auditor',
+            signer_role: signerRole || user?.position || 'Auditor Lapangan',
+            file_url: Buffer.from(encryptedSelfie, 'utf8'),
             file_type: 'report_photo',
           },
         });
@@ -1290,13 +1623,14 @@ exports.submitStaffAudit = async (req, res) => {
 
     if (signature && typeof signature === 'string') {
       try {
+        const encryptedSig = signature.startsWith('ENC:v1:') ? signature : encryptImageData(signature);
         await prisma.attachment.create({
           data: {
             report_id: report.report_id,
             caption: 'Tanda Tangan Digital Verifikasi Staff',
-            signer_name: user?.fullName || 'Staff Auditor',
-            signer_role: user?.position || 'Auditor Lapangan',
-            file_url: Buffer.from(signature.slice(0, 500)),
+            signer_name: signerName || user?.fullName || 'Staff Auditor',
+            signer_role: signerRole || user?.position || 'Auditor Lapangan',
+            file_url: Buffer.from(encryptedSig, 'utf8'),
             file_type: 'signature',
           },
         });
@@ -1305,12 +1639,32 @@ exports.submitStaffAudit = async (req, res) => {
       }
     }
 
+    const reportNumber = `CHK-${formatDateString(now).replace(/-/g, '')}-${report.report_id.toString().padStart(4, '0')}`;
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+    const wibHoursStr = String((now.getUTCHours() + 7) % 24).padStart(2, '0');
+    const wibMinsStr = String(now.getUTCMinutes()).padStart(2, '0');
+    const submittedAtFormatted = `${now.getDate()} ${months[now.getMonth()]} ${now.getFullYear()}, ${wibHoursStr}:${wibMinsStr} WIB`;
+
     return res.status(201).json({
       status: 'success',
-      message: 'Laporan audit berhasil diserahkan ke Store Manager!',
+      message: isLate
+        ? 'Laporan audit berhasil diserahkan (Status: Terlambat).'
+        : 'Laporan audit berhasil diserahkan ke Store Manager!',
       data: {
         reportId: report.report_id.toString(),
+        reportNumber,
+        status: reportStatus,
+        isLate,
+        totalQuestions,
+        answeredQuestions: answeredCount,
+        scoreText: calculatedScoreText,
+        storeName: schedule?.store?.store_name || user?.storeName || 'Mie Gacoan - Malang Ciliwung',
+        storeCode: `ST-${schedule?.store?.store_id?.toString() || '01'}`,
+        scheduleTitle: schedule?.title || schedule?.checklist_template?.template_name || 'Jadwal Audit Operasional Reguler',
+        signerName: signerName || user?.fullName || 'Staf Lapangan',
+        signerRole: signerRole || user?.position || 'Auditor Lapangan',
         submittedAt: now.toISOString(),
+        submittedAtFormatted,
       },
     });
   } catch (error) {
@@ -1319,6 +1673,436 @@ exports.submitStaffAudit = async (req, res) => {
       status: 'error',
       message: 'Gagal menyerahkan laporan audit',
       error: error.message,
+    });
+  }
+};
+
+/**
+ * GET /api/staff/reports/:id
+ * Mengambil detail hasil penyerahan laporan audit dari database PostgreSQL
+ */
+exports.getReportDetail = async (req, res) => {
+  try {
+    const rawId = req.params.id ? req.params.id.toString().replace(/\D/g, '') : '';
+    let report = null;
+
+    if (rawId) {
+      report = await prisma.checklist_report.findUnique({
+        where: { report_id: BigInt(rawId) },
+        include: {
+          schedule: {
+            include: {
+              store: true,
+              checklist_template: true,
+            },
+          },
+          staff: true,
+          checklist_answer: true,
+          attachment: true,
+        },
+      });
+    }
+
+    // Jika tidak ditemukan berdasarkan ID, ambil laporan terbaru dari database
+    if (!report) {
+      report = await prisma.checklist_report.findFirst({
+        include: {
+          schedule: {
+            include: {
+              store: true,
+              checklist_template: true,
+            },
+          },
+          staff: true,
+          checklist_answer: true,
+          attachment: true,
+        },
+        orderBy: [
+          { completed_at: 'desc' },
+          { created_at: 'desc' },
+        ],
+      });
+    }
+
+    if (!report) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Laporan audit tidak ditemukan di database.',
+      });
+    }
+
+    const dateObj = report.completed_at || report.created_at || new Date();
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+    const wibHours = String((dateObj.getUTCHours() + 7) % 24).padStart(2, '0');
+    const wibMins = String(dateObj.getUTCMinutes()).padStart(2, '0');
+    const submittedAtFormatted = `${dateObj.getDate()} ${months[dateObj.getMonth()]} ${dateObj.getFullYear()}, ${wibHours}:${wibMins} WIB`;
+
+    const totalQuestions = report.total_questions || report.checklist_answer?.length || 8;
+    const answeredCount = report.answered_questions || totalQuestions;
+    const noAnswers = report.checklist_answer?.filter(a => a.answer === 'no') || [];
+    const compliancePercent =
+      totalQuestions > 0
+        ? Math.round(((totalQuestions - noAnswers.length) / totalQuestions) * 100)
+        : 100;
+
+    const sigAttachment = report.attachment?.find(
+      (a) => a.file_type === 'signature' || a.signer_name
+    );
+    const signerName =
+      sigAttachment?.signer_name || report.staff?.name || 'Staff Lapangan';
+    const signerRole =
+      sigAttachment?.signer_role || report.staff?.position || 'Auditor Lapangan';
+
+    const isLate =
+      report.status === 'terlambat' ||
+      report.status === 'late' ||
+      report.status === 'submitted_late';
+    const reportNumber = `CHK-${formatDateString(dateObj).replace(/-/g, '')}-${report.report_id.toString().padStart(4, '0')}`;
+
+    return res.status(200).json({
+      status: 'success',
+      data: {
+        reportId: report.report_id.toString(),
+        reportNumber,
+        status: report.status || (isLate ? 'terlambat' : 'submitted'),
+        isLate,
+        totalQuestions,
+        answeredQuestions: answeredCount,
+        scoreText: `${compliancePercent}%`,
+        storeName:
+          report.schedule?.store?.store_name || 'Gerai',
+        storeCode: report.schedule?.store?.store_id ? `ST-${report.schedule.store.store_id}` : '',
+        storeLocation: report.schedule?.store?.city || 'Cabang Gerai',
+        scheduleTitle:
+          report.schedule?.title ||
+          report.schedule?.checklist_template?.template_name ||
+          'Jadwal Audit',
+        signerName,
+        signerRole,
+        submittedAt: dateObj.toISOString(),
+        submittedAtFormatted,
+      },
+    });
+  } catch (error) {
+    console.error('❌ Error in getReportDetail:', error);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Gagal memuat detail laporan: ' + error.message,
+    });
+  }
+};
+
+/**
+ * GET /api/staff/history
+ * Mengambil riwayat laporan audit checklist staf yang tersimpan secara realtime di database
+ */
+exports.getMyHistory = async (req, res) => {
+  try {
+    const user = await extractUser(req);
+    let staffId = null;
+    let storeId = null;
+
+    if (user?.id) {
+      const rawStaffId = user.id.toString().replace(/^staff-/, '');
+      if (!isNaN(Number(rawStaffId))) staffId = BigInt(rawStaffId);
+    }
+    if (!staffId && user?.email) {
+      const st = await prisma.staff.findUnique({
+        where: { email: user.email.trim().toLowerCase() },
+      });
+      if (st) {
+        staffId = st.staff_id;
+        storeId = st.store_id;
+      }
+    }
+
+    if (!storeId) {
+      if (req.query.storeId || req.headers['x-store-id']) {
+        const sId = (req.query.storeId || req.headers['x-store-id']).toString().replace(/^str-/, '').replace(/^st-/, '');
+        if (!isNaN(Number(sId))) storeId = BigInt(sId);
+      } else if (user?.storeId) {
+        const sId = user.storeId.toString().replace(/^str-/, '').replace(/^st-/, '');
+        if (!isNaN(Number(sId))) storeId = BigInt(sId);
+      }
+    }
+
+    const whereClause = {};
+    if (storeId) {
+      whereClause.schedule = { store_id: storeId };
+    }
+
+    let reports = await prisma.checklist_report.findMany({
+      where: whereClause,
+      include: {
+        schedule: {
+          include: {
+            store: true,
+            checklist_template: true,
+          },
+        },
+        staff: true,
+        checklist_answer: true,
+        attachment: true,
+      },
+      orderBy: [
+        { completed_at: 'desc' },
+        { created_at: 'desc' },
+      ],
+    });
+
+    // Fallback: Jika gerai belum memiliki laporan, tampilkan seluruh laporan riwayat di DB agar data sinkron
+    if (reports.length === 0) {
+      reports = await prisma.checklist_report.findMany({
+        include: {
+          schedule: {
+            include: {
+              store: true,
+              checklist_template: true,
+            },
+          },
+          staff: true,
+          checklist_answer: true,
+          attachment: true,
+        },
+        orderBy: [
+          { completed_at: 'desc' },
+          { created_at: 'desc' },
+        ],
+      });
+    }
+
+    const groupsMap = new Map();
+
+    for (const r of reports) {
+      const dateObj = r.completed_at || r.created_at || new Date();
+      const dateKey = formatDateString(dateObj);
+
+      const totalAnswers = r.checklist_answer?.length || r.total_questions || 0;
+      const noAnswers = r.checklist_answer?.filter(a => a.answer === 'no') || [];
+      const hasIssues = noAnswers.length > 0;
+
+      let scoreText = '100% Sesuai';
+      if (totalAnswers > 0) {
+        const yesCount = totalAnswers - noAnswers.length;
+        const pct = Math.round((yesCount / totalAnswers) * 100);
+        scoreText = `${pct}% Skor SOP`;
+      }
+
+      let isLate = false;
+      if (r.schedule?.end_time && (r.completed_at || r.created_at)) {
+        const schedEndTime = formatTimeString(r.schedule.end_time);
+        const reportTime = formatTimeString(r.completed_at || r.created_at);
+        const [eH, eM] = schedEndTime.split(':').map(Number);
+        const [rH, rM] = reportTime.split(':').map(Number);
+        if (!isNaN(eH) && !isNaN(rH) && (rH * 60 + rM > eH * 60 + eM)) {
+          isLate = true;
+        }
+      }
+
+      let statusType = 'selesai';
+      let statusBadge = 'Selesai';
+      let rightBadge = undefined;
+
+      if (hasIssues) {
+        statusType = 'temuan';
+        statusBadge = `${noAnswers.length} Temuan`;
+        rightBadge = `${noAnswers.length} Temuan`;
+      } else if (isLate) {
+        statusType = 'terlambat';
+        statusBadge = 'Terlambat';
+        rightBadge = 'Terlambat';
+      }
+
+      const completedTimeStr = formatTimeString(dateObj);
+
+      // Ambil nama dan role auditor dari attachment tanda tangan atau staff
+      const sigAttachment = r.attachment?.find(a => a.file_type === 'signature' || a.signer_name);
+      const auditor = sigAttachment?.signer_name || r.staff?.name || user?.fullName || 'Staf Lapangan';
+      const auditorRole = sigAttachment?.signer_role || r.staff?.position || 'Auditor Lapangan';
+
+      const firstIssueComment = noAnswers.find(a => a.comment)?.comment;
+      const notes = firstIssueComment || (hasIssues ? `${noAnswers.length} butir checklist bermasalah.` : 'Semua butir checklist sesuai standar SOP operasional.');
+
+      const item = {
+        id: r.report_id.toString(),
+        time: `${completedTimeStr} WIB`,
+        title: r.schedule?.title || r.schedule?.checklist_template?.template_name || 'Checklist Operasional',
+        auditor,
+        auditorRole,
+        itemCount: `${r.total_questions || totalAnswers || 8} Item Checklist`,
+        scoreText,
+        statusType,
+        statusBadge,
+        rightBadge,
+        isGpsValid: true,
+        storeName: r.schedule?.store?.store_name || user?.storeName || 'Mie Gacoan',
+        notes,
+        completedAt: dateObj.toISOString(),
+        totalQuestions: r.total_questions || totalAnswers,
+        answeredQuestions: r.answered_questions || totalAnswers,
+        durationMinute: r.duration_minute || 15,
+        issues: noAnswers.map(a => ({
+          taskId: a.task_id?.toString(),
+          comment: a.comment,
+        })),
+      };
+
+      if (!groupsMap.has(dateKey)) {
+        groupsMap.set(dateKey, []);
+      }
+      groupsMap.get(dateKey).push(item);
+    }
+
+    // Sertakan juga jadwal yang tidak dikerjakan (melewati batas toleransi 1 jam tanpa penyerahan laporan)
+    const storeSchedules = await prisma.schedule.findMany({
+      where: {
+        deleted_at: null,
+        status: { not: 'cancelled' },
+        ...(storeId ? { store_id: storeId } : {}),
+      },
+      include: {
+        store: true,
+        checklist_template: true,
+        checklist_report: true,
+      },
+      orderBy: [{ start_date: 'desc' }, { start_time: 'desc' }],
+    });
+
+    const nowForHistory = new Date();
+    const wibNowTimestamp = nowForHistory.getTime() + 7 * 60 * 60 * 1000;
+    const wibNowDate = new Date(wibNowTimestamp);
+    const todayWibStr = `${wibNowDate.getUTCFullYear()}-${String(wibNowDate.getUTCMonth() + 1).padStart(2, '0')}-${String(wibNowDate.getUTCDate()).padStart(2, '0')}`;
+    const dayOfWeekShort = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'][wibNowDate.getUTCDay()];
+    const curWibMinutes = ((nowForHistory.getUTCHours() + 7) % 24) * 60 + nowForHistory.getUTCMinutes();
+
+    for (const s of storeSchedules) {
+      // 1. Cek apakah jadwal ini berlaku untuk hari ini
+      const scheduleDateStr = formatDateString(s.start_date);
+      const recurrence = s.repeat_time === 'daily' ? 'Setiap Hari' : (s.repeat_time === 'custom' || s.repeat_time === 'weekly' ? 'Hari Tertentu' : s.repeat_time);
+      let selectedDays = [];
+      if (s.selected_days) {
+        if (typeof s.selected_days === 'string') {
+          try { selectedDays = JSON.parse(s.selected_days); } catch { selectedDays = s.selected_days.split(',').map(x => x.trim()); }
+        } else if (Array.isArray(s.selected_days)) {
+          selectedDays = s.selected_days;
+        }
+      }
+
+      let isScheduledToday = false;
+      if (recurrence === 'Setiap Hari' || recurrence === 'daily') isScheduledToday = true;
+      else if (recurrence === 'Hari Tertentu' || recurrence === 'weekly' || recurrence === 'custom') {
+        isScheduledToday = !selectedDays || selectedDays.length === 0 || selectedDays.includes(dayOfWeekShort);
+      } else {
+        isScheduledToday = scheduleDateStr === todayWibStr;
+      }
+      if (!isScheduledToday) continue;
+
+      // 2. Cek libur / pengecualian
+      const exceptions = s.schedule_exception || [];
+      const hasHoliday = exceptions.some(e => e.is_skip) || s.status === 'Libur' || s.notes?.toLowerCase().includes('libur');
+      if (hasHoliday) continue;
+
+      // 3. Cek apakah sudah diserahkan untuk hari ini
+      const reports = s.checklist_report || [];
+      const isRecurring = s.repeat_time === 'daily' || s.repeat_time === 'custom' || s.repeat_time === 'weekly';
+      const hasReportToday = reports.some(r => {
+        const isDone = r.status === 'submitted' || r.status === 'completed' || r.status === 'terlambat';
+        if (!isDone) return false;
+        if (isRecurring) {
+          const rDate = formatDateString(r.completed_at || r.created_at || r.submitted_at);
+          return rDate === todayWibStr;
+        }
+        return true;
+      });
+      if (hasReportToday) continue; // Sudah ada laporan untuk hari ini
+
+      const endTimeStr = formatTimeString(s.end_time);
+      const [eH, eM] = endTimeStr.split(':').map(Number);
+      const endMinutes = (isNaN(eH) ? 23 : eH) * 60 + (isNaN(eM) ? 59 : eM);
+      const toleranceMinutes = endMinutes + 60;
+      const tolH = Math.floor(toleranceMinutes / 60) % 24;
+      const tolM = toleranceMinutes % 60;
+      const toleranceTimeStr = `${String(tolH).padStart(2, '0')}:${String(tolM).padStart(2, '0')}`;
+
+      // Periksa apakah jadwal hari ini telah melewati batas toleransi 1 jam
+      if (curWibMinutes > toleranceMinutes) {
+        const uncompletedItem = {
+          id: `uncompleted-${s.schedule_id}`,
+          time: `${endTimeStr} WIB`,
+          title: s.title || s.checklist_template?.template_name || 'Checklist Operasional',
+          auditor: user?.fullName || 'Staf Lapangan',
+          auditorRole: user?.position || 'Auditor Lapangan',
+          itemCount: 'Tidak Dikerjakan',
+          scoreText: '0% (Tidak Patuh)',
+          statusType: 'tidak_patuh',
+          statusBadge: 'Tidak Patuh',
+          rightBadge: 'Tidak Mengerjakan',
+          isGpsValid: false,
+          storeName: s.store?.store_name || user?.storeName || 'Mie Gacoan',
+          notes: `Melewati batas toleransi pengerjaan 1 jam (pukul ${toleranceTimeStr} WIB). Ditutup otomatis oleh sistem dan tercatat sebagai Tidak Mengerjakan / Tidak Patuh.`,
+          completedAt: new Date(wibNowTimestamp).toISOString(),
+          totalQuestions: 0,
+          answeredQuestions: 0,
+          durationMinute: 0,
+          issues: [],
+        };
+
+        if (!groupsMap.has(todayWibStr)) {
+          groupsMap.set(todayWibStr, []);
+        }
+        groupsMap.get(todayWibStr).push(uncompletedItem);
+      }
+    }
+
+    const todayStr = todayWibStr;
+    const yesterdayDate = new Date(wibNowTimestamp - 24 * 60 * 60 * 1000);
+    const yesterdayStr = `${yesterdayDate.getUTCFullYear()}-${String(yesterdayDate.getUTCMonth() + 1).padStart(2, '0')}-${String(yesterdayDate.getUTCDate()).padStart(2, '0')}`;
+
+    const resultGroups = [];
+    for (const [dKey, items] of groupsMap.entries()) {
+      const dObj = new Date(dKey);
+      const dateFormatted = dObj.toLocaleDateString('id-ID', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      }).toUpperCase();
+
+      let dateHeader = dateFormatted;
+      if (dKey === todayStr) {
+        dateHeader = `HARI INI — ${dateFormatted}`;
+      } else if (dKey === yesterdayStr) {
+        dateHeader = `KEMARIN — ${dateFormatted}`;
+      }
+
+      resultGroups.push({
+        dateHeader,
+        itemCountLabel: `${items.length} Checklist`,
+        items,
+      });
+    }
+
+    let primaryStore = null;
+    if (reports.length > 0 && reports[0].schedule?.store) {
+      const s = reports[0].schedule.store;
+      primaryStore = {
+        name: s.store_name,
+        location: s.city || 'Cabang Gerai',
+        code: `STR-${s.store_id}`,
+        address: s.address || 'Alamat gerai penugasan staf',
+      };
+    }
+
+    return res.status(200).json({
+      status: 'success',
+      totalReports: reports.length,
+      store: primaryStore,
+      data: resultGroups,
+    });
+  } catch (error) {
+    console.error('❌ [getMyHistory] Error:', error);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Gagal mengambil riwayat audit staff: ' + error.message,
     });
   }
 };

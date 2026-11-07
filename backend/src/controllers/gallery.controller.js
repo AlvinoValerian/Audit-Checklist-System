@@ -1,6 +1,50 @@
 const prisma = require('../config/prisma');
 const { extractUser } = require('../middlewares/auth.middleware');
+const { decryptImageData } = require('../utils/imageCrypto');
 const { decryptImage, encryptImage, isEncrypted } = require('../utils/crypto.utils');
+
+/**
+ * Helper untuk dekripsi attachment URL foto galeri (mendukung ENC:v1 dan enc:v1)
+ */
+const decryptAttachmentUrl = (file_url) => {
+  if (!file_url) return '';
+  let raw = '';
+  if (Buffer.isBuffer(file_url) || file_url instanceof Uint8Array || Array.isArray(file_url)) {
+    raw = Buffer.from(file_url).toString('utf-8');
+  } else if (typeof file_url === 'string') {
+    if (/^\d+(,\d+)+$/.test(file_url)) {
+      const nums = file_url.split(',').map((n) => parseInt(n, 10));
+      raw = Buffer.from(nums).toString('utf-8');
+    } else {
+      raw = file_url;
+    }
+  } else if (file_url.data && (Array.isArray(file_url.data) || Buffer.isBuffer(file_url.data))) {
+    raw = Buffer.from(file_url.data).toString('utf-8');
+  }
+
+  if (!raw || typeof raw !== 'string') return '';
+  raw = raw.trim();
+
+  if (raw.startsWith('ENC:v1:')) {
+    try {
+      const dec = decryptImageData(raw);
+      if (dec && dec.length > 0) return dec;
+    } catch (e) {
+      console.warn('⚠️ Gagal decrypt ENC:v1 di gallery:', e.message);
+    }
+  }
+
+  if (raw.startsWith('enc:v1:') || isEncrypted(raw)) {
+    try {
+      const dec = decryptImage(raw);
+      if (dec && dec.length > 0) return dec;
+    } catch (e) {
+      console.warn('⚠️ Gagal decrypt enc:v1 di gallery:', e.message);
+    }
+  }
+
+  return raw;
+};
 
 // Koleksi visual foto inspeksi audit toko ritel berkualitas tinggi
 const GALLERY_SEEDS = [
@@ -281,24 +325,7 @@ ensureGallerySeed();
  * Helper untuk format satu foto attachment ke interface AuditPhoto
  */
 const formatPhoto = (att, report, fallbackIndex) => {
-  let rawUrl = '';
-  if (att.file_url) {
-    if (Buffer.isBuffer(att.file_url)) {
-      rawUrl = att.file_url.toString('utf-8');
-    } else if (att.file_url instanceof Uint8Array || Array.isArray(att.file_url)) {
-      rawUrl = Buffer.from(att.file_url).toString('utf-8');
-    } else if (typeof att.file_url === 'string') {
-      if (/^\d+(,\d+)+$/.test(att.file_url)) {
-        const nums = att.file_url.split(',').map((n) => parseInt(n, 10));
-        rawUrl = Buffer.from(nums).toString('utf-8');
-      } else {
-        rawUrl = att.file_url;
-      }
-    } else if (att.file_url.data && Array.isArray(att.file_url.data)) {
-      rawUrl = Buffer.from(att.file_url.data).toString('utf-8');
-    }
-    rawUrl = isEncrypted(rawUrl) ? decryptImage(rawUrl) : rawUrl;
-  }
+  let rawUrl = decryptAttachmentUrl(att.file_url);
 
   // Jika URL di database adalah link dummy broken atau kosong, gunakan gambar ritel valid
   if (!rawUrl || rawUrl.includes('broken') || rawUrl.trim() === '') {
@@ -309,7 +336,9 @@ const formatPhoto = (att, report, fallbackIndex) => {
   let category = 'Area Toko & Operasional';
   let checklistQuestion = 'Apakah fasilitas toko sesuai dengan standar SOP audit?';
   let hasIssue = false;
-  let issueSeverity = 'Rendah';
+  let isPhotoRequired = true; // default untuk foto lampiran
+  let priority = 'High';
+  let issueSeverity = 'Tinggi';
   let issueDescription = '';
   let description = '';
 
@@ -321,25 +350,40 @@ const formatPhoto = (att, report, fallbackIndex) => {
       category = parsed.category || category;
       checklistQuestion = parsed.checklistQuestion || checklistQuestion;
       hasIssue = Boolean(parsed.hasIssue);
-      issueSeverity = parsed.issueSeverity || issueSeverity;
+      isPhotoRequired = Boolean(parsed.isPhotoRequired ?? parsed.requirePhoto ?? true);
+      priority = isPhotoRequired || parsed.priority === 'High' || parsed.issueSeverity === 'Tinggi' ? 'High' : 'Low';
+      issueSeverity = priority === 'High' ? 'Tinggi' : 'Rendah';
       issueDescription = parsed.issueDescription || '';
       description = parsed.description || '';
     } catch (e) {}
   } else {
-    // Ambil dari checklist_answer jika ada relasi
-    if (att.checklist_answer) {
+    // Tangani foto kehadiran auditor lapangan
+    if (att.file_type === 'report_photo') {
+      caption = 'Foto Kehadiran & Serah Terima';
+      category = 'Verifikasi Kehadiran';
+      checklistQuestion = 'Dokumentasi foto diri auditor berseragam lengkap dan verifikasi kehadiran fisik di gerai';
+      hasIssue = false;
+      isPhotoRequired = true;
+      priority = 'High';
+      issueSeverity = 'Tinggi';
+      description = 'Validasi kehadiran fisik auditor bertugas di gerai fisik.';
+    } else if (att.checklist_answer) {
       const ans = att.checklist_answer;
       if (ans.answer === 'no') {
         hasIssue = true;
-        issueSeverity = 'Tinggi';
         issueDescription = ans.comment || 'Ditemukan ketidaksesuaian butir checklist.';
       }
       description = ans.comment || '';
       if (ans.template_task) {
-        checklistQuestion = ans.template_task.task_name || checklistQuestion;
+        checklistQuestion = ans.template_task.task_description || ans.template_task.task_name || checklistQuestion;
         if (ans.template_task.template_category) {
-          category = ans.template_task.template_category.name || category;
+          category = ans.template_task.template_category.name || ans.template_task.template_category.category_name || category;
         }
+        // Aturan: Wajib foto (is_photo_required = true) => Priority High ('Tinggi')
+        //         Tidak wajib foto (is_photo_required = false) => Priority Low ('Rendah')
+        isPhotoRequired = Boolean(ans.template_task.is_photo_required);
+        priority = isPhotoRequired || ans.template_task.priority === 'High' ? 'High' : 'Low';
+        issueSeverity = priority === 'High' ? 'Tinggi' : 'Rendah';
       }
     }
   }
@@ -361,6 +405,8 @@ const formatPhoto = (att, report, fallbackIndex) => {
     category,
     checklistQuestion,
     hasIssue,
+    isPhotoRequired,
+    priority,
     issueSeverity: hasIssue ? issueSeverity : undefined,
     issueDescription: hasIssue ? issueDescription : undefined,
     description: description || undefined,
@@ -379,7 +425,10 @@ const formatGalleryLog = (report) => {
   const staff = report.staff || {};
   const workspace = store.workspace || {};
 
-  const photos = (report.attachment || []).map((att, idx) => formatPhoto(att, report, idx + 1));
+  // Hanya tampilkan foto bukti task inspeksi di galeri (filter keluar signature dan foto diri/selfie staff)
+  const photos = (report.attachment || [])
+    .filter((att) => att.file_type !== 'signature' && att.file_type !== 'report_photo')
+    .map((att, idx) => formatPhoto(att, report, idx + 1));
 
   const issueCount = photos.filter((p) => p.hasIssue).length;
   const status = issueCount > 0 ? 'Issue' : 'Semua Sesuai';
@@ -481,7 +530,11 @@ exports.getAllGalleryLogs = async (req, res) => {
       };
     }
 
-    // 3. Ambil data dari database PostgreSQL
+    // 3. Ambil data dari database PostgreSQL (Kecualikan laporan tidak mengerjakan / kedaluwarsa)
+    where.status = {
+      notIn: ['tidak_mengerjakan', 'tidak_patuh', 'kedaluwarsa', 'expired', 'draft'],
+    };
+
     const reports = await prisma.checklist_report.findMany({
       where,
       include: {
@@ -517,7 +570,8 @@ exports.getAllGalleryLogs = async (req, res) => {
       orderBy: { created_at: 'desc' },
     });
 
-    let formatted = reports.map(formatGalleryLog);
+    // Format dan HANYA tampilkan log yang memiliki foto task inspeksi valid (status tidak mengerjakan/tanpa foto tidak tampil)
+    let formatted = reports.map(formatGalleryLog).filter((log) => log.photos && log.photos.length > 0);
 
     // 4. Filter Lanjutan (Search, Status, Category, OnlyIssues, DateRange)
     if (search && search.trim()) {
