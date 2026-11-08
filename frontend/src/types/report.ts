@@ -1,10 +1,12 @@
-export type ReportStatus = "Masalah" | "Sesuai";
+export type ReportStatus = "Masalah" | "Sesuai" | "Tidak Mengerjakan";
 
 export interface ChecklistFinding {
   id: string;
   itemTitle: string;
   category: string;
   hasIssue: boolean;
+  priority?: "High" | "Low";
+  isPhotoRequired?: boolean;
   issueNote?: string;
   severity?: "Rendah" | "Sedang" | "Tinggi";
   photoUrl?: string;

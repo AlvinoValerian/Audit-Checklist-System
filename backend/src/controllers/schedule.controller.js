@@ -27,6 +27,22 @@ const formatTimeString = (time) => {
 };
 
 /**
+ * Konversi string waktu format apapun (termasuk jika ada AM/PM) menjadi format 24 jam "HH:mm"
+ */
+const to24HourString = (str) => {
+  if (!str) return '09:00';
+  str = String(str).trim();
+  const match = str.match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?$/i);
+  if (!match) return str.substring(0, 5);
+  let h = parseInt(match[1], 10);
+  const m = match[2];
+  const ampm = match[3] ? match[3].toUpperCase() : null;
+  if (ampm === 'PM' && h < 12) h += 12;
+  if (ampm === 'AM' && h === 12) h = 0;
+  return `${String(h).padStart(2, '0')}:${m}`;
+};
+
+/**
  * Format string tanggal atau Date object menjadi "YYYY-MM-DD"
  */
 const formatDateString = (date) => {
@@ -86,9 +102,32 @@ const isScheduleRunningNow = (scheduleRecord) => {
   return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
 };
 
-const computeRealtimeStatus = (rawStatus, scheduleDateStr, endTimeStr, recurrence, selectedDays) => {
+const calculateDuration = (startTimeStr, endTimeStr) => {
+  if (!startTimeStr || !endTimeStr) return '0 Jam';
+  const [sH, sM] = startTimeStr.split(':').map((v) => parseInt(v, 10));
+  const [eH, eM] = endTimeStr.split(':').map((v) => parseInt(v, 10));
+  if (isNaN(sH) || isNaN(eH)) return '0 Jam';
+
+  let startMin = sH * 60 + (isNaN(sM) ? 0 : sM);
+  let endMin = eH * 60 + (isNaN(eM) ? 0 : eM);
+  if (endMin < startMin) endMin += 24 * 60;
+  const diff = endMin - startMin;
+  const hours = Math.floor(diff / 60);
+  const minutes = diff % 60;
+
+  if (minutes === 0) return `${hours} Jam`;
+  if (hours === 0) return `${minutes} Menit`;
+  return `${hours} Jam ${minutes} Menit`;
+};
+
+const computeRealtimeStatus = (rawStatus, scheduleDateStr, startTimeStr, endTimeStr, recurrence, selectedDays, hasCompletedReport = false) => {
   if (rawStatus === 'cancelled' || rawStatus === 'Dibatalkan' || rawStatus === 'inactive') {
     return 'Dibatalkan';
+  }
+
+  // Jika sudah dikerjakan oleh staff:
+  if (hasCompletedReport) {
+    return 'Selesai';
   }
 
   const now = new Date();
@@ -98,6 +137,11 @@ const computeRealtimeStatus = (rawStatus, scheduleDateStr, endTimeStr, recurrenc
   const todayStr = `${y}-${m}-${d}`;
   const dayOfWeekShort = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'][now.getDay()];
 
+  // Jika tanggal jadwal masa lalu (< today) dan bukan pengulangan berulang, maka sudah selesai:
+  if (scheduleDateStr && scheduleDateStr < todayStr && recurrence !== 'Setiap Hari' && recurrence !== 'Hari Tertentu') {
+    return 'Selesai';
+  }
+
   // Cek apakah jadwal ini aktif/berlaku pada hari ini (today):
   const runsToday =
     scheduleDateStr === todayStr ||
@@ -105,24 +149,50 @@ const computeRealtimeStatus = (rawStatus, scheduleDateStr, endTimeStr, recurrenc
     (recurrence === 'Hari Tertentu' && Array.isArray(selectedDays) && selectedDays.includes(dayOfWeekShort));
 
   if (runsToday) {
-    if (endTimeStr) {
-      const parts = endTimeStr.split(':');
-      if (parts.length >= 2) {
-        const endH = parseInt(parts[0], 10);
-        const endM = parseInt(parts[1], 10);
-        if (!isNaN(endH) && !isNaN(endM)) {
-          const scheduleEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), endH, endM, 0, 0);
-          if (now.getTime() >= scheduleEnd.getTime()) {
+    if (startTimeStr && endTimeStr) {
+      const [sH, sM] = startTimeStr.split(':').map((v) => parseInt(v, 10));
+      const [eH, eM] = endTimeStr.split(':').map((v) => parseInt(v, 10));
+      if (!isNaN(sH) && !isNaN(eH)) {
+        const currentMinutes = now.getHours() * 60 + now.getMinutes();
+        const startMinutes = sH * 60 + (isNaN(sM) ? 0 : sM);
+        const endMinutes = eH * 60 + (isNaN(eM) ? 0 : eM);
+
+        if (endMinutes >= startMinutes) {
+          // Jadwal normal dalam satu hari (misal 09:00 - 12:00)
+          if (currentMinutes < startMinutes) {
+            return 'Terjadwal';
+          } else if (currentMinutes <= endMinutes) {
+            return 'Sedang Berjalan';
+          } else {
+            // Jam akhir sudah selesai / terlewati jam sekarang!
             return 'Selesai';
           }
+        } else {
+          // Jadwal shift malam lintas hari (misal 22:00 - 02:00)
+          if (currentMinutes >= startMinutes || currentMinutes <= endMinutes) {
+            return 'Sedang Berjalan';
+          } else {
+            return 'Terjadwal';
+          }
+        }
+      }
+    } else if (startTimeStr) {
+      const [sH, sM] = startTimeStr.split(':').map((v) => parseInt(v, 10));
+      if (!isNaN(sH)) {
+        const currentMinutes = now.getHours() * 60 + now.getMinutes();
+        const startMinutes = sH * 60 + (isNaN(sM) ? 0 : sM);
+        if (currentMinutes < startMinutes) {
+          return 'Terjadwal';
+        } else {
+          return 'Sedang Berjalan';
         }
       }
     }
     return 'Terjadwal';
   }
 
-  // Jika bukan hari ini:
-  if (scheduleDateStr < todayStr) {
+  // Jika tanggal lampau (< today):
+  if (scheduleDateStr && scheduleDateStr < todayStr) {
     return 'Selesai';
   }
 
@@ -157,7 +227,9 @@ const formatSchedule = (s) => {
     auditorName = s.admin.name;
   }
 
-  const status = computeRealtimeStatus(s.status, date, endTime, recurrence, selectedDays);
+  const hasCompletedReport = Array.isArray(s.checklist_report) && s.checklist_report.some(r => r.status === 'completed' || r.status === 'submitted');
+  const status = computeRealtimeStatus(s.status, date, startTime, endTime, recurrence, selectedDays, hasCompletedReport);
+  const duration = calculateDuration(startTime, endTime);
 
   const storeName = s.store?.store_name || 'Cabang Toko';
   let storeLocation = s.store?.city || s.store?.address || 'Jakarta Pusat';
@@ -181,10 +253,12 @@ const formatSchedule = (s) => {
     timeRange: `${startTime} - ${endTime}`,
     startTime,
     endTime,
+    duration,
     date,
     recurrence,
     selectedDays,
     status,
+    isCompletedByStaff: hasCompletedReport,
     notes: s.notes || '',
     createdAt,
     deletedAt,
@@ -231,6 +305,13 @@ exports.getAllSchedules = async (req, res) => {
         schedule_staff: {
           include: { staff: true },
         },
+        checklist_report: {
+          select: {
+            report_id: true,
+            status: true,
+            completed_at: true,
+          },
+        },
       },
       orderBy: [
         { start_date: 'desc' },
@@ -272,6 +353,13 @@ exports.getScheduleById = async (req, res) => {
         admin: true,
         schedule_staff: {
           include: { staff: true },
+        },
+        checklist_report: {
+          select: {
+            report_id: true,
+            status: true,
+            completed_at: true,
+          },
         },
       },
     });
@@ -433,9 +521,18 @@ exports.createSchedule = async (req, res) => {
         adminId = fallbackAdmin?.admin_id;
       }
 
-      // 4. Resolusi Waktu & Tanggal
-      const startTimeStr = item.startTime || '09:00';
-      const endTimeStr = item.endTime || '12:00';
+      // 4. Resolusi Waktu & Tanggal (Pastikan Format 24 Jam)
+      let startTimeStr = item.startTime || '09:00';
+      let endTimeStr = item.endTime || '12:00';
+      if ((!item.startTime || !item.endTime) && item.timeRange) {
+        const parts = item.timeRange.replace(/WIB/gi, '').split('-');
+        if (parts.length >= 2) {
+          if (!item.startTime) startTimeStr = parts[0].trim();
+          if (!item.endTime) endTimeStr = parts[1].trim();
+        }
+      }
+      startTimeStr = to24HourString(startTimeStr);
+      endTimeStr = to24HourString(endTimeStr);
       const dateStr = item.date || new Date().toISOString().split('T')[0];
 
       const startDateTime = new Date(`1970-01-01T${startTimeStr.padStart(5, '0')}:00.000Z`);
@@ -551,11 +648,13 @@ exports.updateSchedule = async (req, res) => {
     }
 
     if (body.startTime) {
-      updateData.start_time = new Date(`1970-01-01T${body.startTime.padStart(5, '0')}:00.000Z`);
+      const cleanStart = to24HourString(body.startTime);
+      updateData.start_time = new Date(`1970-01-01T${cleanStart.padStart(5, '0')}:00.000Z`);
     }
 
     if (body.endTime) {
-      updateData.end_time = new Date(`1970-01-01T${body.endTime.padStart(5, '0')}:00.000Z`);
+      const cleanEnd = to24HourString(body.endTime);
+      updateData.end_time = new Date(`1970-01-01T${cleanEnd.padStart(5, '0')}:00.000Z`);
     }
 
     if (body.date) {

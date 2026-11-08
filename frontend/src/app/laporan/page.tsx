@@ -15,6 +15,7 @@ import {
   X,
   Loader2,
   Building2,
+  AlertCircle,
 } from "lucide-react";
 import { ReportService } from "@/services/report.service";
 import { AuditReportItem } from "@/types/report";
@@ -53,7 +54,7 @@ export default function LaporanPage() {
   // Selected Report for Full Detail View
   const [selectedReportToView, setSelectedReportToView] = useState<AuditReportItem | null>(null);
 
-  const statusOptions = ["Semua Status", "Masalah", "Sesuai"];
+  const statusOptions = ["Semua Status", "Masalah", "Sesuai", "Tidak Mengerjakan"];
 
   // Load Data from Backend
   const loadReportsData = useCallback(async (showLoading = true, customWsId?: string) => {
@@ -196,6 +197,9 @@ export default function LaporanPage() {
         return false;
       }
       if (selectedStatus === "Sesuai" && item.status !== "Sesuai") {
+        return false;
+      }
+      if (selectedStatus === "Tidak Mengerjakan" && item.status !== "Tidak Mengerjakan") {
         return false;
       }
 
@@ -419,19 +423,29 @@ export default function LaporanPage() {
                       className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold ${
                         selectedStatus === "Sesuai"
                           ? "bg-emerald-50 border border-emerald-200 text-emerald-700"
+                          : selectedStatus === "Tidak Mengerjakan"
+                          ? "bg-rose-100 border border-rose-300 text-rose-800"
                           : "bg-rose-50 border border-rose-200 text-rose-600"
                       }`}
                     >
                       <span
                         className={`w-1.5 h-1.5 rounded-full ${
-                          selectedStatus === "Sesuai" ? "bg-emerald-500" : "bg-rose-500"
+                          selectedStatus === "Sesuai"
+                            ? "bg-emerald-500"
+                            : selectedStatus === "Tidak Mengerjakan"
+                            ? "bg-rose-700"
+                            : "bg-rose-500"
                         }`}
                       />
-                      Status: {selectedStatus === "Masalah" ? "Ada Masalah" : "Sesuai"}
+                      Status: {selectedStatus === "Masalah" ? "Ada Masalah" : selectedStatus}
                       <button
                         onClick={() => setSelectedStatus("Semua Status")}
                         className={`ml-0.5 cursor-pointer ${
-                          selectedStatus === "Sesuai" ? "hover:text-emerald-900" : "hover:text-rose-800"
+                          selectedStatus === "Sesuai"
+                            ? "hover:text-emerald-900"
+                            : selectedStatus === "Tidak Mengerjakan"
+                            ? "hover:text-rose-950"
+                            : "hover:text-rose-800"
                         }`}
                       >
                         <X className="w-3 h-3" />
@@ -597,7 +611,17 @@ export default function LaporanPage() {
 
                           {/* Status & Priority */}
                           <td className="px-5 py-3.5 whitespace-nowrap">
-                            {row.status === "Masalah" ? (
+                            {row.status === "Tidak Mengerjakan" ? (
+                              <div className="flex flex-col gap-0.5 items-start">
+                                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9.5px] font-bold bg-rose-100 border border-rose-300 text-rose-800 whitespace-nowrap">
+                                  <AlertCircle className="w-3 h-3 text-rose-700 shrink-0" />
+                                  <span>Tidak Mengerjakan</span>
+                                </span>
+                                <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[8px] font-extrabold uppercase tracking-wider bg-rose-200 text-rose-900 border border-rose-300">
+                                  Tidak Patuh
+                                </span>
+                              </div>
+                            ) : row.status === "Masalah" ? (
                               <div className="flex flex-col gap-0.5 items-start">
                                 <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9.5px] font-bold bg-rose-50 border border-rose-200 text-rose-600 whitespace-nowrap">
                                   <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />

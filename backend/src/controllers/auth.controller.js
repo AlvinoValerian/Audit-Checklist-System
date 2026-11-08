@@ -1,6 +1,7 @@
 const prisma = require('../config/prisma');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const { encryptImageData, decryptImageData } = require('../utils/imageCrypto');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'audit_checklist_system_jwt_secret_key_2024';
 
@@ -414,7 +415,8 @@ exports.login = async (req, res) => {
             role: 'Staff',
             storeId: staff.store_id.toString(),
             storeName: staff.store ? staff.store.store_name : 'Toko Cabang',
-            storeLocation: staff.store ? (staff.store.address || staff.store.city || 'Cabang') : 'Cabang',
+            storeLocation: staff.store ? (staff.store.city || staff.store.address || 'Cabang') : 'Cabang',
+            storeAddress: staff.store?.address || staff.store?.city || '-',
             storeCode: storeCode,
             workspaceId: staff.store?.workspace_id?.toString() || staff.admin?.workspace_id?.toString() || '',
             workspaceName: staff.store?.workspace?.company_name || 'Workspace',
@@ -495,7 +497,8 @@ exports.getMe = async (req, res) => {
             role: 'Staff',
             storeId: st.store_id.toString(),
             storeName: st.store ? st.store.store_name : 'Toko Cabang',
-            storeLocation: st.store ? (st.store.address || st.store.city || 'Cabang') : 'Cabang',
+            storeLocation: st.store ? (st.store.city || st.store.address || 'Cabang') : 'Cabang',
+            storeAddress: st.store?.address || st.store?.city || '-',
             storeCode: st.store ? `ST-${st.store.store_id.toString()}` : 'ST-01',
             workspaceId: st.store?.workspace_id?.toString() || '',
             workspaceName: st.store?.workspace?.company_name || 'Workspace',
@@ -559,16 +562,19 @@ exports.updateProfile = async (req, res) => {
     const superAdminIdHeader = req.headers['x-super-admin-id'];
     const userIdHeader = req.headers['x-user-id'];
     const userEmailHeader = req.headers['x-user-email'];
+    const userRoleHeader = req.headers['x-user-role'];
 
     let rawId = null;
     let email = null;
+    let role = userRoleHeader || null;
 
     if (authHeader && authHeader.startsWith('Bearer ')) {
       try {
         const token = authHeader.split(' ')[1];
         const decoded = jwt.verify(token, JWT_SECRET);
-        rawId = decoded.rawId;
+        rawId = decoded.rawId || decoded.id;
         email = decoded.email;
+        if (decoded.role) role = decoded.role;
       } catch (err) {
         // Fallback ke headers
       }
@@ -581,82 +587,238 @@ exports.updateProfile = async (req, res) => {
       email = userEmailHeader;
     }
 
-    // 1. Coba cari di super_admin terlebih dahulu
-    let sa = null;
-    if (rawId && !rawId.startsWith('adm-')) {
-      try {
+    // Normalisasi role dari prefix jika ada
+    if (typeof rawId === 'string') {
+      if (rawId.startsWith('staff-')) {
+        role = 'Staff';
+        rawId = rawId.replace(/^staff-/, '');
+      } else if (rawId.startsWith('sa-')) {
+        role = 'Super Admin';
+        rawId = rawId.replace(/^sa-/, '');
+      } else if (rawId.startsWith('adm-')) {
+        role = 'Admin';
+        rawId = rawId.replace(/^adm-/, '');
+      }
+    }
+
+    const cleanNumericId = rawId && !isNaN(Number(rawId)) ? BigInt(rawId.toString().replace(/\D/g, '')) : null;
+
+    // 1. JIKA ROLE ADALAH STAFF (atau login domain staf)
+    if (role === 'Staff' || (email && email.includes('@gacoan.com')) || (email && email.includes('@dikichi.com')) || (email && email.includes('@baksogacoan.com'))) {
+      let staff = null;
+      if (cleanNumericId) {
+        staff = await prisma.staff.findUnique({
+          where: { staff_id: cleanNumericId },
+          include: { store: { include: { workspace: true } } },
+        });
+      }
+      if (!staff && email) {
+        staff = await prisma.staff.findUnique({
+          where: { email: email.trim().toLowerCase() },
+          include: { store: { include: { workspace: true } } },
+        });
+      }
+
+      if (staff) {
+        const updateData = {};
+        if (typeof name === 'string' && name.trim()) {
+          updateData.name = name.trim();
+        }
+        if (profilePicture !== undefined) {
+          updateData.photo = encryptImageData(profilePicture);
+        }
+
+        const updatedStaff = await prisma.staff.update({
+          where: { staff_id: staff.staff_id },
+          data: updateData,
+          include: {
+            store: { include: { workspace: true } },
+          },
+        });
+
+        return res.status(200).json({
+          status: 'success',
+          message: 'Profil Staf berhasil diperbarui.',
+          data: {
+            fullName: updatedStaff.name,
+            profilePicture: updatedStaff.photo,
+            user: {
+              id: `staff-${updatedStaff.staff_id.toString()}`,
+              rawId: updatedStaff.staff_id.toString(),
+              fullName: updatedStaff.name,
+              email: updatedStaff.email,
+              phone: updatedStaff.phone_number || '-',
+              role: 'Staff',
+              storeId: updatedStaff.store_id.toString(),
+              storeName: updatedStaff.store ? updatedStaff.store.store_name : 'Toko Cabang',
+              storeLocation: updatedStaff.store ? (updatedStaff.store.city || updatedStaff.store.address || 'Cabang') : 'Cabang',
+              storeAddress: updatedStaff.store?.address || updatedStaff.store?.city || '-',
+              storeCode: updatedStaff.store ? `ST-${updatedStaff.store.store_id.toString()}` : 'ST-01',
+              workspaceId: updatedStaff.store?.workspace_id?.toString() || '',
+              workspaceName: updatedStaff.store?.workspace?.company_name || 'Workspace',
+              status: updatedStaff.status === 'inactive' || updatedStaff.status === 'Nonaktif' ? 'Nonaktif' : 'Aktif',
+              profilePicture: updatedStaff.photo || null,
+            },
+          },
+        });
+      }
+    }
+
+    // 2. JIKA ROLE ADALAH SUPER ADMIN
+    if (role === 'Super Admin' || superAdminIdHeader) {
+      let sa = null;
+      if (cleanNumericId) {
         sa = await prisma.super_admin.findUnique({
-          where: { super_admin_id: BigInt(rawId.replace(/^sa-/, '')) },
+          where: { super_admin_id: cleanNumericId },
         });
-      } catch (e) {}
-    }
-    if (!sa && email) {
-      sa = await prisma.super_admin.findUnique({
-        where: { email: email.trim().toLowerCase() },
-      });
-    }
-
-    if (sa) {
-      const updateData = {};
-      if (typeof name === 'string' && name.trim()) {
-        updateData.name = name.trim();
       }
-      if (profilePicture !== undefined) {
-        updateData.profile_picture = profilePicture;
+      if (!sa && email) {
+        sa = await prisma.super_admin.findUnique({
+          where: { email: email.trim().toLowerCase() },
+        });
       }
 
-      const updatedSa = await prisma.super_admin.update({
-        where: { super_admin_id: sa.super_admin_id },
-        data: updateData,
-      });
+      if (sa) {
+        const updateData = {};
+        if (typeof name === 'string' && name.trim()) {
+          updateData.name = name.trim();
+        }
+        if (profilePicture !== undefined) {
+          updateData.profile_picture = encryptImageData(profilePicture);
+        }
 
-      return res.status(200).json({
-        status: 'success',
-        message: 'Profil Super Admin berhasil diperbarui.',
-        data: {
-          fullName: updatedSa.name,
-          profilePicture: updatedSa.profile_picture,
-        },
-      });
+        const updatedSa = await prisma.super_admin.update({
+          where: { super_admin_id: sa.super_admin_id },
+          data: updateData,
+        });
+
+        return res.status(200).json({
+          status: 'success',
+          message: 'Profil Super Admin berhasil diperbarui.',
+          data: {
+            fullName: updatedSa.name,
+            profilePicture: updatedSa.profile_picture,
+          },
+        });
+      }
     }
 
-    // 2. Jika bukan Super Admin, cari di tabel admin
-    let adm = null;
-    if (rawId) {
-      try {
+    // 3. JIKA ROLE ADALAH ADMIN
+    if (role === 'Admin' || role === 'Divisi Teknis' || role === 'Store Manager' || role === 'Area Manager') {
+      let adm = null;
+      if (cleanNumericId) {
         adm = await prisma.admin.findUnique({
-          where: { admin_id: BigInt(rawId.replace(/^adm-/, '')) },
+          where: { admin_id: cleanNumericId },
         });
-      } catch (e) {}
-    }
-    if (!adm && email) {
-      adm = await prisma.admin.findUnique({
-        where: { email: email.trim().toLowerCase() },
-      });
-    }
-
-    if (adm) {
-      const updateData = {};
-      if (typeof name === 'string' && name.trim()) {
-        updateData.name = name.trim();
       }
-      if (profilePicture !== undefined) {
-        updateData.profile_picture = profilePicture;
+      if (!adm && email) {
+        adm = await prisma.admin.findUnique({
+          where: { email: email.trim().toLowerCase() },
+        });
       }
 
-      const updatedAdm = await prisma.admin.update({
-        where: { admin_id: adm.admin_id },
-        data: updateData,
-      });
+      if (adm) {
+        const updateData = {};
+        if (typeof name === 'string' && name.trim()) {
+          updateData.name = name.trim();
+        }
+        if (profilePicture !== undefined) {
+          updateData.profile_picture = encryptImageData(profilePicture);
+        }
 
-      return res.status(200).json({
-        status: 'success',
-        message: 'Profil Admin berhasil diperbarui.',
-        data: {
-          fullName: updatedAdm.name,
-          profilePicture: updatedAdm.profile_picture,
-        },
+        const updatedAdm = await prisma.admin.update({
+          where: { admin_id: adm.admin_id },
+          data: updateData,
+        });
+
+        return res.status(200).json({
+          status: 'success',
+          message: 'Profil Admin berhasil diperbarui.',
+          data: {
+            fullName: updatedAdm.name,
+            profilePicture: updatedAdm.profile_picture,
+          },
+        });
+      }
+    }
+
+    // 4. FALLBACK UMUM: Cari berdasarkan EMAIL (karena email unik di setiap tabel)
+    if (email) {
+      const cleanEmail = email.trim().toLowerCase();
+
+      // Cek tabel staff
+      const staffByEmail = await prisma.staff.findUnique({
+        where: { email: cleanEmail },
+        include: { store: { include: { workspace: true } } },
       });
+      if (staffByEmail) {
+        const updateData = {};
+        if (typeof name === 'string' && name.trim()) updateData.name = name.trim();
+        if (profilePicture !== undefined) updateData.photo = encryptImageData(profilePicture);
+
+        const updatedStaff = await prisma.staff.update({
+          where: { staff_id: staffByEmail.staff_id },
+          data: updateData,
+          include: { store: { include: { workspace: true } } },
+        });
+
+        return res.status(200).json({
+          status: 'success',
+          message: 'Profil Staf berhasil diperbarui.',
+          data: {
+            fullName: updatedStaff.name,
+            profilePicture: updatedStaff.photo,
+          },
+        });
+      }
+
+      // Cek tabel admin
+      const admByEmail = await prisma.admin.findUnique({
+        where: { email: cleanEmail },
+      });
+      if (admByEmail) {
+        const updateData = {};
+        if (typeof name === 'string' && name.trim()) updateData.name = name.trim();
+        if (profilePicture !== undefined) updateData.profile_picture = encryptImageData(profilePicture);
+
+        const updatedAdm = await prisma.admin.update({
+          where: { admin_id: admByEmail.admin_id },
+          data: updateData,
+        });
+
+        return res.status(200).json({
+          status: 'success',
+          message: 'Profil Admin berhasil diperbarui.',
+          data: {
+            fullName: updatedAdm.name,
+            profilePicture: updatedAdm.profile_picture,
+          },
+        });
+      }
+
+      // Cek tabel super_admin
+      const saByEmail = await prisma.super_admin.findUnique({
+        where: { email: cleanEmail },
+      });
+      if (saByEmail) {
+        const updateData = {};
+        if (typeof name === 'string' && name.trim()) updateData.name = name.trim();
+        if (profilePicture !== undefined) updateData.profile_picture = encryptImageData(profilePicture);
+
+        const updatedSa = await prisma.super_admin.update({
+          where: { super_admin_id: saByEmail.super_admin_id },
+          data: updateData,
+        });
+
+        return res.status(200).json({
+          status: 'success',
+          message: 'Profil Super Admin berhasil diperbarui.',
+          data: {
+            fullName: updatedSa.name,
+            profilePicture: updatedSa.profile_picture,
+          },
+        });
+      }
     }
 
     return res.status(404).json({

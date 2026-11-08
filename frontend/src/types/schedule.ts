@@ -1,4 +1,4 @@
-export type ScheduleStatus = "Terjadwal" | "Selesai" | "Dibatalkan";
+export type ScheduleStatus = "Terjadwal" | "Sedang Berjalan" | "Selesai" | "Dibatalkan";
 export type RecurrenceType = "Setiap Hari" | "Hari Tertentu";
 
 export interface AuditSchedule {
@@ -15,6 +15,8 @@ export interface AuditSchedule {
   timeRange: string;
   startTime?: string;
   endTime?: string;
+  duration?: string;
+  isCompletedByStaff?: boolean;
   date: string; // YYYY-MM-DD
   recurrence: RecurrenceType;
   selectedDays?: string[];

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, Suspense } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Store as StoreIcon,
   Check,
@@ -10,93 +10,108 @@ import {
   Clock,
   User,
   ArrowRight,
-  Cloud,
   X,
-  Share2,
-  Download,
   Smartphone,
   Maximize2,
-  Wifi,
-  Battery,
-  Signal,
   RotateCcw,
-  Sparkles,
-  ShieldCheck,
 } from "lucide-react";
-import { toast, Toaster } from "sonner";
+import { Toaster } from "sonner";
 import { AuthService, AuthUser } from "@/lib/auth";
+
+interface ReportDetail {
+  reportId: string;
+  reportNumber: string;
+  status: string;
+  isLate: boolean;
+  totalQuestions: number;
+  answeredQuestions: number;
+  scoreText: string;
+  storeName: string;
+  storeCode: string;
+  storeLocation: string;
+  scheduleTitle: string;
+  signerName: string;
+  signerRole: string;
+  submittedAt: string;
+  submittedAtFormatted: string;
+}
 
 function TerkirimContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const reportIdParam = searchParams.get("reportId") || "";
+  const scheduleIdParam = searchParams.get("scheduleId") || "";
 
-  const [currentTime, setCurrentTime] = useState<string>("11:38");
-  const [currentDateFormatted, setCurrentDateFormatted] = useState<string>(
-    "24 Okt 2024, 11:38 WIB"
-  );
   const [isFullscreenMode, setIsFullscreenMode] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
-  const [showPdfModal, setShowPdfModal] = useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [report, setReport] = useState<ReportDetail | null>(null);
 
   useEffect(() => {
     const user = AuthService.getCurrentUser();
     setCurrentUser(user);
 
-    // Pastikan task sch-2 tersimpan sebagai selesai di localStorage
+    // Bersihkan sisa cache lokal pengerjaan tugas
     if (typeof window !== "undefined") {
       try {
-        const completed = JSON.parse(
-          localStorage.getItem("staff_completed_tasks") || "[]"
-        );
-        if (!completed.includes("sch-2")) {
-          completed.push("sch-2");
-          localStorage.setItem("staff_completed_tasks", JSON.stringify(completed));
-        }
-      } catch (e) {
-        console.warn(e);
-      }
+        localStorage.removeItem("staff_completed_tasks");
+      } catch (e) {}
     }
 
-    const updateClock = () => {
-      const now = new Date();
-      const hours = String(now.getHours()).padStart(2, "0");
-      const minutes = String(now.getMinutes()).padStart(2, "0");
-      setCurrentTime(`${hours}:${minutes}`);
+    // Ambil data detail laporan resmi dari backend database PostgreSQL
+    const fetchReport = async () => {
+      try {
+        setLoading(true);
+        const token = AuthService.getToken();
+        const headers: Record<string, string> = {};
+        if (token) headers["Authorization"] = `Bearer ${token}`;
 
-      const months = [
-        "Jan",
-        "Feb",
-        "Mar",
-        "Apr",
-        "Mei",
-        "Jun",
-        "Jul",
-        "Agu",
-        "Sep",
-        "Okt",
-        "Nov",
-        "Des",
-      ];
-      setCurrentDateFormatted(
-        `${now.getDate()} ${months[now.getMonth()]} ${now.getFullYear()}, ${hours}:${minutes} WIB`
-      );
+        const endpoint = reportIdParam
+          ? `/api/staff/reports/${reportIdParam}`
+          : `/api/staff/reports/latest`;
+
+        let res = await fetch(endpoint, { headers });
+        if (!res.ok) {
+          res = await fetch(`http://127.0.0.1:5000${endpoint}`, { headers });
+        }
+
+        if (res.ok) {
+          const json = await res.json();
+          if (json.data) {
+            setReport(json.data);
+          }
+        }
+      } catch (err) {
+        console.error("Gagal memuat detail laporan database:", err);
+      } finally {
+        setLoading(false);
+      }
     };
-    updateClock();
-    const timer = setInterval(updateClock, 30000);
-    return () => clearInterval(timer);
-  }, []);
 
-  const displayName = currentUser?.fullName || "Siti Rahmawati";
-  const displayLocation =
-    currentUser?.storeLocation || currentUser?.storeCode
-      ? `${currentUser.storeLocation || "Mall Kelapa Gading 3"} (${currentUser.storeCode || "KK-JKT-15"})`
-      : "Mall Kelapa Gading 3 (KK-JKT-15)";
+    fetchReport();
+  }, [reportIdParam, scheduleIdParam]);
+
+  const displayReportNumber = report?.reportNumber
+    ? (report.reportNumber.startsWith("#") ? report.reportNumber : `#${report.reportNumber}`)
+    : (reportIdParam ? `#CHK-${reportIdParam.slice(0, 8).toUpperCase()}` : "-");
+  const isLate = Boolean(report?.isLate || report?.status === "terlambat");
+  const totalItems = report?.totalQuestions ?? 0;
+  const answeredItems = report?.answeredQuestions ?? totalItems;
+  const scorePercent = report?.scoreText || "-";
+  const displayStore = report?.storeName
+    ? `${report.storeName}${report.storeCode ? ` (${report.storeCode})` : ""}`
+    : (currentUser?.storeLocation || "-");
+  const displaySchedule = report?.scheduleTitle || "-";
+  const displaySigner = report?.signerName || currentUser?.fullName || "-";
+  const displayRole = report?.signerRole || currentUser?.position || "";
+  const displayTime = report?.submittedAtFormatted || "-";
 
   const handleReturnToDashboard = () => {
-    router.push("/jadwal-staff?completed=sch-2");
+    router.push("/jadwal-staff");
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center sm:py-6 p-0 sm:px-4 font-sans select-none antialiased">
+    <div className="fixed inset-0 flex flex-col overflow-hidden bg-slate-900 sm:relative sm:inset-auto sm:min-h-screen sm:bg-slate-900 sm:flex sm:items-center sm:justify-center sm:py-6 sm:px-4 font-sans antialiased">
       <Toaster position="top-center" richColors />
 
       {/* Floating Mode Toggle untuk Layar Laptop / Desktop */}
@@ -107,7 +122,7 @@ function TerkirimContent() {
         </span>
         <button
           onClick={() => setIsFullscreenMode(!isFullscreenMode)}
-          className="ml-2 text-[11px] font-semibold text-slate-400 hover:text-white bg-slate-700/50 hover:bg-slate-700 px-2.5 py-1 rounded-full transition-all flex items-center gap-1 cursor-pointer"
+          className="ml-2 text-[11px] font-semibold text-slate-400 hover:text-white bg-slate-700/50 hover:bg-slate-700 px-2.5 py-1 rounded-full transition-all flex items-center gap-1 cursor-pointer touch-manipulation active:scale-95"
         >
           <Maximize2 className="w-3 h-3" />
           {isFullscreenMode ? "Bingkai HP" : "Layar Penuh"}
@@ -116,27 +131,17 @@ function TerkirimContent() {
 
       {/* Smartphone Device Frame Container */}
       <div
-        className={`w-full bg-[#f8fbff] text-slate-900 transition-all duration-300 relative flex flex-col ${
+        className={`w-full h-full flex flex-col bg-[#f8fbff] text-slate-900 transition-all duration-300 relative ${
           isFullscreenMode
-            ? "max-w-md min-h-screen sm:rounded-none sm:shadow-none"
-            : "max-w-[420px] min-h-[844px] sm:max-h-[92vh] sm:rounded-[42px] sm:shadow-[0_25px_60px_-15px_rgba(0,0,0,0.6)] sm:border-[9px] sm:border-slate-800 sm:ring-1 sm:ring-white/10 overflow-hidden"
+            ? "max-w-md sm:rounded-none sm:shadow-none sm:h-screen"
+            : "sm:h-[844px] sm:max-h-[92vh] sm:max-w-[420px] sm:rounded-[42px] sm:shadow-[0_25px_60px_-15px_rgba(0,0,0,0.6)] sm:border-[9px] sm:border-slate-800 sm:ring-1 sm:ring-white/10 overflow-hidden"
         }`}
       >
         {/* Dynamic Island / Speaker Pill on Desktop Frame */}
         <div className="hidden sm:block absolute top-2 left-1/2 -translate-x-1/2 w-28 h-4 bg-slate-900 rounded-full z-40 pointer-events-none" />
 
-        {/* 1. Mobile Status Bar */}
-        <div className="pt-3 px-6 pb-1 flex items-center justify-between text-slate-900 font-semibold text-xs tracking-tight z-20 shrink-0 select-none bg-transparent">
-          <span className="text-sm font-bold tracking-tight">{currentTime}</span>
-          <div className="flex items-center gap-1.5 text-slate-800">
-            <Signal className="w-3.5 h-3.5 stroke-[2.2]" />
-            <Wifi className="w-3.5 h-3.5 stroke-[2.2]" />
-            <Battery className="w-4 h-4 stroke-[2.2]" />
-          </div>
-        </div>
-
-        {/* 2. Top Navigation Bar matching the image */}
-        <div className="px-5 py-3 flex items-center justify-between shrink-0">
+        {/* 2. Top Navigation Bar matching the design */}
+        <div className="px-5 pt-3.5 sm:pt-3 pb-3 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-lg bg-white shadow-2xs border border-slate-200/80 flex items-center justify-center text-slate-800">
               <StoreIcon className="w-4 h-4 stroke-[2.2]" />
@@ -152,7 +157,7 @@ function TerkirimContent() {
             </span>
             <button
               onClick={handleReturnToDashboard}
-              className="w-7 h-7 rounded-full hover:bg-slate-200/60 text-slate-500 hover:text-slate-800 flex items-center justify-center transition-colors cursor-pointer"
+              className="w-7 h-7 rounded-full hover:bg-slate-200/60 text-slate-500 hover:text-slate-800 flex items-center justify-center transition-colors cursor-pointer touch-manipulation active:scale-95"
               aria-label="Tutup"
             >
               <X className="w-4 h-4 stroke-[2.2]" />
@@ -161,7 +166,7 @@ function TerkirimContent() {
         </div>
 
         {/* Scrollable Body Content */}
-        <div className="flex-1 overflow-y-auto px-5 py-3 flex flex-col justify-between">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 py-3 flex flex-col justify-between">
           <div>
             {/* 3. Hero Success Icon with Glow Ring */}
             <div className="text-center mt-2 sm:mt-4">
@@ -188,15 +193,24 @@ function TerkirimContent() {
 
             {/* 4. Receipt / Verification Summary Card */}
             <div className="bg-white rounded-3xl p-5 border border-slate-100/90 shadow-[0_4px_24px_rgba(0,0,0,0.04)] mt-6 space-y-4">
-              {/* Header: Audit Code & Verified Badge */}
-              <div className="flex items-center justify-between pb-1">
+              {/* Header: Audit Code & Verified Badges */}
+              <div className="flex items-center justify-between pb-1 flex-wrap gap-2">
                 <div className="flex items-center gap-1.5 text-xs font-mono font-bold text-slate-800">
                   <CheckCircle2 className="w-3.5 h-3.5 text-blue-600" />
-                  <span>#CHK-20241024-8824</span>
+                  <span>{loading ? "Memuat..." : displayReportNumber}</span>
                 </div>
-                <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-semibold rounded-md">
-                  Terverifikasi GPS & E-Sign
-                </span>
+
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {isLate && (
+                    <span className="px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-bold rounded-md flex items-center gap-1">
+                      <Clock className="w-3 h-3 text-amber-600" />
+                      <span>Terlambat</span>
+                    </span>
+                  )}
+                  <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-semibold rounded-md">
+                    Terverifikasi GPS & E-Sign
+                  </span>
+                </div>
               </div>
 
               {/* Evaluation Score Box */}
@@ -210,13 +224,13 @@ function TerkirimContent() {
                       HASIL EVALUASI
                     </span>
                     <span className="text-sm font-bold text-slate-900 leading-tight mt-0.5 block">
-                      8 dari 8 Item Selesai
+                      {loading ? "Menghitung data..." : `${answeredItems} dari ${totalItems} Item Selesai`}
                     </span>
                   </div>
                 </div>
 
                 <span className="px-3 py-1 bg-emerald-100 text-emerald-800 font-bold text-sm rounded-full">
-                  100%
+                  {loading ? "..." : scorePercent}
                 </span>
               </div>
 
@@ -228,7 +242,7 @@ function TerkirimContent() {
                     <span>Toko</span>
                   </span>
                   <span className="font-bold text-slate-900 text-right truncate">
-                    {displayLocation}
+                    {loading ? "..." : displayStore}
                   </span>
                 </div>
 
@@ -237,8 +251,8 @@ function TerkirimContent() {
                     <FileText className="w-3.5 h-3.5 text-slate-400" />
                     <span>Jadwal</span>
                   </span>
-                  <span className="font-bold text-slate-900 text-right">
-                    Hygiene & Sanitasi Meja Bar
+                  <span className="font-bold text-slate-900 text-right truncate">
+                    {loading ? "..." : displaySchedule}
                   </span>
                 </div>
 
@@ -248,8 +262,8 @@ function TerkirimContent() {
                     <span>Petugas</span>
                   </span>
                   <span className="text-right">
-                    <span className="font-bold text-slate-900">{displayName}</span>{" "}
-                    <span className="text-slate-500 font-normal">(Senior Barista)</span>
+                    <span className="font-bold text-slate-900">{loading ? "..." : displaySigner}</span>{" "}
+                    {displayRole ? <span className="text-slate-500 font-normal">({displayRole})</span> : null}
                   </span>
                 </div>
 
@@ -259,7 +273,7 @@ function TerkirimContent() {
                     <span>Waktu Serah</span>
                   </span>
                   <span className="font-semibold font-mono text-slate-800 text-right">
-                    {currentDateFormatted}
+                    {loading ? "..." : displayTime}
                   </span>
                 </div>
               </div>
@@ -267,104 +281,18 @@ function TerkirimContent() {
           </div>
 
           {/* 5. Bottom Action Section */}
-          <div className="pt-6 pb-4">
+          <div className="pt-6 pb-5">
             {/* Primary Action Button */}
             <button
               onClick={handleReturnToDashboard}
-              className="w-full py-3.5 px-4 bg-[#193f53] hover:bg-[#122f3e] text-white font-bold text-xs sm:text-sm rounded-xl flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all active:scale-[0.98] cursor-pointer"
+              className="w-full py-3.5 px-4 bg-[#193f53] hover:bg-[#122f3e] text-white font-bold text-xs sm:text-sm rounded-xl flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all active:scale-[0.98] cursor-pointer touch-manipulation"
             >
               <span>Kembali ke Dashboard</span>
               <ArrowRight className="w-4 h-4" />
             </button>
-
-            {/* Secondary Quick Links matching image */}
-            <div className="mt-3.5 flex items-center justify-center gap-2 text-xs font-semibold text-slate-700">
-              <button
-                onClick={() => setShowPdfModal(true)}
-                className="hover:text-blue-700 transition-colors cursor-pointer flex items-center gap-1"
-              >
-                <FileText className="w-3.5 h-3.5 text-slate-500" />
-                <span>Lihat Bukti Pengiriman (PDF)</span>
-              </button>
-
-              <span className="text-slate-300">•</span>
-
-              <button
-                onClick={() => router.push("/jadwal-staff/riwayat")}
-                className="hover:text-blue-700 transition-colors cursor-pointer flex items-center gap-1"
-              >
-                <Clock className="w-3.5 h-3.5 text-slate-500" />
-                <span>Riwayat Hari Ini</span>
-              </button>
-            </div>
-
-            {/* Offline Sync Subtitle */}
-            <div className="mt-4 flex items-center justify-center gap-1 text-[11px] text-slate-400 select-none">
-              <Cloud className="w-3.5 h-3.5 text-slate-400" />
-              <span>Disinkronkan otomatis dengan Workspace Store Manager</span>
-            </div>
           </div>
         </div>
       </div>
-
-      {/* MODAL: BUKTI PENGIRIMAN DIGITAL (PDF PREVIEW) */}
-      {showPdfModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-          <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl animate-in zoom-in-95 duration-150 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <FileText className="w-4 h-4 text-blue-600" />
-                <h3 className="font-bold text-sm text-slate-900">
-                  Bukti Serah Terima Resmi
-                </h3>
-              </div>
-              <button
-                onClick={() => setShowPdfModal(false)}
-                className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-xs space-y-2">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Nomor Registrasi:</span>
-                <span className="font-mono font-bold text-slate-800">#CHK-20241024-8824</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Hash Dokumen:</span>
-                <span className="font-mono text-slate-600 text-[10px]">SHA256: 8F4C...92BA</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Petugas / Auditor:</span>
-                <span className="font-semibold text-slate-800">{displayName}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Koordinat Validasi:</span>
-                <span className="font-mono text-slate-600 text-[10px]">-6.15842, 106.90821</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Status Validasi:</span>
-                <span className="text-emerald-600 font-bold">100% Lolos Audit</span>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => {
-                  toast.success("Dokumen bukti audit PDF berhasil diunduh!");
-                  setShowPdfModal(false);
-                }}
-                className="w-full py-2.5 bg-[#193f53] hover:bg-[#122f3e] text-white font-semibold text-xs rounded-xl flex items-center justify-center gap-2 shadow-sm cursor-pointer"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Unduh Salinan Dokumen PDF</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
