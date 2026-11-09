@@ -1,45 +1,60 @@
 "use client";
 
 import React, { useState } from "react";
+import { WeeklyTrendItem } from "@/services/dashboard.service";
 
-export default function AuditTrendLineChart() {
+interface AuditTrendLineChartProps {
+  data?: WeeklyTrendItem[];
+  monthLabel?: string;
+}
+
+export default function AuditTrendLineChart({
+  data,
+  monthLabel = "Bulan Ini",
+}: AuditTrendLineChartProps) {
   const [activePoint, setActivePoint] = useState<number | null>(null);
 
-  // Y-axis values from 100 down to 60 with step 5, matching screenshot
-  const yValues = [100, 95, 90, 85, 80, 75, 70, 65, 60];
-  const minY = 60;
-  const maxY = 100;
-
-  // Data for the 4 weeks matching screenshot
-  const data = [
-    { week: "Minggu 1", score: 74.5 },
-    { week: "Minggu 2", score: 82.0 },
-    { week: "Minggu 3", score: 79.2 },
-    { week: "Minggu 4", score: 87.8 },
+  const emptyTrend: WeeklyTrendItem[] = [
+    { week: "Minggu 1", score: 0 },
+    { week: "Minggu 2", score: 0 },
+    { week: "Minggu 3", score: 0 },
+    { week: "Minggu 4", score: 0 },
   ];
+
+  const chartData = data && data.length > 0 ? data : emptyTrend;
+
+  // Tentukan batas min & max sumbu Y secara adaptif
+  const rawMin = Math.min(...chartData.map((d) => d.score));
+  const minY = rawMin < 50 ? 0 : 50;
+  const maxY = 100;
+  const step = minY === 0 ? 20 : 10;
+  const yValues = [];
+  for (let v = maxY; v >= minY; v -= step) {
+    yValues.push(v);
+  }
 
   // SVG Chart Dimensions
   const svgWidth = 420;
-  const svgHeight = 180;
-  const paddingLeft = 35;
-  const paddingRight = 20;
-  const paddingTop = 15;
-  const paddingBottom = 25;
+  const svgHeight = 142;
+  const paddingLeft = 32;
+  const paddingRight = 16;
+  const paddingTop = 12;
+  const paddingBottom = 22;
 
   const chartWidth = svgWidth - paddingLeft - paddingRight;
   const chartHeight = svgHeight - paddingTop - paddingBottom;
 
   // Coordinate mapping
-  const points = data.map((d, i) => {
-    const x = paddingLeft + (i / (data.length - 1)) * chartWidth;
-    const y =
-      paddingTop + chartHeight - ((d.score - minY) / (maxY - minY)) * chartHeight;
+  const points = chartData.map((d, i) => {
+    const x = paddingLeft + (chartData.length > 1 ? (i / (chartData.length - 1)) * chartWidth : chartWidth / 2);
+    const range = maxY - minY || 1;
+    const y = paddingTop + chartHeight - ((Math.min(maxY, Math.max(minY, d.score)) - minY) / range) * chartHeight;
     return { ...d, x, y };
   });
 
   // Create smooth Bezier curve SVG path
   const createSmoothPath = (pts: typeof points) => {
-    if (pts.length < 2) return "";
+    if (pts.length < 2) return pts.length === 1 ? `M ${pts[0].x},${pts[0].y}` : "";
     let path = `M ${pts[0].x},${pts[0].y}`;
     for (let i = 0; i < pts.length - 1; i++) {
       const p0 = pts[i];
@@ -54,19 +69,21 @@ export default function AuditTrendLineChart() {
   };
 
   const linePath = createSmoothPath(points);
-  const areaPath = `${linePath} L ${points[points.length - 1].x},${
-    paddingTop + chartHeight
-  } L ${points[0].x},${paddingTop + chartHeight} Z`;
+  const lastPointX = points[points.length - 1]?.x || paddingLeft;
+  const firstPointX = points[0]?.x || paddingLeft;
+  const areaPath = points.length > 1
+    ? `${linePath} L ${lastPointX},${paddingTop + chartHeight} L ${firstPointX},${paddingTop + chartHeight} Z`
+    : "";
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-2xs p-5 flex flex-col justify-between h-full">
+    <div className="bg-white rounded-xl border border-slate-200 shadow-2xs p-3.5 sm:p-4 flex flex-col justify-between h-full">
       {/* Card Header */}
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="font-bold text-slate-900 text-sm sm:text-base">
+      <div className="flex items-center justify-between mb-1.5">
+        <h3 className="font-bold text-slate-900 text-xs sm:text-sm">
           Tren Hasil Audit
         </h3>
-        <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
-          Bulan Ini
+        <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded truncate max-w-[140px]">
+          {monthLabel}
         </span>
       </div>
 
@@ -85,8 +102,8 @@ export default function AuditTrendLineChart() {
 
           {/* Horizontal Gridlines & Y-axis labels */}
           {yValues.map((val) => {
-            const y =
-              paddingTop + chartHeight - ((val - minY) / (maxY - minY)) * chartHeight;
+            const range = maxY - minY || 1;
+            const y = paddingTop + chartHeight - ((val - minY) / range) * chartHeight;
             return (
               <g key={val}>
                 <line
@@ -98,10 +115,10 @@ export default function AuditTrendLineChart() {
                   strokeWidth="1"
                 />
                 <text
-                  x={paddingLeft - 8}
-                  y={y + 3.5}
+                  x={paddingLeft - 6}
+                  y={y + 3}
                   textAnchor="end"
-                  fontSize="9.5"
+                  fontSize="8.5"
                   className="fill-slate-400 font-medium"
                 >
                   {val}
@@ -111,91 +128,98 @@ export default function AuditTrendLineChart() {
           })}
 
           {/* Area Fill */}
-          <path d={areaPath} fill="url(#auditTrendGrad)" />
+          {areaPath && <path d={areaPath} fill="url(#auditTrendGrad)" />}
 
           {/* Smooth Line Curve */}
-          <path
-            d={linePath}
-            fill="none"
-            stroke="#193f53"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-          />
+          {linePath && (
+            <path
+              d={linePath}
+              fill="none"
+              stroke="#193f53"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+            />
+          )}
 
-          {/* Interactive Data Points */}
-          {points.map((pt, idx) => {
-            const isHovered = activePoint === idx;
+          {/* Data Points and Interactivity */}
+          {points.map((p, i) => {
+            const isActive = activePoint === i;
             return (
-              <g
-                key={pt.week}
-                className="cursor-pointer"
-                onMouseEnter={() => setActivePoint(idx)}
-                onMouseLeave={() => setActivePoint(null)}
-              >
-                {/* Outer Touch Target */}
-                <circle cx={pt.x} cy={pt.y} r="14" fill="transparent" />
+              <g key={p.week} className="cursor-pointer">
+                {/* Active Indicator Pulse Ring */}
+                {isActive && (
+                  <circle
+                    cx={p.x}
+                    cy={p.y}
+                    r="7"
+                    fill="#193f53"
+                    fillOpacity="0.15"
+                    className="animate-ping"
+                  />
+                )}
 
-                {/* Visible Node */}
+                {/* Visible Point Dot */}
                 <circle
-                  cx={pt.x}
-                  cy={pt.y}
-                  r={isHovered ? "5.5" : "4"}
+                  cx={p.x}
+                  cy={p.y}
+                  r={isActive ? "4" : "3"}
                   fill="#ffffff"
                   stroke="#193f53"
-                  strokeWidth="2"
-                  className="transition-all duration-150"
+                  strokeWidth={isActive ? "2" : "1.8"}
+                  className="transition-all duration-200"
                 />
 
-                {/* Hover Tooltip Box */}
-                {isHovered && (
-                  <g className="animate-in fade-in zoom-in-95 duration-150">
+                {/* Transparent hit area for hover */}
+                <circle
+                  cx={p.x}
+                  cy={p.y}
+                  r="14"
+                  fill="transparent"
+                  onMouseEnter={() => setActivePoint(i)}
+                  onMouseLeave={() => setActivePoint(null)}
+                />
+
+                {/* X-axis Label (Week Name) */}
+                <text
+                  x={p.x}
+                  y={svgHeight - 4}
+                  textAnchor="middle"
+                  fontSize="9"
+                  className={`font-medium transition-colors select-none ${
+                    isActive ? "fill-slate-800 font-bold" : "fill-slate-400"
+                  }`}
+                >
+                  {p.week}
+                </text>
+
+                {/* Tooltip on Hover */}
+                {isActive && (
+                  <g className="animate-in fade-in zoom-in-95 duration-100">
                     <rect
-                      x={pt.x - 30}
-                      y={pt.y - 30}
-                      width="60"
-                      height="20"
-                      rx="4"
+                      x={p.x - 24}
+                      y={p.y - 24}
+                      width="48"
+                      height="18"
+                      rx="3.5"
                       fill="#0f172a"
                       className="shadow-md"
                     />
                     <text
-                      x={pt.x}
-                      y={pt.y - 16}
+                      x={p.x}
+                      y={p.y - 12}
                       textAnchor="middle"
                       fontSize="9.5"
                       fill="#ffffff"
                       fontWeight="bold"
                     >
-                      {pt.score}%
+                      {p.score}%
                     </text>
                   </g>
                 )}
               </g>
             );
           })}
-
-          {/* X-axis Labels */}
-          {points.map((pt) => (
-            <text
-              key={pt.week}
-              x={pt.x}
-              y={svgHeight - 4}
-              textAnchor="middle"
-              fontSize="10"
-              className="fill-slate-500 font-medium"
-            >
-              {pt.week}
-            </text>
-          ))}
         </svg>
-      </div>
-
-      {/* Legend below chart matching screenshot */}
-      <div className="flex items-center justify-center gap-2 pt-3 border-t border-slate-100 text-xs">
-        <span className="w-2.5 h-2.5 rounded-full border-2 border-[#193f53] bg-white shrink-0" />
-        <span className="text-slate-600 text-[11px] sm:text-xs font-medium">
-          Rata-rata Skor Audit
-        </span>
       </div>
     </div>
   );

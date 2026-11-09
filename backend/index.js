@@ -43,6 +43,7 @@ const staffRoutes = require('./src/routes/staff.routes');
 const teknisRoutes = require('./src/routes/teknis.routes');
 const galleryRoutes = require('./src/routes/gallery.routes');
 const reportRoutes = require('./src/routes/report.routes');
+const dashboardRoutes = require('./src/routes/dashboard.routes');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/ai', aiRoutes);
@@ -67,6 +68,8 @@ app.use('/api/gallery', galleryRoutes);
 app.use('/api/galeri', galleryRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/laporan', reportRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/monitoring', dashboardRoutes);
 
 // Base Route / Health Check
 app.get('/api/health', (req, res) => {

@@ -751,9 +751,9 @@ export default function JadwalAuditPage() {
 
                       {/* NAMA JADWAL */}
                       <td className={`py-3.5 px-4 ${isCancelled ? "opacity-60" : ""}`}>
-                        <div className="inline-flex items-start gap-1.5 px-2.5 py-1.5 rounded-lg bg-sky-50/60 text-sky-700 border border-sky-100 text-xs font-medium max-w-[260px] sm:max-w-[300px]">
-                          <FileCheck2 className="w-3.5 h-3.5 text-sky-500 shrink-0 mt-0.5" />
-                          <span className="line-clamp-2 leading-relaxed break-words font-semibold">{schedule.scheduleName}</span>
+                        <div className="inline-flex items-start gap-1.5 px-2 py-1 rounded-md bg-sky-50/60 text-sky-700 border border-sky-100 max-w-[260px] sm:max-w-[300px]">
+                          <FileCheck2 className="w-3 h-3 text-sky-500 shrink-0 mt-0.5" />
+                          <span className="line-clamp-2 leading-snug break-words text-[11px] font-medium">{schedule.scheduleName}</span>
                         </div>
                       </td>
 
@@ -775,13 +775,13 @@ export default function JadwalAuditPage() {
                       {/* PENGULANGAN */}
                       <td className={`py-3.5 px-4 whitespace-nowrap ${isCancelled ? "opacity-60" : ""}`}>
                         {schedule.recurrence === "Setiap Hari" ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-slate-100 text-slate-600 text-xs font-medium border border-slate-200">
-                            <Repeat className="w-3 h-3 text-slate-400" />
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[11px] font-medium border border-slate-200">
+                            <Repeat className="w-2.5 h-2.5 text-slate-400 shrink-0" />
                             <span>Setiap Hari</span>
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-sky-50 text-sky-600 text-xs font-medium border border-sky-100">
-                            <CalendarDays className="w-3 h-3 text-sky-500" />
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-sky-50 text-sky-600 text-[11px] font-medium border border-sky-100">
+                            <CalendarDays className="w-2.5 h-2.5 text-sky-500 shrink-0" />
                             <span>Hari Tertentu</span>
                           </span>
                         )}
@@ -790,23 +790,23 @@ export default function JadwalAuditPage() {
                       {/* STATUS */}
                       <td className="py-3.5 px-4 text-center whitespace-nowrap">
                         {schedule.status === "Sedang Berjalan" ? (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 animate-pulse" title="Audit sedang berlangsung atau belum selesai dikerjakan staf">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 animate-pulse" title="Audit sedang berlangsung atau belum selesai dikerjakan staf">
                             <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
                             Sedang Berjalan
                           </span>
                         ) : schedule.status === "Terjadwal" ? (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-purple-50 text-purple-700 border border-purple-200">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-50 text-purple-700 border border-purple-200">
                             <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
                             Terjadwal
                           </span>
                         ) : schedule.status === "Selesai" ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-600 border border-emerald-200">
-                            <Check className="w-3 h-3 stroke-[2.5]" />
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-600 border border-emerald-200">
+                            <Check className="w-2.5 h-2.5 stroke-[2.5]" />
                             Selesai
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-rose-50 text-rose-600 border border-rose-200">
-                            <Ban className="w-3 h-3" />
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-50 text-rose-600 border border-rose-200">
+                            <Ban className="w-2.5 h-2.5" />
                             Dibatalkan
                           </span>
                         )}

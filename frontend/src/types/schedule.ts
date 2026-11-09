@@ -17,6 +17,7 @@ export interface AuditSchedule {
   endTime?: string;
   duration?: string;
   isCompletedByStaff?: boolean;
+  isCompletedToday?: boolean;
   date: string; // YYYY-MM-DD
   recurrence: RecurrenceType;
   selectedDays?: string[];
