@@ -14,6 +14,7 @@ import {
   FileCheck,
   Calendar,
   AlertCircle,
+  User,
 } from "lucide-react";
 import { AuditReportItem } from "@/types/report";
 import { toast } from "sonner";
@@ -29,15 +30,18 @@ export default function DetailLaporanView({ report, onBack }: DetailLaporanViewP
     toast.success(`Mengunduh PDF Laporan ${report.storeName}...`);
   };
 
+  const isNonCompliant = report.status === "Tidak Mengerjakan";
   const findings = Array.isArray(report.findings) ? report.findings : [];
-  const totalItems = findings.length > 0 ? findings.length : (report.issueCount || 1);
-  const issueCount = findings.length > 0 ? findings.filter((f) => f.hasIssue).length : report.issueCount;
-  const compliantCount = Math.max(0, totalItems - issueCount);
-  const compliantPercentage = Math.round((compliantCount / totalItems) * 100);
-  const issuePercentage = 100 - compliantPercentage;
+  const totalItems = isNonCompliant ? 0 : (findings.length > 0 ? findings.length : (report.issueCount || 0));
+  const issueCount = isNonCompliant ? 0 : (findings.length > 0 ? findings.filter((f) => f.hasIssue).length : (report.issueCount || 0));
+  const compliantCount = isNonCompliant ? 0 : Math.max(0, totalItems - issueCount);
+  const compliantPercentage = isNonCompliant ? 0 : (totalItems > 0 ? Math.round((compliantCount / totalItems) * 100) : 0);
+  const issuePercentage = isNonCompliant ? 0 : (totalItems > 0 ? Math.round((issueCount / totalItems) * 100) : 0);
 
   let complianceCategory = "Sangat Baik";
-  if (report.complianceScore < 60) {
+  if (isNonCompliant) {
+    complianceCategory = "Tidak Mengerjakan";
+  } else if (report.complianceScore < 60) {
     complianceCategory = "Perlu Perhatian";
   } else if (report.complianceScore < 75) {
     complianceCategory = "Cukup";
@@ -143,7 +147,8 @@ export default function DetailLaporanView({ report, onBack }: DetailLaporanViewP
             <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
               <Clock className="w-3.5 h-3.5 text-slate-400" />
               <span>
-                Waktu Submit: <strong className="text-slate-800 font-bold">{report.submitDate}, {report.submitTime}</strong>
+                {isNonCompliant ? "Batas Toleransi: " : "Waktu Submit: "}
+                <strong className="text-slate-800 font-bold">{report.submitDate}, {report.submitTime}</strong>
               </span>
             </div>
 
@@ -197,7 +202,7 @@ export default function DetailLaporanView({ report, onBack }: DetailLaporanViewP
                     {compliantCount} <span className="text-xs font-bold text-emerald-700">Butir ({compliantPercentage}%)</span>
                   </div>
                   <p className="text-[10px] text-emerald-600 font-medium mt-1">
-                    Jawaban: YES
+                    {isNonCompliant ? "Jawaban: Nihil (0 Butir)" : "Jawaban: YES"}
                   </p>
                 </div>
               </div>
@@ -224,7 +229,7 @@ export default function DetailLaporanView({ report, onBack }: DetailLaporanViewP
                     {issueCount} <span className="text-xs font-bold text-rose-700">Butir ({issuePercentage}%)</span>
                   </div>
                   <p className="text-[10px] text-rose-600 font-medium mt-1">
-                    Jawaban: NO
+                    {isNonCompliant ? "Jawaban: Nihil (0 Butir)" : "Jawaban: NO"}
                   </p>
                 </div>
               </div>
@@ -429,78 +434,90 @@ export default function DetailLaporanView({ report, onBack }: DetailLaporanViewP
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-4 pt-1">
-          {/* Left: Auditor Selfie Verification Card */}
-          <div className="md:col-span-4 bg-[#fffdfa] border border-[#f5ede4] rounded-xl p-3.5 flex flex-col items-center justify-center text-center">
-            <div className="relative w-28 h-28 sm:w-32 sm:h-32 rounded-xl overflow-hidden shadow-2xs bg-slate-900 mx-auto">
-              <DecryptedImage
-                src={report.auditorPhoto || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=500&auto=format&fit=crop"}
-                alt={report.auditorName}
-                className="w-full h-full object-cover"
-              />
-              <div className="absolute bottom-1.5 inset-x-1.5 py-0.5 bg-black/70 backdrop-blur-xs text-white text-[9px] font-medium rounded flex items-center justify-center">
-                Verifikasi Kehadiran Toko
-              </div>
-            </div>
-
-            <h4 className="text-xs sm:text-sm font-bold text-slate-900 mt-2">
-              {report.auditorName}
+        {isNonCompliant ? (
+          <div className="rounded-xl border border-rose-200 bg-rose-50/50 p-6 text-center space-y-2">
+            <AlertCircle className="w-7 h-7 text-rose-500 mx-auto" />
+            <h4 className="text-xs sm:text-sm font-bold text-rose-900">
+              Tidak Ada Dokumentasi Pengesahan & Tanda Tangan
             </h4>
-
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-slate-100 text-slate-700 rounded-full text-[10px] font-medium mt-1">
-              <span>{report.auditorRole}</span>
-            </div>
-
-            <p className="text-[9.5px] text-slate-400 mt-1.5 font-medium">
-              Submit: {report.submitDate} • {report.submitTime} (GPS Valid)
+            <p className="text-[11px] text-rose-700 max-w-md mx-auto leading-relaxed">
+              Jadwal audit ini ditutup secara otomatis oleh sistem dengan status <strong>Tidak Mengerjakan</strong> karena staf melewati batas toleransi pengerjaan. Tidak ada dokumentasi foto kehadiran toko, verifikasi GPS, maupun tanda tangan digital yang diserahkan.
             </p>
           </div>
-
-          {/* Right: Digital Signature & Declaration Statement */}
-          <div className="md:col-span-8 flex flex-col justify-between space-y-3">
-            <div>
-              <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wider block mb-1.5">
-                TANDA TANGAN DIGITAL AUDITOR LAPANGAN:
-              </span>
-
-              <div className="relative border-2 border-dashed border-slate-200 rounded-xl bg-white p-3 h-28 sm:h-32 flex items-center justify-center">
-                {report.signatureUrl ? (
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 pt-1">
+            {/* Left: Auditor Selfie Verification Card */}
+            <div className="md:col-span-4 bg-[#fffdfa] border border-[#f5ede4] rounded-xl p-3.5 flex flex-col items-center justify-center text-center">
+              <div className="relative w-28 h-28 sm:w-32 sm:h-32 rounded-xl overflow-hidden shadow-2xs bg-slate-100 border border-slate-200 mx-auto flex items-center justify-center">
+                {report.auditorPhoto ? (
                   <DecryptedImage
-                    src={report.signatureUrl}
-                    alt="Tanda Tangan Digital"
-                    className="max-h-20 w-auto object-contain bg-white rounded-md"
+                    src={report.auditorPhoto}
+                    alt={report.auditorName}
+                    className="w-full h-full object-cover"
                   />
                 ) : (
-                  <svg
-                    className="w-44 h-16 text-slate-800"
-                    viewBox="0 0 260 80"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M20 55 C 35 15, 45 10, 55 45 C 65 65, 80 60, 95 48 C 110 35, 125 45, 135 60 C 145 65, 160 30, 175 35 C 190 40, 205 55, 230 45" />
-                    <path d="M45 42 L 105 40" />
-                    <circle cx="236" cy="42" r="2.5" fill="currentColor" />
-                  </svg>
+                  <div className="flex flex-col items-center justify-center text-slate-400 p-2">
+                    <User className="w-8 h-8 text-slate-400 mb-1" />
+                    <span className="text-[9px] text-slate-400 text-center font-medium">Foto Tidak Tersedia</span>
+                  </div>
                 )}
-
-                <div className="absolute bottom-2 right-2 inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 border border-emerald-200 rounded-md text-[9.5px] font-semibold text-emerald-700">
-                  <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" />
-                  <span>Tervalidasi Digital • {report.submitDate}</span>
-                </div>
+                {report.auditorPhoto && (
+                  <div className="absolute bottom-1.5 inset-x-1.5 py-0.5 bg-black/70 backdrop-blur-xs text-white text-[9px] font-medium rounded flex items-center justify-center">
+                    Verifikasi Kehadiran Toko
+                  </div>
+                )}
               </div>
-            </div>
 
-            <div className="rounded-xl border border-slate-200/80 bg-[#faf8f5]/80 p-3 flex items-start gap-2.5">
-              <ShieldCheck className="w-4 h-4 text-slate-700 shrink-0 mt-0.5" />
-              <p className="text-[10.5px] text-slate-600 leading-relaxed">
-                Saya menyatakan bahwa seluruh butir evaluasi, respon Yes/No, catatan temuan, dan bukti foto pada laporan ini adalah benar diambil langsung di lokasi {report.storeName} sesuai dengan fakta operasional lapangan.
+              <h4 className="text-xs sm:text-sm font-bold text-slate-900 mt-2">
+                {report.auditorName}
+              </h4>
+
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-slate-100 text-slate-700 rounded-full text-[10px] font-medium mt-1">
+                <span>{report.auditorRole}</span>
+              </div>
+
+              <p className="text-[9.5px] text-slate-400 mt-1.5 font-medium">
+                Submit: {report.submitDate} • {report.submitTime} (GPS Valid)
               </p>
             </div>
+
+            {/* Right: Digital Signature & Declaration Statement */}
+            <div className="md:col-span-8 flex flex-col justify-between space-y-3">
+              <div>
+                <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wider block mb-1.5">
+                  TANDA TANGAN DIGITAL AUDITOR LAPANGAN:
+                </span>
+
+                <div className="relative border-2 border-dashed border-slate-200 rounded-xl bg-white p-3 h-28 sm:h-32 flex items-center justify-center">
+                  {report.signatureUrl ? (
+                    <>
+                      <DecryptedImage
+                        src={report.signatureUrl}
+                        alt="Tanda Tangan Digital"
+                        className="max-h-20 w-auto object-contain bg-white rounded-md"
+                      />
+                      <div className="absolute bottom-2 right-2 inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 border border-emerald-200 rounded-md text-[9.5px] font-semibold text-emerald-700">
+                        <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" />
+                        <span>Tervalidasi Digital • {report.submitDate}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="text-center text-slate-400 text-xs">
+                      Tidak ada tanda tangan digital terlampir
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200/80 bg-[#faf8f5]/80 p-3 flex items-start gap-2.5">
+                <ShieldCheck className="w-4 h-4 text-slate-700 shrink-0 mt-0.5" />
+                <p className="text-[10.5px] text-slate-600 leading-relaxed">
+                  Saya menyatakan bahwa seluruh butir evaluasi, respon Yes/No, catatan temuan, dan bukti foto pada laporan ini adalah benar diambil langsung di lokasi {report.storeName} sesuai dengan fakta operasional lapangan.
+                </p>
+              </div>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

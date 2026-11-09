@@ -2,6 +2,7 @@ const prisma = require('../config/prisma');
 const { extractUser } = require('../middlewares/auth.middleware');
 const { decryptImageData } = require('../utils/imageCrypto');
 const { decryptImage, isEncrypted } = require('../utils/crypto.utils');
+const { syncExpiredSchedulesToDb } = require('../utils/scheduleSync');
 
 /**
  * Helper untuk dekripsi attachment URL yang tersimpan dalam format bytes/encrypted (ENC:v1 atau enc:v1)
@@ -185,15 +186,19 @@ const formatReportItem = (report) => {
     });
   }
 
+  const isNonCompliant = report.status === 'tidak_mengerjakan' || report.status === 'tidak_patuh';
   const totalQuestions = report.total_questions || (findings.length > 0 ? findings.length : 1);
-  const complianceScore = Math.max(
-    0,
-    Math.min(100, Math.round(((totalQuestions - issueCount) / totalQuestions) * 100))
-  );
-  const status = issueCount > 0 ? 'Masalah' : 'Sesuai';
+  const complianceScore = isNonCompliant
+    ? 0
+    : Math.max(0, Math.min(100, Math.round(((totalQuestions - issueCount) / totalQuestions) * 100)));
+  const status = isNonCompliant
+    ? 'Tidak Mengerjakan'
+    : (issueCount > 0 ? 'Masalah' : 'Sesuai');
 
   let summaryNote = '';
-  if (issueCount > 0) {
+  if (isNonCompliant) {
+    summaryNote = 'Tugas audit ini ditutup otomatis oleh sistem karena staf melewati batas toleransi keterlambatan tanpa penyerahan checklist (Tidak Mengerjakan / Tidak Patuh).';
+  } else if (issueCount > 0) {
     summaryNote = `Ditemukan ${issueCount} ketidaksesuaian butir checklist yang memerlukan perhatian dan tindak lanjut perbaikan operasional toko.`;
   } else {
     summaryNote = 'Seluruh aspek operasional, kebersihan, dan keselamatan gerai memenuhi standar SOP prima.';
@@ -251,16 +256,20 @@ exports.getAllReports = async (req, res) => {
     const requestedWsId = workspaceId || req.headers['x-workspace-id'];
     const where = {};
 
+    let targetWsId = null;
+
     // 1. Isolasi Workspace & Hak Akses Role
-    if (user && (user.role === 'Divisi Teknis' || user.role === 'Teknis') && user.workspaceId) {
-      where.schedule = { store: { workspace_id: BigInt(user.workspaceId) } };
-    } else if (requestedWsId && requestedWsId !== 'all') {
+    if (requestedWsId && requestedWsId !== 'all') {
       try {
-        const cleanWs = BigInt(requestedWsId.toString().replace(/^ws-/, ''));
-        where.schedule = { store: { workspace_id: cleanWs } };
+        targetWsId = requestedWsId.toString().replace(/^ws-/, '');
+        where.schedule = { store: { workspace_id: BigInt(targetWsId) } };
       } catch (e) {}
+    } else if (user && (user.role === 'Divisi Teknis' || user.role === 'Teknis') && user.workspaceId) {
+      targetWsId = user.workspaceId.toString().replace(/^ws-/, '');
+      where.schedule = { store: { workspace_id: BigInt(targetWsId) } };
     } else if (user && user.role === 'Admin' && user.workspaceId) {
-      where.schedule = { store: { workspace_id: BigInt(user.workspaceId) } };
+      targetWsId = user.workspaceId.toString().replace(/^ws-/, '');
+      where.schedule = { store: { workspace_id: BigInt(targetWsId) } };
     } else if (user && user.role === 'Super Admin' && user.rawId) {
       where.schedule = {
         store: {
@@ -268,6 +277,9 @@ exports.getAllReports = async (req, res) => {
         },
       };
     }
+
+    // Auto-sinkronisasi jadwal yang melewati toleransi menjadi record 'tidak_mengerjakan' permanen di database
+    await syncExpiredSchedulesToDb({ workspaceId: targetWsId });
 
     // 2. Filter Store
     if (storeName && storeName !== 'Semua Toko') {
@@ -318,102 +330,6 @@ exports.getAllReports = async (req, res) => {
     });
 
     let formatted = reports.map(formatReportItem);
-
-    // 4b. Sertakan jadwal aktif yang tidak dikerjakan (melewati batas toleransi 1 jam tanpa penyerahan laporan)
-    const schedules = await prisma.schedule.findMany({
-      where: {
-        deleted_at: null,
-        status: { not: 'cancelled' },
-        ...(where.schedule?.store?.workspace_id ? { store: { workspace_id: where.schedule.store.workspace_id } } : {}),
-      },
-      include: {
-        store: { include: { workspace: true } },
-        checklist_template: true,
-        checklist_report: true,
-        schedule_staff: { include: { staff: true } },
-      },
-    });
-
-    const now = new Date();
-    const wibTimestamp = now.getTime() + 7 * 60 * 60 * 1000;
-    const wibDate = new Date(wibTimestamp);
-    const todayWibStr = `${wibDate.getUTCFullYear()}-${String(wibDate.getUTCMonth() + 1).padStart(2, '0')}-${String(wibDate.getUTCDate()).padStart(2, '0')}`;
-    const dayOfWeekShort = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'][wibDate.getUTCDay()];
-    const curWibMinutes = ((now.getUTCHours() + 7) % 24) * 60 + now.getUTCMinutes();
-
-    for (const s of schedules) {
-      // 1. Cek apakah jadwal ini berlaku hari ini
-      const scheduleDateStr = formatDateString(s.start_date);
-      const recurrence = s.repeat_time === 'daily' ? 'Setiap Hari' : (s.repeat_time === 'custom' || s.repeat_time === 'weekly' ? 'Hari Tertentu' : s.repeat_time);
-      let selectedDays = [];
-      if (s.selected_days) {
-        if (typeof s.selected_days === 'string') {
-          try { selectedDays = JSON.parse(s.selected_days); } catch { selectedDays = s.selected_days.split(',').map(x => x.trim()); }
-        } else if (Array.isArray(s.selected_days)) {
-          selectedDays = s.selected_days;
-        }
-      }
-
-      let isScheduledToday = false;
-      if (recurrence === 'Setiap Hari' || recurrence === 'daily') isScheduledToday = true;
-      else if (recurrence === 'Hari Tertentu' || recurrence === 'weekly' || recurrence === 'custom') {
-        isScheduledToday = !selectedDays || selectedDays.length === 0 || selectedDays.includes(dayOfWeekShort);
-      } else {
-        isScheduledToday = scheduleDateStr === todayWibStr;
-      }
-      if (!isScheduledToday) continue;
-
-      // 2. Cek libur
-      const exceptions = s.schedule_exception || [];
-      const hasHoliday = exceptions.some(e => e.is_skip) || s.status === 'Libur' || s.notes?.toLowerCase().includes('libur');
-      if (hasHoliday) continue;
-
-      // 3. Cek apakah sudah diserahkan hari ini
-      const isRecurring = s.repeat_time === 'daily' || s.repeat_time === 'custom' || s.repeat_time === 'weekly';
-      const hasReportToday = (s.checklist_report || []).some(r => {
-        const isDone = r.status === 'submitted' || r.status === 'completed' || r.status === 'terlambat';
-        if (!isDone) return false;
-        if (isRecurring) {
-          const rDate = formatDateString(r.completed_at || r.created_at || r.submitted_at);
-          return rDate === todayWibStr;
-        }
-        return true;
-      });
-      if (hasReportToday) continue;
-
-      // 4. Hitung toleransi
-      const endTimeStr = formatTimeString(s.end_time);
-      const [eH, eM] = endTimeStr.split(':').map(Number);
-      const endMinutes = (isNaN(eH) ? 23 : eH) * 60 + (isNaN(eM) ? 59 : eM);
-      const toleranceMinutes = endMinutes + 60;
-
-      if (curWibMinutes > toleranceMinutes) {
-        const assignedStaff = s.schedule_staff?.[0]?.staff;
-        const d = wibDate;
-        const submitDateStr = `${d.getUTCDate()} ${INDONESIAN_MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
-        const monthStr = `${INDONESIAN_MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
-
-        formatted.push({
-          id: `rep-uncompleted-${s.schedule_id}`,
-          storeName: s.store?.store_name || 'Outlet Ritel Audit',
-          storeLocation: s.store?.city || s.store?.address || 'Indonesia',
-          scheduleName: s.title || s.checklist_template?.template_name || 'Checklist Operasional Harian',
-          auditorName: assignedStaff?.name || 'Staf Lapangan',
-          auditorRole: assignedStaff?.position || 'Auditor Lapangan',
-          submitDate: submitDateStr,
-          submitTime: `${endTimeStr} WIB`,
-          month: monthStr,
-          status: 'Tidak Mengerjakan',
-          issueCount: 0,
-          complianceScore: 0,
-          summaryNote: 'Tugas audit ini ditutup otomatis oleh sistem karena staf melewati batas toleransi keterlambatan 1 jam tanpa penyerahan checklist (Tidak Mengerjakan / Tidak Patuh).',
-          findings: [],
-          signatureUrl: undefined,
-          auditorPhoto: undefined,
-          workspaceName: s.store?.workspace?.company_name || 'Workspace',
-        });
-      }
-    }
 
     // 5. In-Memory Filters (Search, Month, Status)
     if (search && search.trim()) {
@@ -467,39 +383,80 @@ exports.getReportMeta = async (req, res) => {
     const user = await extractUser(req);
     const requestedWsId = req.query.workspaceId || req.headers['x-workspace-id'];
     const where = {};
+    const storeWhere = {};
+    const scheduleWhere = { deleted_at: null, status: { not: 'cancelled' } };
 
-    if (user && (user.role === 'Divisi Teknis' || user.role === 'Teknis') && user.workspaceId) {
-      where.schedule = { store: { workspace_id: BigInt(user.workspaceId) } };
-    } else if (requestedWsId && requestedWsId !== 'all') {
+    let targetWsId = null;
+
+    if (requestedWsId && requestedWsId !== 'all') {
       try {
-        where.schedule = { store: { workspace_id: BigInt(requestedWsId.toString().replace(/^ws-/, '')) } };
+        targetWsId = requestedWsId.toString().replace(/^ws-/, '');
+        where.schedule = { store: { workspace_id: BigInt(targetWsId) } };
+        storeWhere.workspace_id = BigInt(targetWsId);
+        scheduleWhere.store = { workspace_id: BigInt(targetWsId) };
       } catch (e) {}
+    } else if (user && (user.role === 'Divisi Teknis' || user.role === 'Teknis') && user.workspaceId) {
+      targetWsId = user.workspaceId.toString().replace(/^ws-/, '');
+      where.schedule = { store: { workspace_id: BigInt(targetWsId) } };
+      storeWhere.workspace_id = BigInt(targetWsId);
+      scheduleWhere.store = { workspace_id: BigInt(targetWsId) };
     } else if (user && user.role === 'Admin' && user.workspaceId) {
-      where.schedule = { store: { workspace_id: BigInt(user.workspaceId) } };
+      targetWsId = user.workspaceId.toString().replace(/^ws-/, '');
+      where.schedule = { store: { workspace_id: BigInt(targetWsId) } };
+      storeWhere.workspace_id = BigInt(targetWsId);
+      scheduleWhere.store = { workspace_id: BigInt(targetWsId) };
     } else if (user && user.role === 'Super Admin' && user.rawId) {
       where.schedule = { store: { workspace: { super_admin_id: BigInt(user.rawId) } } };
+      storeWhere.workspace = { super_admin_id: BigInt(user.rawId) };
+      scheduleWhere.store = { workspace: { super_admin_id: BigInt(user.rawId) } };
     }
 
-    const reports = await prisma.checklist_report.findMany({
-      where,
-      select: {
-        completed_at: true,
-        started_at: true,
-        created_at: true,
-        schedule: {
-          select: {
-            title: true,
-            store: {
-              select: { store_name: true },
+    // Auto-sinkronisasi jadwal yang melewati toleransi menjadi record 'tidak_mengerjakan' permanen di database
+    await syncExpiredSchedulesToDb({ workspaceId: targetWsId });
+
+    const [dbStores, dbSchedules, reports] = await Promise.all([
+      prisma.store.findMany({
+        where: storeWhere,
+        select: { store_name: true },
+        orderBy: { store_name: 'asc' },
+      }),
+      prisma.schedule.findMany({
+        where: scheduleWhere,
+        select: { title: true },
+        distinct: ['title'],
+        orderBy: { title: 'asc' },
+      }),
+      prisma.checklist_report.findMany({
+        where,
+        select: {
+          completed_at: true,
+          started_at: true,
+          created_at: true,
+          schedule: {
+            select: {
+              title: true,
+              store: {
+                select: { store_name: true },
+              },
             },
           },
         },
-      },
-      orderBy: { created_at: 'desc' },
-    });
+        orderBy: { created_at: 'desc' },
+      }),
+    ]);
 
-    const stores = Array.from(new Set(reports.map((r) => r.schedule?.store?.store_name).filter(Boolean)));
-    const schedules = Array.from(new Set(reports.map((r) => r.schedule?.title).filter(Boolean)));
+    const storeSet = new Set(dbStores.map((s) => s.store_name).filter(Boolean));
+    reports.forEach((r) => {
+      if (r.schedule?.store?.store_name) storeSet.add(r.schedule.store.store_name);
+    });
+    const stores = Array.from(storeSet);
+
+    const scheduleSet = new Set(dbSchedules.map((s) => s.title).filter(Boolean));
+    reports.forEach((r) => {
+      if (r.schedule?.title) scheduleSet.add(r.schedule.title);
+    });
+    const schedules = Array.from(scheduleSet);
+
     const months = Array.from(
       new Set(
         reports.map((r) => {

@@ -1,6 +1,8 @@
-import React from "react";
-import { X, Store, Calendar, Clock, Info, Pencil } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { X, Store, Calendar, Clock, Info, Pencil, Loader2 } from "lucide-react";
 import { Holiday, HolidayStatus } from "@/types/holiday";
+import { ScheduleService } from "@/services/schedule.service";
+import { AuditSchedule } from "@/types/schedule";
 
 interface DetailHolidayModalProps {
   isOpen: boolean;
@@ -9,14 +11,24 @@ interface DetailHolidayModalProps {
   onEdit: () => void; 
 }
 
-const schedulesList = [
-  { id: "1", name: "Audit Operasional Pagi & Kasir", time: "09:00 - 12:00 WIB" },
-  { id: "2", name: "Audit Display Promosi & Merchandising", time: "13:00 - 15:30 WIB" },
-  { id: "3", name: "Audit Sanitasi & Penutupan Toko", time: "19:00 - 21:00 WIB" },
-  { id: "4", name: "Audit Stok & Cold Storage Mingguan", time: "16:00 - 18:00 WIB" },
-];
-
 export default function DetailHolidayModal({ isOpen, holiday, onClose, onEdit }: DetailHolidayModalProps) {
+  const [storeSchedules, setStoreSchedules] = useState<AuditSchedule[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    if (holiday && isOpen) {
+      setIsLoading(true);
+      ScheduleService.fetchAll(holiday.workspaceId)
+        .then((res) => {
+          if (Array.isArray(res)) {
+            setStoreSchedules(res.filter((s) => s.storeName === holiday.storeName && s.status !== "Dibatalkan"));
+          }
+        })
+        .catch((e) => console.warn("Gagal memuat jadwal toko:", e))
+        .finally(() => setIsLoading(false));
+    }
+  }, [holiday, isOpen]);
+
   if (!isOpen || !holiday) return null;
 
   const formatDate = (dateString: string) => {
@@ -29,13 +41,55 @@ export default function DetailHolidayModal({ isOpen, holiday, onClose, onEdit }:
     ? formatDate(holiday.startDate)
     : `${formatDate(holiday.startDate)} - ${formatDate(holiday.endDate)}`;
 
-  const hasSavedSchedules = Boolean(holiday.schedules && holiday.schedules.length > 0);
-  const diliburkanCount = holiday.schedules && holiday.schedules.length > 0
-    ? holiday.schedules.length 
-    : holiday.liburType === "full" || !holiday.liburType 
-    ? 4 
-    : 0;
-  const berjalanCount = Math.max(0, 4 - diliburkanCount);
+  const isScheduleActiveOnDayName = (schedule: AuditSchedule, dayName: string): boolean => {
+    if (schedule.recurrence === "Setiap Hari" || (schedule as any).repeat_time === "daily") {
+      if (!schedule.selectedDays || schedule.selectedDays.length === 0 || schedule.selectedDays.length >= 7) {
+        return true;
+      }
+      return schedule.selectedDays.includes(dayName);
+    }
+    if (Array.isArray(schedule.selectedDays) && schedule.selectedDays.length > 0) {
+      return schedule.selectedDays.includes(dayName);
+    }
+    if (typeof (schedule as any).selectedDays === "string") {
+      const arr = ((schedule as any).selectedDays as string).split(",").map((d) => d.trim()).filter(Boolean);
+      if (arr.length > 0) return arr.includes(dayName);
+    }
+    return true;
+  };
+
+  const isScheduleActiveInRange = (schedule: AuditSchedule, startStr?: string, endStr?: string): boolean => {
+    if (!startStr) return true;
+    const eStr = endStr || startStr;
+    const startParts = startStr.split("-").map(Number);
+    const endParts = eStr.split("-").map(Number);
+    const curr = new Date(startParts[0], startParts[1] - 1, startParts[2]);
+    const end = new Date(endParts[0], endParts[1] - 1, endParts[2]);
+    if (isNaN(curr.getTime()) || isNaN(end.getTime())) return true;
+
+    const dayNames = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
+    const daysInRange = new Set<string>();
+    let safety = 0;
+    while (curr <= end && safety < 366) {
+      daysInRange.add(dayNames[curr.getDay()]);
+      curr.setDate(curr.getDate() + 1);
+      safety++;
+    }
+
+    return Array.from(daysInRange).some((dayName) => isScheduleActiveOnDayName(schedule, dayName));
+  };
+
+  const matchingSchedules = storeSchedules.filter((s) => {
+    if (!holiday.startDate) return true;
+    return isScheduleActiveInRange(s, holiday.startDate, holiday.endDate);
+  });
+
+  const totalJadwal = matchingSchedules.length;
+  const isFullLibur = holiday.liburType === "full" || !holiday.liburType;
+  const diliburkanCount = isFullLibur
+    ? totalJadwal
+    : matchingSchedules.filter((s) => holiday.schedules?.includes(s.id)).length;
+  const berjalanCount = Math.max(0, totalJadwal - diliburkanCount);
 
   const getStatusColor = (status: HolidayStatus) => {
     if (status === "Terjadwal") return { bg: "bg-purple-50 text-purple-700", dot: "bg-purple-600" };
@@ -125,7 +179,7 @@ export default function DetailHolidayModal({ isOpen, holiday, onClose, onEdit }:
             <div className="grid grid-cols-3 gap-3 mb-3">
               <div className="border border-slate-200 rounded-xl p-4 text-center">
                 <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Total Jadwal di Toko</div>
-                <div className="text-2xl font-extrabold text-slate-900">4</div>
+                <div className="text-2xl font-extrabold text-slate-900">{totalJadwal}</div>
               </div>
               <div className="bg-red-50/50 border border-red-100 rounded-xl p-4 text-center">
                 <div className="text-[10px] font-bold text-red-600 uppercase tracking-wider mb-2">Jadwal Diliburkan</div>
@@ -151,33 +205,42 @@ export default function DetailHolidayModal({ isOpen, holiday, onClose, onEdit }:
           <div>
             <h3 className="text-sm font-bold text-slate-900 mb-3">Status Jadwal Audit di Toko Ini</h3>
             <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100">
-              {schedulesList.map((schedule) => {
-                const isLibur = hasSavedSchedules
-                  ? holiday.schedules?.includes(schedule.id)
-                  : holiday.liburType === "full" || !holiday.liburType;
-                return (
-                  <div key={schedule.id} className="p-4 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center shrink-0">
-                        <Clock className="w-4 h-4 text-slate-400" />
+              {isLoading ? (
+                <div className="p-6 text-center flex items-center justify-center gap-2 text-slate-500 text-xs font-medium">
+                  <Loader2 className="w-4 h-4 animate-spin text-[#193f53]" />
+                  <span>Memuat jadwal toko...</span>
+                </div>
+              ) : matchingSchedules.length === 0 ? (
+                <div className="p-6 text-center text-slate-400 text-xs">
+                  Tidak ada jadwal audit pada hari operasional periode libur ini.
+                </div>
+              ) : (
+                matchingSchedules.map((schedule) => {
+                  const isLibur = isFullLibur || holiday.schedules?.includes(schedule.id);
+                  return (
+                    <div key={schedule.id} className="p-4 flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center shrink-0">
+                          <Clock className="w-4 h-4 text-slate-400" />
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold text-slate-900">{schedule.scheduleName}</div>
+                          <div className="text-[11px] text-slate-500">Waktu: {schedule.timeRange}</div>
+                        </div>
                       </div>
-                      <div>
-                        <div className="text-xs font-bold text-slate-900">{schedule.name}</div>
-                        <div className="text-[11px] text-slate-500">Waktu: {schedule.time}</div>
-                      </div>
+                      {isLibur ? (
+                        <div className="px-3 py-1 rounded-full border border-red-200 bg-red-50 text-red-600 text-[10px] font-bold">
+                          Libur
+                        </div>
+                      ) : (
+                        <div className="px-3 py-1 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-600 text-[10px] font-bold">
+                          Berjalan
+                        </div>
+                      )}
                     </div>
-                    {isLibur ? (
-                      <div className="px-3 py-1 rounded-full border border-red-200 bg-red-50 text-red-600 text-[10px] font-bold">
-                        Libur
-                      </div>
-                    ) : (
-                      <div className="px-3 py-1 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-600 text-[10px] font-bold">
-                        Berjalan
-                      </div>
-                    )}
-                  </div>
-                );
-              })}  
+                  );
+                })
+              )}  
             </div>
           </div>
         </div>

@@ -2,6 +2,7 @@ const prisma = require('../config/prisma');
 const bcrypt = require('bcrypt');
 const { extractUser } = require('../middlewares/auth.middleware');
 const { encryptImageData, decryptImageData } = require('../utils/imageCrypto');
+const { syncExpiredSchedulesToDb } = require('../utils/scheduleSync');
 
 /**
  * Self-healing: Pastikan kolom position dan deleted_at selalu tersedia di PostgreSQL
@@ -891,6 +892,11 @@ exports.getMySchedules = async (req, res) => {
       store_id: targetStoreId,
     };
 
+    // Auto-sync jadwal kedaluwarsa ke database checklist_report sebelum mengambil data
+    if (targetStoreId) {
+      await syncExpiredSchedulesToDb({ storeId: targetStoreId, staffId });
+    }
+
     // 3. Query PostgreSQL Schedule dengan relasi lengkap
     const schedules = await prisma.schedule.findMany({
       where,
@@ -973,6 +979,20 @@ exports.getMySchedules = async (req, res) => {
       return scheduleDateStr === todayStr;
     });
 
+    // Ambil data libur toko (store_holiday) aktif hari ini untuk seluruh toko staf
+    let todayStoreHolidays = [];
+    try {
+      todayStoreHolidays = await prisma.$queryRawUnsafe(`
+        SELECT * FROM store_holiday 
+        WHERE deleted_at IS NULL 
+          AND status != 'Dibatalkan'
+          AND start_date <= $1::date 
+          AND end_date >= $1::date
+      `, todayStr);
+    } catch (e) {
+      todayStoreHolidays = [];
+    }
+
     // 5. Transformasi data jadwal real hari ini dari database
     const scheduleItems = todaySchedules.map((s) => {
       const startTimeStr = formatTimeString(s.start_time);
@@ -999,9 +1019,44 @@ exports.getMySchedules = async (req, res) => {
         return true;
       });
 
-      // Cek pengecualian / libur
+      const uncompletedReport = reports.find(r => {
+        const isUndone = r.status === 'tidak_mengerjakan' || r.status === 'tidak_patuh';
+        if (!isUndone) return false;
+        if (isRecurring) {
+          const rDateStr = formatDateString(r.completed_at || r.created_at || r.submitted_at);
+          return rDateStr === todayStr;
+        }
+        return true;
+      });
+
+      // Cek pengecualian / libur dari tabel schedule_exception atau store_holiday
       const exceptions = s.schedule_exception || [];
-      const hasHolidayException = exceptions.some(e => e.is_skip) || s.status === 'Libur' || s.notes?.toLowerCase().includes('libur');
+      const sIdStr = s.schedule_id.toString();
+      const sStoreName = (s.store?.store_name || storeName || '').trim().toLowerCase();
+      const sStoreId = s.store_id ? s.store_id.toString() : '';
+
+      const activeStoreHoliday = todayStoreHolidays.find((h) => {
+        const hStoreId = h.store_id ? h.store_id.toString() : '';
+        const hStoreName = (h.store_name || '').trim().toLowerCase();
+        const storeMatches = (hStoreId && hStoreId === sStoreId) || (hStoreName && hStoreName === sStoreName);
+        if (!storeMatches) return false;
+
+        const lType = h.libur_type || 'full';
+        if (lType === 'full') return true;
+
+        let hSchedules = [];
+        if (Array.isArray(h.schedules)) hSchedules = h.schedules.map(String);
+        else if (typeof h.schedules === 'string') {
+          try {
+            hSchedules = JSON.parse(h.schedules).map(String);
+          } catch {
+            hSchedules = [];
+          }
+        }
+        return hSchedules.includes(sIdStr);
+      });
+
+      const hasHolidayException = exceptions.some(e => e.is_skip) || s.status === 'Libur' || s.notes?.toLowerCase().includes('libur') || Boolean(activeStoreHoliday);
 
       const [sH, sM] = startTimeStr.split(':').map(v => parseInt(v, 10));
       const [eH, eM] = endTimeStr.split(':').map(v => parseInt(v, 10));
@@ -1045,8 +1100,8 @@ exports.getMySchedules = async (req, res) => {
       } else if (hasHolidayException) {
         status = 'Libur';
         statusBadge = 'Libur';
-        const exReason = exceptions[0]?.reason || s.notes || 'Pengecualian Terjadwal';
-        infoNote = `Jadwal Ditiadakan / ${exReason}`;
+        const exReason = activeStoreHoliday?.reason || exceptions[0]?.reason || s.notes || 'Toko Sedang Libur';
+        infoNote = `Toko Diliburkan / ${exReason}`;
         exemptionText = `Bebas Tugas: ${exReason}`;
         isHoliday = true;
         canStart = false;
@@ -1056,7 +1111,7 @@ exports.getMySchedules = async (req, res) => {
         unlockText = `Terbuka Pukul ${startTimeStr} WIB`;
         isLocked = true;
         canStart = false;
-      } else if (currentMinutes > toleranceMinutes) {
+      } else if (uncompletedReport || currentMinutes > toleranceMinutes) {
         // Melewati batas toleransi keterlambatan 1 jam: Ditutup otomatis sebagai Tidak Patuh
         status = 'Kedaluwarsa';
         statusBadge = 'Tidak Patuh';
@@ -1114,12 +1169,12 @@ exports.getMySchedules = async (req, res) => {
           isPhotoRequired: t.is_photo_required === true,
           priority: t.priority || 'Low',
         })),
-        report: completedReport ? {
-          reportId: completedReport.report_id.toString(),
-          status: completedReport.status,
-          submittedAt: completedReport.submitted_at,
-          submittedBy: completedReport.staff?.name,
-          notes: completedReport.notes,
+        report: (completedReport || uncompletedReport) ? {
+          reportId: (completedReport || uncompletedReport).report_id.toString(),
+          status: (completedReport || uncompletedReport).status,
+          submittedAt: (completedReport || uncompletedReport).submitted_at || (completedReport || uncompletedReport).completed_at,
+          submittedBy: (completedReport || uncompletedReport).staff?.name || staffName,
+          notes: (completedReport || uncompletedReport).notes,
         } : null,
       };
     });
@@ -1485,6 +1540,57 @@ exports.submitStaffAudit = async (req, res) => {
       },
     });
 
+    // Cek apakah toko / jadwal sedang berstatus LIBUR hari ini
+    const wibTimestamp = now.getTime() + 7 * 60 * 60 * 1000;
+    const wibDate = new Date(wibTimestamp);
+    const yToday = wibDate.getUTCFullYear();
+    const mToday = String(wibDate.getUTCMonth() + 1).padStart(2, '0');
+    const dToday = String(wibDate.getUTCDate()).padStart(2, '0');
+    const todayDateStr = `${yToday}-${mToday}-${dToday}`;
+
+    let storeHolidays = [];
+    try {
+      storeHolidays = await prisma.$queryRawUnsafe(`
+        SELECT * FROM store_holiday 
+        WHERE deleted_at IS NULL 
+          AND status != 'Dibatalkan'
+          AND start_date <= $1::date 
+          AND end_date >= $1::date
+      `, todayDateStr);
+    } catch (e) {
+      storeHolidays = [];
+    }
+
+    const sStoreId = schedule?.store_id ? schedule.store_id.toString() : '';
+    const sStoreName = (schedule?.store?.store_name || '').trim().toLowerCase();
+    const isHolidayBlocked = storeHolidays.some((h) => {
+      const hStoreId = h.store_id ? h.store_id.toString() : '';
+      const hStoreName = (h.store_name || '').trim().toLowerCase();
+      const storeMatches = (hStoreId && hStoreId === sStoreId) || (hStoreName && hStoreName === sStoreName);
+      if (!storeMatches) return false;
+
+      const lType = h.libur_type || 'full';
+      if (lType === 'full') return true;
+
+      let hSchedules = [];
+      if (Array.isArray(h.schedules)) hSchedules = h.schedules.map(String);
+      else if (typeof h.schedules === 'string') {
+        try {
+          hSchedules = JSON.parse(h.schedules).map(String);
+        } catch {
+          hSchedules = [];
+        }
+      }
+      return hSchedules.includes(scheduleId.toString());
+    });
+
+    if (isHolidayBlocked) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Laporan audit tidak dapat diserahkan karena gerai toko sedang berstatus libur operasional.',
+      });
+    }
+
     let isLate = false;
     if (schedule?.end_time) {
       const endTimeStr = formatTimeString(schedule.end_time);
@@ -1829,6 +1935,7 @@ exports.getMyHistory = async (req, res) => {
     const whereClause = {};
     if (storeId) {
       whereClause.schedule = { store_id: storeId };
+      await syncExpiredSchedulesToDb({ storeId, staffId });
     }
 
     let reports = await prisma.checklist_report.findMany({
@@ -1881,15 +1988,18 @@ exports.getMyHistory = async (req, res) => {
       const noAnswers = r.checklist_answer?.filter(a => a.answer === 'no') || [];
       const hasIssues = noAnswers.length > 0;
 
+      const isNonCompliant = r.status === 'tidak_mengerjakan' || r.status === 'tidak_patuh';
       let scoreText = '100% Sesuai';
-      if (totalAnswers > 0) {
+      if (isNonCompliant) {
+        scoreText = '0% (Tidak Patuh)';
+      } else if (totalAnswers > 0) {
         const yesCount = totalAnswers - noAnswers.length;
         const pct = Math.round((yesCount / totalAnswers) * 100);
         scoreText = `${pct}% Skor SOP`;
       }
 
       let isLate = false;
-      if (r.schedule?.end_time && (r.completed_at || r.created_at)) {
+      if (!isNonCompliant && r.schedule?.end_time && (r.completed_at || r.created_at)) {
         const schedEndTime = formatTimeString(r.schedule.end_time);
         const reportTime = formatTimeString(r.completed_at || r.created_at);
         const [eH, eM] = schedEndTime.split(':').map(Number);
@@ -1903,7 +2013,11 @@ exports.getMyHistory = async (req, res) => {
       let statusBadge = 'Selesai';
       let rightBadge = undefined;
 
-      if (hasIssues) {
+      if (isNonCompliant) {
+        statusType = 'tidak_patuh';
+        statusBadge = 'Tidak Patuh';
+        rightBadge = 'Tidak Mengerjakan';
+      } else if (hasIssues) {
         statusType = 'temuan';
         statusBadge = `${noAnswers.length} Temuan`;
         rightBadge = `${noAnswers.length} Temuan`;
@@ -1921,7 +2035,9 @@ exports.getMyHistory = async (req, res) => {
       const auditorRole = sigAttachment?.signer_role || r.staff?.position || 'Auditor Lapangan';
 
       const firstIssueComment = noAnswers.find(a => a.comment)?.comment;
-      const notes = firstIssueComment || (hasIssues ? `${noAnswers.length} butir checklist bermasalah.` : 'Semua butir checklist sesuai standar SOP operasional.');
+      const notes = isNonCompliant
+        ? 'Melewati batas toleransi pengerjaan 1 jam. Ditutup otomatis oleh sistem dan tercatat sebagai Tidak Mengerjakan / Tidak Patuh.'
+        : (firstIssueComment || (hasIssues ? `${noAnswers.length} butir checklist bermasalah.` : 'Semua butir checklist sesuai standar SOP operasional.'));
 
       const item = {
         id: r.report_id.toString(),
@@ -1929,18 +2045,18 @@ exports.getMyHistory = async (req, res) => {
         title: r.schedule?.title || r.schedule?.checklist_template?.template_name || 'Checklist Operasional',
         auditor,
         auditorRole,
-        itemCount: `${r.total_questions || totalAnswers || 8} Item Checklist`,
+        itemCount: isNonCompliant ? 'Tidak Dikerjakan' : `${r.total_questions || totalAnswers || 8} Item Checklist`,
         scoreText,
         statusType,
         statusBadge,
         rightBadge,
-        isGpsValid: true,
+        isGpsValid: !isNonCompliant,
         storeName: r.schedule?.store?.store_name || user?.storeName || 'Mie Gacoan',
         notes,
         completedAt: dateObj.toISOString(),
         totalQuestions: r.total_questions || totalAnswers,
-        answeredQuestions: r.answered_questions || totalAnswers,
-        durationMinute: r.duration_minute || 15,
+        answeredQuestions: isNonCompliant ? 0 : (r.answered_questions || totalAnswers),
+        durationMinute: r.duration_minute || 0,
         issues: noAnswers.map(a => ({
           taskId: a.task_id?.toString(),
           comment: a.comment,
@@ -1953,107 +2069,10 @@ exports.getMyHistory = async (req, res) => {
       groupsMap.get(dateKey).push(item);
     }
 
-    // Sertakan juga jadwal yang tidak dikerjakan (melewati batas toleransi 1 jam tanpa penyerahan laporan)
-    const storeSchedules = await prisma.schedule.findMany({
-      where: {
-        deleted_at: null,
-        status: { not: 'cancelled' },
-        ...(storeId ? { store_id: storeId } : {}),
-      },
-      include: {
-        store: true,
-        checklist_template: true,
-        checklist_report: true,
-      },
-      orderBy: [{ start_date: 'desc' }, { start_time: 'desc' }],
-    });
-
     const nowForHistory = new Date();
     const wibNowTimestamp = nowForHistory.getTime() + 7 * 60 * 60 * 1000;
     const wibNowDate = new Date(wibNowTimestamp);
     const todayWibStr = `${wibNowDate.getUTCFullYear()}-${String(wibNowDate.getUTCMonth() + 1).padStart(2, '0')}-${String(wibNowDate.getUTCDate()).padStart(2, '0')}`;
-    const dayOfWeekShort = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'][wibNowDate.getUTCDay()];
-    const curWibMinutes = ((nowForHistory.getUTCHours() + 7) % 24) * 60 + nowForHistory.getUTCMinutes();
-
-    for (const s of storeSchedules) {
-      // 1. Cek apakah jadwal ini berlaku untuk hari ini
-      const scheduleDateStr = formatDateString(s.start_date);
-      const recurrence = s.repeat_time === 'daily' ? 'Setiap Hari' : (s.repeat_time === 'custom' || s.repeat_time === 'weekly' ? 'Hari Tertentu' : s.repeat_time);
-      let selectedDays = [];
-      if (s.selected_days) {
-        if (typeof s.selected_days === 'string') {
-          try { selectedDays = JSON.parse(s.selected_days); } catch { selectedDays = s.selected_days.split(',').map(x => x.trim()); }
-        } else if (Array.isArray(s.selected_days)) {
-          selectedDays = s.selected_days;
-        }
-      }
-
-      let isScheduledToday = false;
-      if (recurrence === 'Setiap Hari' || recurrence === 'daily') isScheduledToday = true;
-      else if (recurrence === 'Hari Tertentu' || recurrence === 'weekly' || recurrence === 'custom') {
-        isScheduledToday = !selectedDays || selectedDays.length === 0 || selectedDays.includes(dayOfWeekShort);
-      } else {
-        isScheduledToday = scheduleDateStr === todayWibStr;
-      }
-      if (!isScheduledToday) continue;
-
-      // 2. Cek libur / pengecualian
-      const exceptions = s.schedule_exception || [];
-      const hasHoliday = exceptions.some(e => e.is_skip) || s.status === 'Libur' || s.notes?.toLowerCase().includes('libur');
-      if (hasHoliday) continue;
-
-      // 3. Cek apakah sudah diserahkan untuk hari ini
-      const reports = s.checklist_report || [];
-      const isRecurring = s.repeat_time === 'daily' || s.repeat_time === 'custom' || s.repeat_time === 'weekly';
-      const hasReportToday = reports.some(r => {
-        const isDone = r.status === 'submitted' || r.status === 'completed' || r.status === 'terlambat';
-        if (!isDone) return false;
-        if (isRecurring) {
-          const rDate = formatDateString(r.completed_at || r.created_at || r.submitted_at);
-          return rDate === todayWibStr;
-        }
-        return true;
-      });
-      if (hasReportToday) continue; // Sudah ada laporan untuk hari ini
-
-      const endTimeStr = formatTimeString(s.end_time);
-      const [eH, eM] = endTimeStr.split(':').map(Number);
-      const endMinutes = (isNaN(eH) ? 23 : eH) * 60 + (isNaN(eM) ? 59 : eM);
-      const toleranceMinutes = endMinutes + 60;
-      const tolH = Math.floor(toleranceMinutes / 60) % 24;
-      const tolM = toleranceMinutes % 60;
-      const toleranceTimeStr = `${String(tolH).padStart(2, '0')}:${String(tolM).padStart(2, '0')}`;
-
-      // Periksa apakah jadwal hari ini telah melewati batas toleransi 1 jam
-      if (curWibMinutes > toleranceMinutes) {
-        const uncompletedItem = {
-          id: `uncompleted-${s.schedule_id}`,
-          time: `${endTimeStr} WIB`,
-          title: s.title || s.checklist_template?.template_name || 'Checklist Operasional',
-          auditor: user?.fullName || 'Staf Lapangan',
-          auditorRole: user?.position || 'Auditor Lapangan',
-          itemCount: 'Tidak Dikerjakan',
-          scoreText: '0% (Tidak Patuh)',
-          statusType: 'tidak_patuh',
-          statusBadge: 'Tidak Patuh',
-          rightBadge: 'Tidak Mengerjakan',
-          isGpsValid: false,
-          storeName: s.store?.store_name || user?.storeName || 'Mie Gacoan',
-          notes: `Melewati batas toleransi pengerjaan 1 jam (pukul ${toleranceTimeStr} WIB). Ditutup otomatis oleh sistem dan tercatat sebagai Tidak Mengerjakan / Tidak Patuh.`,
-          completedAt: new Date(wibNowTimestamp).toISOString(),
-          totalQuestions: 0,
-          answeredQuestions: 0,
-          durationMinute: 0,
-          issues: [],
-        };
-
-        if (!groupsMap.has(todayWibStr)) {
-          groupsMap.set(todayWibStr, []);
-        }
-        groupsMap.get(todayWibStr).push(uncompletedItem);
-      }
-    }
-
     const todayStr = todayWibStr;
     const yesterdayDate = new Date(wibNowTimestamp - 24 * 60 * 60 * 1000);
     const yesterdayStr = `${yesterdayDate.getUTCFullYear()}-${String(yesterdayDate.getUTCMonth() + 1).padStart(2, '0')}-${String(yesterdayDate.getUTCDate()).padStart(2, '0')}`;
