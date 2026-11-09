@@ -20,8 +20,10 @@ import {
 } from "lucide-react";
 import { HolidayService } from "@/services/holiday.service";
 import { TokoService } from "@/services/toko.service";
+import { ScheduleService } from "@/services/schedule.service";
 import { AuthService } from "@/lib/auth";
 import { Holiday } from "@/types/holiday";
+import { AuditSchedule } from "@/types/schedule";
 
 interface CreateHolidayViewProps {
   initialData?: Holiday | null;
@@ -63,6 +65,8 @@ export default function CreateHolidayView({
   const [endDate, setEndDate] = useState(cleanDate(initialData?.endDate || initialData?.startDate));
   const [reason, setReason] = useState(initialData?.reason || "");
   const [existingHolidays, setExistingHolidays] = useState<Holiday[]>([]);
+  const [allWorkspaceSchedules, setAllWorkspaceSchedules] = useState<AuditSchedule[]>([]);
+  const [isLoadingSchedules, setIsLoadingSchedules] = useState<boolean>(true);
 
   // Sinkronisasi form saat initialData berubah (Mode Edit)
   useEffect(() => {
@@ -112,9 +116,24 @@ export default function CreateHolidayView({
             });
           }
           setStoreOptions(unique);
+          if (unique.length === 1 && !initialData) {
+            setSelectedStores((prev) => (prev.length === 0 ? [unique[0].name] : prev));
+          }
         }
       } catch (err) {
         console.warn("Gagal memuat toko dinamis:", err);
+      }
+
+      try {
+        setIsLoadingSchedules(true);
+        const liveSchedules = await ScheduleService.fetchAll(targetWs);
+        if (Array.isArray(liveSchedules)) {
+          setAllWorkspaceSchedules(liveSchedules.filter((s) => s.status !== "Dibatalkan"));
+        }
+      } catch (err) {
+        console.warn("Gagal memuat jadwal audit toko:", err);
+      } finally {
+        setIsLoadingSchedules(false);
       }
     };
 
@@ -208,9 +227,74 @@ export default function CreateHolidayView({
   const nextMonthDaysCount = totalGridCells % 7 === 0 ? 0 : 7 - (totalGridCells % 7);
   const nextMonthDays = Array.from({ length: nextMonthDaysCount }).map((_, i) => i + 1);
 
+  // Helper pengecekan hari operasional jadwal audit
+  const isScheduleActiveOnDayName = (schedule: AuditSchedule, dayName: string): boolean => {
+    if (schedule.recurrence === "Setiap Hari" || (schedule as any).repeat_time === "daily") {
+      if (!schedule.selectedDays || schedule.selectedDays.length === 0 || schedule.selectedDays.length >= 7) {
+        return true;
+      }
+      return schedule.selectedDays.includes(dayName);
+    }
+    if (Array.isArray(schedule.selectedDays) && schedule.selectedDays.length > 0) {
+      return schedule.selectedDays.includes(dayName);
+    }
+    if (typeof (schedule as any).selectedDays === "string") {
+      const arr = ((schedule as any).selectedDays as string).split(",").map((d) => d.trim()).filter(Boolean);
+      if (arr.length > 0) return arr.includes(dayName);
+    }
+    return true;
+  };
+
+  const isScheduleActiveOnDate = (schedule: AuditSchedule, dateStr: string): boolean => {
+    if (!dateStr) return true;
+    const parts = dateStr.split("-").map(Number);
+    if (parts.length < 3 || isNaN(parts[0]) || isNaN(parts[1]) || isNaN(parts[2])) return true;
+    const dateObj = new Date(parts[0], parts[1] - 1, parts[2]);
+    const dayNames = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
+    const dayName = dayNames[dateObj.getDay()];
+    return isScheduleActiveOnDayName(schedule, dayName);
+  };
+
+  const isScheduleActiveInRange = (schedule: AuditSchedule, startStr?: string, endStr?: string): boolean => {
+    if (!startStr) return true;
+    const eStr = endStr || startStr;
+    const startParts = startStr.split("-").map(Number);
+    const endParts = eStr.split("-").map(Number);
+    const curr = new Date(startParts[0], startParts[1] - 1, startParts[2]);
+    const end = new Date(endParts[0], endParts[1] - 1, endParts[2]);
+    if (isNaN(curr.getTime()) || isNaN(end.getTime())) return true;
+
+    const dayNames = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
+    const daysInRange = new Set<string>();
+    let safety = 0;
+    while (curr <= end && safety < 366) {
+      daysInRange.add(dayNames[curr.getDay()]);
+      curr.setDate(curr.getDate() + 1);
+      safety++;
+    }
+
+    return Array.from(daysInRange).some((dayName) => isScheduleActiveOnDayName(schedule, dayName));
+  };
+
+  // Seluruh jadwal dari toko yang sedang dipilih
+  const selectedStoreSchedules = allWorkspaceSchedules.filter((s) => {
+    if (selectedStores.length > 0 && !selectedStores.includes(s.storeName)) {
+      return false;
+    }
+    return true;
+  });
+
+  // Pengecekan apakah tanggal tertentu bukan hari operasional audit untuk toko terpilih (non-aktif)
+  const isDateNonOperational = (dateStr: string): boolean => {
+    if (selectedStores.length === 0) return false;
+    if (selectedStoreSchedules.length === 0) return false;
+    return !selectedStoreSchedules.some((s) => isScheduleActiveOnDate(s, dateStr));
+  };
+
   const handleCalendarDateClick = (dateStr: string) => {
     if (selectedStores.length === 0) return;
     if (dateStr < todayStr) return;
+    if (isDateNonOperational(dateStr)) return;
 
     if (!startDate || (startDate && endDate && startDate !== endDate)) {
       setStartDate(dateStr);
@@ -251,7 +335,7 @@ export default function CreateHolidayView({
       alert("Toko sudah diliburkan penuh pada tanggal ini. Tidak dapat menyimpan jadwal.");
       return;
     }
-    if (!initialData && liburType === "full" && startDate === todayStr && unavailableScheduleIds.length === 4) {
+    if (!initialData && liburType === "full" && startDate === todayStr && totalSchedulesCount > 0 && unavailableScheduleIds.length >= totalSchedulesCount) {
       alert("Seluruh jadwal audit toko hari ini sudah terlewat jam operasionalnya!");
       return;
     }
@@ -317,40 +401,98 @@ export default function CreateHolidayView({
     }
   };
 
-  const schedules = [
-    { id: "1", name: "Audit Operasional Pagi & Kasir", time: "09:00 - 12:00 WIB", desc: "Checklist Operasional Harian" },
-    { id: "2", name: "Audit Display Promosi & Merchandising", time: "13:00 - 15:30 WIB", desc: "Audit Display & Promosi" },
-    { id: "3", name: "Audit Sanitasi & Penutupan Toko", time: "19:00 - 21:00 WIB", desc: "Audit Kebersihan & K3" },
-    { id: "4", name: "Audit Stok & Cold Storage Mingguan", time: "16:00 - 18:00 WIB", desc: "Audit Stok & Inventori" },
-  ];
+  // 1. Ambil jadwal toko terpilih yang BENAR-BENAR BERJALAN PADA HARI INI
+  const todayActiveSchedules = selectedStoreSchedules.filter((s) => {
+    return isScheduleActiveOnDate(s, todayStr);
+  });
+
+  const isScheduleFinishedToday = (s: AuditSchedule): boolean => {
+    // a. Jika laporan sudah diserahkan / dikerjakan hari ini
+    if (s.isCompletedToday) return true;
+
+    // b. Cek apakah jam operasional jadwal hari ini sudah terlewat
+    let startStr = s.startTime;
+    let endStr = s.endTime;
+    if ((!startStr || !endStr) && s.timeRange) {
+      const parts = s.timeRange.replace(/WIB/gi, "").split("-");
+      if (parts.length >= 2) {
+        if (!startStr) startStr = parts[0].trim();
+        if (!endStr) endStr = parts[1].trim();
+      }
+    }
+
+    if (endStr) {
+      const cleanEnd = endStr.replace(/[^\d:]/g, "");
+      const eParts = cleanEnd.split(":").map(Number);
+      if (eParts.length >= 2 && !isNaN(eParts[0])) {
+        const now = new Date();
+        const currentMinutes = now.getHours() * 60 + now.getMinutes();
+        const endMinutes = eParts[0] * 60 + (isNaN(eParts[1]) ? 0 : eParts[1]);
+
+        let startMinutes = 0;
+        if (startStr) {
+          const cleanStart = startStr.replace(/[^\d:]/g, "");
+          const sParts = cleanStart.split(":").map(Number);
+          if (sParts.length >= 2 && !isNaN(sParts[0])) {
+            startMinutes = sParts[0] * 60 + (isNaN(sParts[1]) ? 0 : sParts[1]);
+          }
+        }
+
+        if (endMinutes >= startMinutes) {
+          // Normal shift di hari yang sama (misal 08:00 - 12:00)
+          return currentMinutes > endMinutes;
+        } else {
+          // Shift malam lintas hari (misal 22:00 - 02:00)
+          return currentMinutes > endMinutes && currentMinutes < startMinutes;
+        }
+      }
+    }
+
+    // c. Fallback ke status jadwal
+    return s.status === "Selesai";
+  };
+
+  const todayTotalCount = todayActiveSchedules.length;
+  // Selesai hari ini dihitung jika laporan audit sudah diserahkan atau jam operasionalnya telah selesai
+  const todayCompletedCount = todayActiveSchedules.filter(isScheduleFinishedToday).length;
+
+  const isAllCompletedToday = todayTotalCount > 0 && todayCompletedCount >= todayTotalCount;
+  const isPartialCompletedToday = todayTotalCount > 0 && todayCompletedCount > 0 && todayCompletedCount < todayTotalCount;
+  const hasCompletedScheduleToday = isAllCompletedToday || isPartialCompletedToday;
+
+  // 2. Filter jadwal nyata sesuai cabang toko dan hari operasional rentang tanggal yang dipilih
+  const schedules = selectedStoreSchedules
+    .filter((s) => {
+      if (!startDate) {
+        return true;
+      }
+      return isScheduleActiveInRange(s, startDate, endDate);
+    })
+    .map((s) => ({
+      id: s.id,
+      name: s.scheduleName,
+      time: s.timeRange,
+      desc: s.templateName || "Checklist Operasional",
+      startTime: s.startTime || s.timeRange.split(" - ")[0],
+      storeName: s.storeName,
+      recurrence: s.recurrence,
+      selectedDays: s.selectedDays,
+    }));
 
   const unavailableScheduleIds = schedules
     .filter((schedule) => {
       if (takenSchedules.includes(schedule.id)) return true;
       // Pengecekan jam operasional yang telah lewat hanya diterapkan saat membuat libur baru, bukan saat edit
-      if (!initialData && startDate) {
+      if (!initialData && startDate && startDate === todayStr) {
         const now = new Date();
-        const [startH, startM] = schedule.time.split(" - ")[0].split(":").map(Number);
+        const timePart = schedule.startTime || schedule.time.split(" - ")[0];
+        const cleanTime = timePart.replace(/[^\d:]/g, "");
+        const [startH, startM] = cleanTime.split(":").map(Number);
 
-        const checkDate = new Date(startDate);
-        const sYear = checkDate.getFullYear();
-        const sMonth = checkDate.getMonth();
-        const sDate = checkDate.getDate();
-
-        const nYear = now.getFullYear();
-        const nMonth = now.getMonth();
-        const nDate = now.getDate();
-
-        if (
-          sYear < nYear ||
-          (sYear === nYear && sMonth < nMonth) ||
-          (sYear === nYear && sMonth === nMonth && sDate < nDate)
-        ) {
-          return true;
-        } else if (sYear === nYear && sMonth === nMonth && sDate === nDate) {
+        if (!isNaN(startH)) {
           const currentH = now.getHours();
           const currentM = now.getMinutes();
-          if (currentH > startH || (currentH === startH && currentM >= startM)) {
+          if (currentH > startH || (currentH === startH && currentM >= (isNaN(startM) ? 0 : startM))) {
             return true;
           }
         }
@@ -359,15 +501,16 @@ export default function CreateHolidayView({
     })
     .map((s) => s.id);
 
-  // For "full", all are selected automatically in the UI logic.
-  const activeSelectedRaw = liburType === "full" ? ["1", "2", "3", "4"] : selectedSchedules;
+  // Untuk libur penuh (full), seluruh jadwal yang relevan otomatis dipilih
+  const activeSelectedRaw = liburType === "full" ? schedules.map((s) => s.id) : selectedSchedules;
   const activeSelected = activeSelectedRaw.filter((id) => !unavailableScheduleIds.includes(id));
+  const totalSchedulesCount = schedules.length;
   const diliburkanCount =
     liburType === null || selectedStores.length === 0 || startDate === "" ? 0 : activeSelected.length;
   const berjalanCount =
     liburType === null || selectedStores.length === 0 || startDate === ""
       ? 0
-      : 4 - diliburkanCount - unavailableScheduleIds.length;
+      : Math.max(0, totalSchedulesCount - diliburkanCount - unavailableScheduleIds.length);
 
   const initialStartDateClean = cleanDate(initialData?.startDate);
   const isDateInPast = Boolean(
@@ -380,7 +523,8 @@ export default function CreateHolidayView({
     !initialData &&
     liburType === "full" &&
     startDate === todayStr &&
-    unavailableScheduleIds.length === 4
+    totalSchedulesCount > 0 &&
+    unavailableScheduleIds.length >= totalSchedulesCount
   );
   const hasNoAvailableSchedules = Boolean(
     liburType === "partial" &&
@@ -442,11 +586,10 @@ export default function CreateHolidayView({
               {/* Option Full */}
               <div
                 onClick={() => setLiburType("full")}
-                className={`p-5 rounded-xl border-2 transition-all cursor-pointer relative group ${
-                  liburType === "full"
+                className={`p-5 rounded-xl border-2 transition-all cursor-pointer relative group ${liburType === "full"
                     ? "border-orange-500 bg-orange-50/25 shadow-xs"
                     : "border-slate-200 hover:border-orange-300 hover:shadow-xs bg-white"
-                }`}
+                  }`}
               >
                 {/* Radio Circle Indicator */}
                 <div className="absolute top-4 right-4 flex items-center justify-center">
@@ -479,11 +622,10 @@ export default function CreateHolidayView({
               {/* Option Partial */}
               <div
                 onClick={() => setLiburType("partial")}
-                className={`p-5 rounded-xl border-2 transition-all cursor-pointer relative group ${
-                  liburType === "partial"
+                className={`p-5 rounded-xl border-2 transition-all cursor-pointer relative group ${liburType === "partial"
                     ? "border-blue-500 bg-blue-50/25 shadow-xs"
                     : "border-slate-200 hover:border-blue-300 hover:shadow-xs bg-white"
-                }`}
+                  }`}
               >
                 {/* Radio Circle Indicator */}
                 <div className="absolute top-4 right-4 flex items-center justify-center">
@@ -600,9 +742,8 @@ export default function CreateHolidayView({
                       title="Buka daftar toko"
                     >
                       <ChevronDown
-                        className={`w-3.5 h-3.5 transition-transform duration-200 ${
-                          isStoreDropdownOpen ? "rotate-180" : ""
-                        }`}
+                        className={`w-3.5 h-3.5 transition-transform duration-200 ${isStoreDropdownOpen ? "rotate-180" : ""
+                          }`}
                       />
                     </button>
                   </div>
@@ -657,7 +798,7 @@ export default function CreateHolidayView({
                                   type={initialData ? "radio" : "checkbox"}
                                   name="holidayStoreSelection"
                                   checked={checked}
-                                  onChange={() => {}}
+                                  onChange={() => { }}
                                   className="w-3.5 h-3.5 rounded accent-[#193f53] cursor-pointer"
                                 />
                                 <div className="flex-1 min-w-0">
@@ -830,6 +971,7 @@ export default function CreateHolidayView({
                     const isFullHoliday = holidaysOnDate.some((h) => h.liburType === "full" || !h.liburType);
                     const isPartialHoliday = !isFullHoliday && holidaysOnDate.some((h) => h.liburType === "partial");
 
+                    const isNonOperational = isDateNonOperational(dateStr);
                     const isPast = dateStr < todayStr;
                     const isToday = dateStr === todayStr;
                     const isSelectedStart = startDate === dateStr;
@@ -843,6 +985,8 @@ export default function CreateHolidayView({
                       cellCls = "bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed opacity-60";
                     } else if (isPast) {
                       cellCls = "bg-slate-100/60 text-slate-300 border-slate-100 cursor-not-allowed";
+                    } else if (isNonOperational) {
+                      cellCls = "bg-slate-100/70 text-slate-300/80 border-slate-200/50 cursor-not-allowed select-none";
                     } else if (isFullHoliday) {
                       cellCls = "bg-red-500 text-white font-bold border-red-600 shadow-xs hover:bg-red-600 cursor-pointer";
                       if (isInRange) cellCls += " ring-2 ring-blue-600 ring-offset-1";
@@ -857,19 +1001,36 @@ export default function CreateHolidayView({
                         cellCls = "bg-blue-100/80 text-blue-900 font-semibold border-blue-200 cursor-pointer";
                       }
                     } else if (isToday) {
-                      cellCls = "bg-white text-blue-700 font-bold border-blue-400 ring-1 ring-blue-400 cursor-pointer";
+                      if (isAllCompletedToday) {
+                        cellCls =
+                          "bg-emerald-600 text-white font-bold border-emerald-700 shadow-xs hover:bg-emerald-700 cursor-pointer";
+                      } else if (isPartialCompletedToday) {
+                        cellCls =
+                          "bg-emerald-300 text-emerald-950 font-bold border-emerald-400 shadow-xs hover:bg-emerald-400 cursor-pointer";
+                      } else {
+                        cellCls = "bg-white text-blue-700 font-bold border-blue-400 ring-1 ring-blue-400 cursor-pointer";
+                      }
                     }
 
                     return (
                       <button
                         type="button"
                         key={d}
-                        disabled={selectedStores.length === 0 || isPast}
+                        disabled={selectedStores.length === 0 || isPast || isNonOperational}
                         onClick={() => handleCalendarDateClick(dateStr)}
+                        title={
+                          selectedStores.length === 0
+                            ? "Pilih cabang toko terlebih dahulu"
+                            : isPast
+                            ? "Tanggal sudah terlewat"
+                            : isNonOperational
+                            ? "Tidak ada jadwal audit pada hari ini"
+                            : undefined
+                        }
                         className={`h-9 sm:h-9.5 rounded-lg border flex flex-col items-center justify-center relative transition-all text-[11px] ${cellCls}`}
                       >
                         <span>{d}</span>
-                        {isToday && !isInRange && !isFullHoliday && !isPartialHoliday && (
+                        {isToday && !hasCompletedScheduleToday && !isNonOperational && !isInRange && !isFullHoliday && !isPartialHoliday && (
                           <div className="w-1 h-1 rounded-full bg-blue-600 absolute bottom-1" />
                         )}
                       </button>
@@ -889,7 +1050,7 @@ export default function CreateHolidayView({
 
                 {/* Legend Bar */}
                 <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200 text-[10px] text-slate-500">
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
                     <div className="flex items-center gap-1.5">
                       <div className="w-2.5 h-2.5 rounded bg-[#193f53]" />
                       <span>Rentang Pilihan</span>
@@ -901,6 +1062,18 @@ export default function CreateHolidayView({
                     <div className="flex items-center gap-1.5">
                       <div className="w-2.5 h-2.5 rounded bg-amber-400" />
                       <span>Libur Sebagian</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-2.5 h-2.5 rounded bg-emerald-600" />
+                      <span>Jadwal Selesai</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-2.5 h-2.5 rounded bg-emerald-300 border border-emerald-400" />
+                      <span>Selesai Sebagian</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-2.5 h-2.5 rounded bg-slate-100 border border-slate-300" />
+                      <span>Non-Aktif (Tidak Ada Jadwal)</span>
                     </div>
                   </div>
                   {startDate && endDate && (
@@ -917,13 +1090,12 @@ export default function CreateHolidayView({
                     ALASAN LIBUR / KETERANGAN PENGECUALIAN <span className="text-red-500">*</span>
                   </label>
                   <span
-                    className={`text-[10px] font-semibold ${
-                      reason.length >= MAX_REASON_LENGTH
+                    className={`text-[10px] font-semibold ${reason.length >= MAX_REASON_LENGTH
                         ? "text-rose-500"
                         : reason.length >= MAX_REASON_LENGTH * 0.8
-                        ? "text-amber-600"
-                        : "text-slate-400"
-                    }`}
+                          ? "text-amber-600"
+                          : "text-slate-400"
+                      }`}
                   >
                     {reason.length} / {MAX_REASON_LENGTH} karakter
                   </span>
@@ -934,11 +1106,10 @@ export default function CreateHolidayView({
                   value={reason}
                   onChange={(e) => setReason(e.target.value.slice(0, MAX_REASON_LENGTH))}
                   placeholder={`Masukkan alasan libur atau keterangan pengecualian (maksimal ${MAX_REASON_LENGTH} karakter)...`}
-                  className={`w-full px-4 py-2.5 bg-white border rounded-lg text-xs font-medium focus:outline-none focus:ring-2 transition-all resize-none ${
-                    reason.length >= MAX_REASON_LENGTH
+                  className={`w-full px-4 py-2.5 bg-white border rounded-lg text-xs font-medium focus:outline-none focus:ring-2 transition-all resize-none ${reason.length >= MAX_REASON_LENGTH
                       ? "border-amber-300 focus:ring-amber-500/20 focus:border-amber-500"
                       : "border-slate-200 focus:ring-[#193f53]/20 focus:border-[#193f53]"
-                  }`}
+                    }`}
                 />
                 <div className="flex items-center justify-between text-[10px] text-slate-500 mt-1.5">
                   <p>Alasan ini akan tercatat di log riwayat dan kalender penugasan auditor lapangan.</p>
@@ -975,9 +1146,8 @@ export default function CreateHolidayView({
                 <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-6">
                   <div className="flex gap-4">
                     <div
-                      className={`w-8 h-8 rounded-full ${
-                        liburType === "full" ? "bg-orange-100 text-orange-600" : "bg-blue-100 text-blue-600"
-                      } flex items-center justify-center font-bold text-sm shrink-0`}
+                      className={`w-8 h-8 rounded-full ${liburType === "full" ? "bg-orange-100 text-orange-600" : "bg-blue-100 text-blue-600"
+                        } flex items-center justify-center font-bold text-sm shrink-0`}
                     >
                       3
                     </div>
@@ -1033,11 +1203,10 @@ export default function CreateHolidayView({
                   </div>
                 ) : (
                   <div
-                    className={`flex items-start gap-3 p-4 rounded-xl border mb-5 ${
-                      liburType === "full"
+                    className={`flex items-start gap-3 p-4 rounded-xl border mb-5 ${liburType === "full"
                         ? "bg-orange-50/50 border-orange-200 text-orange-800"
                         : "bg-blue-50/50 border-blue-200 text-blue-800"
-                    }`}
+                      }`}
                   >
                     <div className="mt-0.5">
                       {liburType === "full" ? (
@@ -1090,84 +1259,100 @@ export default function CreateHolidayView({
                 {/* Schedules List */}
                 {!isFullConflict && (
                   <div className="space-y-3">
-                    {schedules.map((schedule) => {
-                      const isTaken = takenSchedules.includes(schedule.id);
-                      const isUnavailable = unavailableScheduleIds.includes(schedule.id);
-                      const isExpired = isUnavailable && !isTaken;
-                      const isLibur = isUnavailable || liburType === "full" || activeSelected.includes(schedule.id);
+                    {isLoadingSchedules ? (
+                      <div className="p-8 text-center border border-slate-200 rounded-xl bg-slate-50 flex items-center justify-center gap-2.5">
+                        <Loader2 className="w-5 h-5 animate-spin text-[#193f53]" />
+                        <span className="text-xs text-slate-500 font-medium">Memuat jadwal audit dari database...</span>
+                      </div>
+                    ) : schedules.length === 0 ? (
+                      <div className="p-8 text-center border border-dashed border-slate-200 rounded-xl bg-slate-50/80">
+                        <Clock className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                        <p className="text-xs font-semibold text-slate-700">
+                          {selectedStores.length === 0
+                            ? "Pilih cabang toko terlebih dahulu untuk melihat jadwal audit"
+                            : "Tidak ada jadwal audit pada hari operasional yang dipilih"}
+                        </p>
+                        <p className="text-[11px] text-slate-400 mt-1 max-w-sm mx-auto">
+                          {selectedStores.length === 0
+                            ? "Jadwal audit akan otomatis ditampilkan setelah Anda memilih cabang toko di atas."
+                            : "Toko ini tidak memiliki jadwal audit yang aktif pada hari tersebut. Silakan periksa kembali hari berulang jadwal atau tanggal libur."}
+                        </p>
+                      </div>
+                    ) : (
+                      schedules.map((schedule) => {
+                        const isTaken = takenSchedules.includes(schedule.id);
+                        const isUnavailable = unavailableScheduleIds.includes(schedule.id);
+                        const isExpired = isUnavailable && !isTaken;
+                        const isLibur = isUnavailable || liburType === "full" || activeSelected.includes(schedule.id);
 
-                      return (
-                        <div
-                          key={schedule.id}
-                          onClick={() => liburType === "partial" && !isUnavailable && toggleSchedule(schedule.id)}
-                          className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl border transition-colors ${
-                            liburType === "partial" && !isUnavailable ? "cursor-pointer" : ""
-                          } ${
-                            isUnavailable
-                              ? "border-slate-200 bg-slate-50 opacity-60 grayscale"
-                              : isLibur
-                              ? "border-red-200 bg-red-50/30"
-                              : "border-slate-200 bg-white hover:border-slate-300"
-                          }`}
-                        >
-                          <div className="flex items-center gap-4">
-                            {liburType === "partial" && (
-                              <div
-                                className={`w-5 h-5 rounded border flex items-center justify-center shrink-0 transition-colors ${
-                                  isLibur ? "bg-red-500 border-red-500 text-white" : "border-slate-300 bg-white"
-                                }`}
-                              >
-                                {isLibur && <Check className="w-3.5 h-3.5" />}
-                              </div>
-                            )}
-                            {liburType === "full" && (
-                              <div className="w-8 h-8 rounded-lg bg-red-100 text-red-600 flex items-center justify-center shrink-0">
-                                <CalendarOff className="w-4 h-4" />
-                              </div>
-                            )}
-
-                            <div>
-                              <div className="flex flex-wrap items-center gap-2 mb-1">
-                                <h4 className="text-xs font-bold text-slate-900">{schedule.name}</h4>
-                                {isUnavailable ? (
-                                  <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase rounded bg-slate-200 text-slate-600">
-                                    {isExpired ? "SUDAH TERLEWAT" : "SUDAH DILIBURKAN"}
-                                  </span>
-                                ) : (
-                                  <span
-                                    className={`px-1.5 py-0.5 text-[9px] font-bold uppercase rounded ${
-                                      isLibur ? "bg-red-100 text-red-600" : "bg-emerald-100 text-emerald-700"
+                        return (
+                          <div
+                            key={schedule.id}
+                            onClick={() => liburType === "partial" && !isUnavailable && toggleSchedule(schedule.id)}
+                            className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl border transition-colors ${liburType === "partial" && !isUnavailable ? "cursor-pointer" : ""
+                              } ${isUnavailable
+                                ? "border-slate-200 bg-slate-50 opacity-60 grayscale"
+                                : isLibur
+                                  ? "border-red-200 bg-red-50/30"
+                                  : "border-slate-200 bg-white hover:border-slate-300"
+                              }`}
+                          >
+                            <div className="flex items-center gap-4">
+                              {liburType === "partial" && (
+                                <div
+                                  className={`w-5 h-5 rounded border flex items-center justify-center shrink-0 transition-colors ${isLibur ? "bg-red-500 border-red-500 text-white" : "border-slate-300 bg-white"
                                     }`}
-                                  >
-                                    {isLibur ? "AKAN DILIBURKAN" : "TETAP BERJALAN"}
+                                >
+                                  {isLibur && <Check className="w-3.5 h-3.5" />}
+                                </div>
+                              )}
+                              {liburType === "full" && (
+                                <div className="w-8 h-8 rounded-lg bg-red-100 text-red-600 flex items-center justify-center shrink-0">
+                                  <CalendarOff className="w-4 h-4" />
+                                </div>
+                              )}
+
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2 mb-1">
+                                  <h4 className="text-xs font-bold text-slate-900">{schedule.name}</h4>
+                                  {isUnavailable ? (
+                                    <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase rounded bg-slate-200 text-slate-600">
+                                      {isExpired ? "SUDAH TERLEWAT" : "SUDAH DILIBURKAN"}
+                                    </span>
+                                  ) : (
+                                    <span
+                                      className={`px-1.5 py-0.5 text-[9px] font-bold uppercase rounded ${isLibur ? "bg-red-100 text-red-600" : "bg-emerald-100 text-emerald-700"
+                                        }`}
+                                    >
+                                      {isLibur ? "AKAN DILIBURKAN" : "TETAP BERJALAN"}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
+                                  <span className="flex items-center gap-1">
+                                    <Clock className="w-3 h-3" /> {schedule.time}
                                   </span>
-                                )}
-                              </div>
-                              <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
-                                <span className="flex items-center gap-1">
-                                  <Clock className="w-3 h-3" /> {schedule.time}
-                                </span>
-                                <span className="flex items-center gap-1">
-                                  <Check className="w-3 h-3" /> {schedule.desc}
-                                </span>
+                                  <span className="flex items-center gap-1">
+                                    <Check className="w-3 h-3" /> {schedule.desc}
+                                  </span>
+                                </div>
                               </div>
                             </div>
-                          </div>
 
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            {isUnavailable ? null : isLibur ? (
-                              <span className="flex items-center gap-1.5 text-xs font-bold text-red-500">
-                                <XCircle className="w-4 h-4" /> Libur
-                              </span>
-                            ) : (
-                              <span className="flex items-center gap-1.5 text-xs font-bold text-emerald-600">
-                                <Check className="w-4 h-4" /> Berjalan
-                              </span>
-                            )}
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {isUnavailable ? null : isLibur ? (
+                                <span className="flex items-center gap-1.5 text-xs font-bold text-red-500">
+                                  <XCircle className="w-4 h-4" /> Libur
+                                </span>
+                              ) : (
+                                <span className="flex items-center gap-1.5 text-xs font-bold text-emerald-600">
+                                  <Check className="w-4 h-4" /> Berjalan
+                                </span>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      }))}
                   </div>
                 )}
               </>
@@ -1184,13 +1369,12 @@ export default function CreateHolidayView({
                 <h3 className="text-xs font-bold text-slate-900">RINGKASAN DAMPAK</h3>
               </div>
               <div
-                className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${
-                  liburType === null
+                className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${liburType === null
                     ? "bg-slate-100 text-slate-500"
                     : liburType === "full"
-                    ? "bg-orange-100 text-orange-700"
-                    : "bg-blue-100 text-blue-700"
-                }`}
+                      ? "bg-orange-100 text-orange-700"
+                      : "bg-blue-100 text-blue-700"
+                  }`}
               >
                 {liburType === null ? "BELUM DIPILIH" : liburType === "full" ? "LIBUR PENUH" : "PENGECUALIAN"}
               </div>
@@ -1201,29 +1385,27 @@ export default function CreateHolidayView({
                 <div className="flex justify-between items-center text-[11px]">
                   <span className="text-slate-500">Toko Terpilih</span>
                   <span
-                    className={`font-bold ${
-                      selectedStores.length === 0 ? "text-slate-400" : "text-slate-900"
-                    }`}
+                    className={`font-bold ${selectedStores.length === 0 ? "text-slate-400" : "text-slate-900"
+                      }`}
                   >
                     {selectedStores.length === 0
                       ? "Belum dipilih"
                       : selectedStores.length === 1
-                      ? selectedStores[0]
-                      : `${selectedStores.length} Toko Dipilih`}
+                        ? selectedStores[0]
+                        : `${selectedStores.length} Toko Dipilih`}
                   </span>
                 </div>
                 <div className="flex justify-between items-center text-[11px]">
                   <span className="text-slate-500">Lokasi</span>
                   <span
-                    className={`font-medium ${
-                      selectedStores.length === 0 ? "text-slate-400" : "text-slate-700"
-                    }`}
+                    className={`font-medium ${selectedStores.length === 0 ? "text-slate-400" : "text-slate-700"
+                      }`}
                   >
                     {selectedStores.length === 0
                       ? "-"
                       : selectedStores.length === 1
-                      ? storeOptions.find((s) => s.name === selectedStores[0])?.location || "Lokasi Toko"
-                      : `${selectedStores.length} Cabang Terpilih`}
+                        ? storeOptions.find((s) => s.name === selectedStores[0])?.location || "Lokasi Toko"
+                        : `${selectedStores.length} Cabang Terpilih`}
                   </span>
                 </div>
                 <div className="flex justify-between items-center text-[11px]">
@@ -1253,22 +1435,26 @@ export default function CreateHolidayView({
               </div>
 
               {/* Progress Bar */}
-              <div className="w-full h-2 rounded-full flex overflow-hidden mb-2">
+              <div className="w-full h-2 rounded-full flex overflow-hidden mb-2 bg-slate-100">
                 <div
                   className="h-full bg-red-500 transition-all duration-500"
-                  style={{ width: `${(diliburkanCount / 4) * 100}%` }}
+                  style={{
+                    width: `${(diliburkanCount / (totalSchedulesCount > 0 ? totalSchedulesCount : 1)) * 100}%`,
+                  }}
                 />
                 <div
                   className="h-full bg-emerald-500 transition-all duration-500"
-                  style={{ width: `${(berjalanCount / 4) * 100}%` }}
+                  style={{
+                    width: `${(berjalanCount / (totalSchedulesCount > 0 ? totalSchedulesCount : 1)) * 100}%`,
+                  }}
                 />
               </div>
               <div className="flex justify-between text-[9px] font-bold text-slate-400">
                 <span className={diliburkanCount > 0 ? "text-red-500" : ""}>
-                  {Math.round((diliburkanCount / 4) * 100)}% Diliburkan
+                  {Math.round((diliburkanCount / (totalSchedulesCount > 0 ? totalSchedulesCount : 1)) * 100)}% Diliburkan
                 </span>
                 <span className={berjalanCount > 0 ? "text-emerald-500" : ""}>
-                  {Math.round((berjalanCount / 4) * 100)}% Berjalan
+                  {Math.round((berjalanCount / (totalSchedulesCount > 0 ? totalSchedulesCount : 1)) * 100)}% Berjalan
                 </span>
               </div>
 
@@ -1305,11 +1491,10 @@ export default function CreateHolidayView({
             type="button"
             onClick={handleSaveClick}
             disabled={isSaveDisabled}
-            className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-6 py-2.5 rounded-lg text-xs font-semibold transition-all shadow-md ${
-              isSaveDisabled
+            className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-6 py-2.5 rounded-lg text-xs font-semibold transition-all shadow-md ${isSaveDisabled
                 ? "bg-slate-300 text-slate-500 cursor-not-allowed"
                 : "bg-[#193f53] hover:bg-[#143343] active:scale-[0.98] text-white cursor-pointer"
-            }`}
+              }`}
           >
             {isSubmitting ? (
               <>
@@ -1318,8 +1503,8 @@ export default function CreateHolidayView({
                   {initialData
                     ? "Menyimpan Perubahan..."
                     : selectedStores.length > 1
-                    ? `Menyimpan (${selectedStores.length} Toko)...`
-                    : "Menyimpan Libur..."}
+                      ? `Menyimpan (${selectedStores.length} Toko)...`
+                      : "Menyimpan Libur..."}
                 </span>
               </>
             ) : (
@@ -1329,8 +1514,8 @@ export default function CreateHolidayView({
                   {initialData
                     ? "Simpan Perubahan"
                     : selectedStores.length > 1
-                    ? `Simpan Libur (${selectedStores.length} Toko)`
-                    : "Simpan Libur Toko"}
+                      ? `Simpan Libur (${selectedStores.length} Toko)`
+                      : "Simpan Libur Toko"}
                 </span>
               </>
             )}

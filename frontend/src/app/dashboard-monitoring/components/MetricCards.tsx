@@ -24,12 +24,12 @@ interface MetricCardsProps {
 
 export default function MetricCards({
   stats = {
-    totalStores: 10,
-    completedAudits: 78,
-    pendingAudits: 12,
-    totalFindings: 24,
-    resolvedFindings: 18,
-    openFindings: 6,
+    totalStores: 0,
+    completedAudits: 0,
+    pendingAudits: 0,
+    totalFindings: 0,
+    resolvedFindings: 0,
+    openFindings: 0,
   },
 }: MetricCardsProps) {
   const cards = [
@@ -44,9 +44,9 @@ export default function MetricCards({
       icon: <CheckCircle2 className="w-4 h-4 text-emerald-500 stroke-[2.2]" />,
     },
     {
-      title: "Belum Dilakukan",
+      title: "Tidak Mengerjakan",
       value: stats.pendingAudits,
-      icon: <Clock className="w-4 h-4 text-amber-500 stroke-[2]" />,
+      icon: <Clock className="w-4 h-4 text-rose-500 stroke-[2]" />,
     },
     {
       title: "Total Temuan",
@@ -68,11 +68,11 @@ export default function MetricCards({
   ];
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-3 sm:gap-3.5 mb-6">
+    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-2.5 sm:gap-3 mb-3.5">
       {cards.map((card, idx) => (
         <div
           key={idx}
-          className="bg-white rounded-xl border border-slate-200 shadow-2xs p-3.5 sm:p-4 flex flex-col justify-between hover:border-slate-300 transition-all hover:shadow-xs group"
+          className="bg-white rounded-xl border border-slate-200 shadow-2xs p-3 sm:p-3.5 flex flex-col justify-between hover:border-slate-300 transition-all hover:shadow-xs group"
         >
           {/* Card Label */}
           <span className="text-[11px] font-semibold text-slate-500 tracking-tight">
@@ -80,8 +80,8 @@ export default function MetricCards({
           </span>
 
           {/* Number & Icon on the same line */}
-          <div className="flex items-baseline justify-between mt-3 sm:mt-4">
-            <span className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
+          <div className="flex items-baseline justify-between mt-2">
+            <span className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
               {card.value}
             </span>
             <div className="shrink-0 transition-transform group-hover:scale-110">

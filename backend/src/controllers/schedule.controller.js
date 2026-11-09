@@ -46,14 +46,13 @@ const to24HourString = (str) => {
  * Format string tanggal atau Date object menjadi "YYYY-MM-DD"
  */
 const formatDateString = (date) => {
-  if (!date) return new Date().toISOString().split('T')[0];
-  if (typeof date === 'string') {
-    return date.split('T')[0];
-  }
-  if (date instanceof Date) {
-    return date.toISOString().split('T')[0];
-  }
-  return String(date).substring(0, 10);
+  if (!date) return '';
+  const d = date instanceof Date ? date : new Date(date);
+  if (isNaN(d.getTime())) return '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 };
 
 /**
@@ -227,8 +226,22 @@ const formatSchedule = (s) => {
     auditorName = s.admin.name;
   }
 
-  const hasCompletedReport = Array.isArray(s.checklist_report) && s.checklist_report.some(r => r.status === 'completed' || r.status === 'submitted');
-  const status = computeRealtimeStatus(s.status, date, startTime, endTime, recurrence, selectedDays, hasCompletedReport);
+  const hasCompletedReport = Array.isArray(s.checklist_report) && s.checklist_report.some(r => r.status === 'completed' || r.status === 'submitted' || r.status === 'terlambat');
+  const now = new Date();
+  const todayY = now.getFullYear();
+  const todayM = String(now.getMonth() + 1).padStart(2, '0');
+  const todayD = String(now.getDate()).padStart(2, '0');
+  const todayDateStr = `${todayY}-${todayM}-${todayD}`;
+
+  const isCompletedToday = Array.isArray(s.checklist_report) && s.checklist_report.some(r => {
+    if (r.status !== 'completed' && r.status !== 'submitted' && r.status !== 'terlambat') return false;
+    const rDateStr = r.completed_at ? formatDateString(r.completed_at) : (r.created_at ? formatDateString(r.created_at) : null);
+    return rDateStr === todayDateStr;
+  });
+
+  const isRecurring = recurrence === 'Setiap Hari' || recurrence === 'Hari Tertentu';
+  const reportDoneForSchedule = isRecurring ? isCompletedToday : hasCompletedReport;
+  const status = computeRealtimeStatus(s.status, date, startTime, endTime, recurrence, selectedDays, reportDoneForSchedule);
   const duration = calculateDuration(startTime, endTime);
 
   const storeName = s.store?.store_name || 'Cabang Toko';
@@ -258,6 +271,7 @@ const formatSchedule = (s) => {
     recurrence,
     selectedDays,
     status,
+    isCompletedToday,
     isCompletedByStaff: hasCompletedReport,
     notes: s.notes || '',
     createdAt,
@@ -310,6 +324,7 @@ exports.getAllSchedules = async (req, res) => {
             report_id: true,
             status: true,
             completed_at: true,
+            created_at: true,
           },
         },
       },
@@ -359,6 +374,7 @@ exports.getScheduleById = async (req, res) => {
             report_id: true,
             status: true,
             completed_at: true,
+            created_at: true,
           },
         },
       },
@@ -398,11 +414,11 @@ exports.createSchedule = async (req, res) => {
     if (rawWsId && rawWsId !== 'all') {
       try {
         targetWsId = BigInt(rawWsId.toString().replace(/^ws-/, ''));
-      } catch (e) {}
+      } catch (e) { }
     } else if (user && user.role === 'Admin' && user.workspaceId) {
       try {
         targetWsId = BigInt(user.workspaceId.toString().replace(/^ws-/, ''));
-      } catch (e) {}
+      } catch (e) { }
     }
 
     // Validasi Workspace: jika workspace dinonaktifkan, hentikan pembuatan jadwal
@@ -439,7 +455,7 @@ exports.createSchedule = async (req, res) => {
           storeRecord = await prisma.store.findUnique({
             where: { store_id: BigInt(item.storeId.toString().replace(/^str-/, '')) },
           });
-        } catch (e) {}
+        } catch (e) { }
       }
 
       if (!storeRecord && item.storeName) {
@@ -483,7 +499,7 @@ exports.createSchedule = async (req, res) => {
           templateRecord = await prisma.checklist_template.findUnique({
             where: { template_id: BigInt(item.templateId.toString().replace(/^tpl-/, '')) },
           });
-        } catch (e) {}
+        } catch (e) { }
       }
 
       if (!templateRecord && item.templateName) {
@@ -693,7 +709,7 @@ exports.updateSchedule = async (req, res) => {
           targetTemplate = await prisma.checklist_template.findUnique({
             where: { template_id: cleanTplId },
           });
-        } catch (e) {}
+        } catch (e) { }
       }
 
       if (!targetTemplate && (body.templateName || body.template)) {
@@ -723,7 +739,7 @@ exports.updateSchedule = async (req, res) => {
           storeRecord = await prisma.store.findUnique({
             where: { store_id: cleanStoreId },
           });
-        } catch (e) {}
+        } catch (e) { }
       }
       if (!storeRecord && body.storeName) {
         storeRecord = await prisma.store.findFirst({

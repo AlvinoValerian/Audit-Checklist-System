@@ -129,7 +129,8 @@ export const resolveScheduleStatus = (
   }
 
   // Cek apakah sudah dikerjakan oleh staff langsung dari database
-  if (schedule.isCompletedByStaff) {
+  const isRecurring = schedule.recurrence === "Setiap Hari" || schedule.recurrence === "Hari Tertentu";
+  if (isRecurring ? Boolean(schedule.isCompletedToday) : Boolean(schedule.isCompletedByStaff)) {
     return "Selesai";
   }
 

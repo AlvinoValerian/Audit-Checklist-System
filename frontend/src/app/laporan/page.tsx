@@ -136,6 +136,12 @@ export default function LaporanPage() {
       if (activeWs?.id) {
         setSelectedWorkspaceId(activeWs.id);
         setCurrentWorkspaceName(activeWs.name);
+        setSelectedStore("Semua Toko");
+        setSelectedSchedule("Semua Jadwal");
+        setSelectedMonth("Semua Bulan");
+        setSelectedStatus("Semua Status");
+        setSearchTerm("");
+        setCurrentPage(1);
         loadReportsData(true, activeWs.id);
       }
     };
@@ -154,6 +160,13 @@ export default function LaporanPage() {
     }
 
     setSelectedWorkspaceId(newWsId);
+    setSelectedStore("Semua Toko");
+    setSelectedSchedule("Semua Jadwal");
+    setSelectedMonth("Semua Bulan");
+    setSelectedStatus("Semua Status");
+    setSearchTerm("");
+    setCurrentPage(1);
+
     if (chosen) {
       const name = chosen.companyName || chosen.name;
       setCurrentWorkspaceName(name);
@@ -573,9 +586,6 @@ export default function LaporanPage() {
                               <div className="min-w-0">
                                 <p className="text-xs font-bold text-slate-900 leading-tight">
                                   {row.storeName}
-                                </p>
-                                <p className="text-[11px] text-slate-500 mt-0.5">
-                                  {row.storeLocation}
                                 </p>
                               </div>
                             </div>
