@@ -55,7 +55,11 @@ exports.getAllWorkspaces = async (req, res) => {
     const workspaces = await prisma.workspace.findMany({
       where,
       include: {
-        store: true,
+        store: {
+          select: {
+            store_name: true,
+          },
+        },
         admin: {
           select: {
             admin_id: true,
@@ -104,7 +108,15 @@ exports.getWorkspaceById = async (req, res) => {
     const workspace = await prisma.workspace.findFirst({
       where,
       include: {
-        store: true,
+        store: {
+          select: {
+            store_id: true,
+            store_name: true,
+            status: true,
+            city: true,
+            address: true,
+          },
+        },
         admin: true,
       },
     });

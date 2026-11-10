@@ -6,6 +6,22 @@ const { encryptImageData, decryptImageData } = require('../utils/imageCrypto');
 const JWT_SECRET = process.env.JWT_SECRET || 'audit_checklist_system_jwt_secret_key_2024';
 
 /**
+ * Helper untuk mengambil kolom tambahan staff (position, deleted_at)
+ * yang belum didefinisikan pada Prisma schema statik
+ */
+const getStaffExtra = async (staffId) => {
+  try {
+    const rows = await prisma.$queryRawUnsafe(
+      `SELECT position, deleted_at FROM staff WHERE staff_id = $1 LIMIT 1`,
+      staffId
+    );
+    return rows && rows[0] ? rows[0] : {};
+  } catch (e) {
+    return {};
+  }
+};
+
+/**
  * Helper untuk format response Super Admin
  */
 const formatAuthSuperAdmin = (sa, token) => {
@@ -366,10 +382,11 @@ exports.login = async (req, res) => {
     });
 
     if (staff) {
-      if (staff.status === 'inactive' || staff.status === 'Nonaktif') {
+      const extra = await getStaffExtra(staff.staff_id);
+      if (extra.deleted_at || staff.status === 'inactive' || staff.status === 'Nonaktif') {
         return res.status(403).json({
           status: 'error',
-          message: 'Akun staf Anda berstatus Nonaktif. Hubungi Admin untuk mengaktifkan kembali.',
+          message: 'Akun staf Anda berstatus Nonaktif atau telah dihapus. Hubungi Admin untuk mengaktifkan kembali.',
         });
       }
 
@@ -387,14 +404,17 @@ exports.login = async (req, res) => {
         });
       }
 
+      const staffPosition = extra.position || 'Auditor Lapangan';
       const storeCode = staff.store ? `ST-${staff.store.store_id.toString()}` : 'ST-01';
+      const storeIdStr = staff.store_id ? staff.store_id.toString() : null;
       const token = jwt.sign(
         {
           id: `staff-${staff.staff_id.toString()}`,
           rawId: staff.staff_id.toString(),
           email: staff.email,
           role: 'Staff',
-          storeId: staff.store_id.toString(),
+          position: staffPosition,
+          storeId: storeIdStr,
           workspaceId: staff.store?.workspace_id?.toString() || staff.admin?.workspace_id?.toString() || '',
         },
         JWT_SECRET,
@@ -413,9 +433,10 @@ exports.login = async (req, res) => {
             email: staff.email,
             phone: staff.phone_number || '-',
             role: 'Staff',
-            storeId: staff.store_id.toString(),
+            position: staffPosition,
+            storeId: storeIdStr,
             storeName: staff.store ? staff.store.store_name : 'Toko Cabang',
-            storeLocation: staff.store ? (staff.store.city || staff.store.address || 'Cabang') : 'Cabang',
+            storeLocation: staff.store ? (staff.store.address || staff.store.city || 'Cabang') : 'Cabang',
             storeAddress: staff.store?.address || staff.store?.city || '-',
             storeCode: storeCode,
             workspaceId: staff.store?.workspace_id?.toString() || staff.admin?.workspace_id?.toString() || '',
@@ -484,6 +505,13 @@ exports.getMe = async (req, res) => {
       if (!st) {
         return res.status(404).json({ status: 'error', message: 'Staff tidak ditemukan' });
       }
+      const extra = await getStaffExtra(st.staff_id);
+      if (extra.deleted_at || st.status === 'inactive' || st.status === 'Nonaktif') {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Akun staf Anda berstatus Nonaktif atau telah dihapus.',
+        });
+      }
       return res.status(200).json({
         status: 'success',
         data: {
@@ -495,14 +523,15 @@ exports.getMe = async (req, res) => {
             email: st.email,
             phone: st.phone_number || '-',
             role: 'Staff',
-            storeId: st.store_id.toString(),
+            position: extra.position || 'Auditor Lapangan',
+            storeId: st.store_id ? st.store_id.toString() : null,
             storeName: st.store ? st.store.store_name : 'Toko Cabang',
-            storeLocation: st.store ? (st.store.city || st.store.address || 'Cabang') : 'Cabang',
+            storeLocation: st.store ? (st.store.address || st.store.city || 'Cabang') : 'Cabang',
             storeAddress: st.store?.address || st.store?.city || '-',
             storeCode: st.store ? `ST-${st.store.store_id.toString()}` : 'ST-01',
             workspaceId: st.store?.workspace_id?.toString() || '',
             workspaceName: st.store?.workspace?.company_name || 'Workspace',
-            status: st.status === 'inactive' || st.status === 'Nonaktif' ? 'Nonaktif' : 'Aktif',
+            status: 'Aktif',
             profilePicture: st.photo || null,
           },
         },
@@ -620,12 +649,25 @@ exports.updateProfile = async (req, res) => {
       }
 
       if (staff) {
+        const currentExtra = await getStaffExtra(staff.staff_id);
+        if (currentExtra.deleted_at || staff.status === 'inactive' || staff.status === 'Nonaktif') {
+          return res.status(403).json({
+            status: 'error',
+            message: 'Akun staf Anda berstatus Nonaktif atau telah dihapus.',
+          });
+        }
         const updateData = {};
         if (typeof name === 'string' && name.trim()) {
           updateData.name = name.trim();
         }
         if (profilePicture !== undefined) {
-          updateData.photo = encryptImageData(profilePicture);
+          if (!profilePicture) {
+            updateData.photo = null;
+          } else if (profilePicture.startsWith('ENC:v1:') || profilePicture.startsWith('enc:v1:')) {
+            updateData.photo = profilePicture;
+          } else {
+            updateData.photo = encryptImageData(profilePicture);
+          }
         }
 
         const updatedStaff = await prisma.staff.update({
@@ -635,6 +677,7 @@ exports.updateProfile = async (req, res) => {
             store: { include: { workspace: true } },
           },
         });
+        const updatedExtra = await getStaffExtra(updatedStaff.staff_id);
 
         return res.status(200).json({
           status: 'success',
@@ -649,9 +692,10 @@ exports.updateProfile = async (req, res) => {
               email: updatedStaff.email,
               phone: updatedStaff.phone_number || '-',
               role: 'Staff',
-              storeId: updatedStaff.store_id.toString(),
+              position: updatedExtra.position || 'Auditor Lapangan',
+              storeId: updatedStaff.store_id ? updatedStaff.store_id.toString() : null,
               storeName: updatedStaff.store ? updatedStaff.store.store_name : 'Toko Cabang',
-              storeLocation: updatedStaff.store ? (updatedStaff.store.city || updatedStaff.store.address || 'Cabang') : 'Cabang',
+              storeLocation: updatedStaff.store ? (updatedStaff.store.address || updatedStaff.store.city || 'Cabang') : 'Cabang',
               storeAddress: updatedStaff.store?.address || updatedStaff.store?.city || '-',
               storeCode: updatedStaff.store ? `ST-${updatedStaff.store.store_id.toString()}` : 'ST-01',
               workspaceId: updatedStaff.store?.workspace_id?.toString() || '',
@@ -684,7 +728,13 @@ exports.updateProfile = async (req, res) => {
           updateData.name = name.trim();
         }
         if (profilePicture !== undefined) {
-          updateData.profile_picture = encryptImageData(profilePicture);
+          if (!profilePicture) {
+            updateData.profile_picture = null;
+          } else if (profilePicture.startsWith('ENC:v1:') || profilePicture.startsWith('enc:v1:')) {
+            updateData.profile_picture = profilePicture;
+          } else {
+            updateData.profile_picture = encryptImageData(profilePicture);
+          }
         }
 
         const updatedSa = await prisma.super_admin.update({
@@ -723,7 +773,13 @@ exports.updateProfile = async (req, res) => {
           updateData.name = name.trim();
         }
         if (profilePicture !== undefined) {
-          updateData.profile_picture = encryptImageData(profilePicture);
+          if (!profilePicture) {
+            updateData.profile_picture = null;
+          } else if (profilePicture.startsWith('ENC:v1:') || profilePicture.startsWith('enc:v1:')) {
+            updateData.profile_picture = profilePicture;
+          } else {
+            updateData.profile_picture = encryptImageData(profilePicture);
+          }
         }
 
         const updatedAdm = await prisma.admin.update({
@@ -752,15 +808,25 @@ exports.updateProfile = async (req, res) => {
         include: { store: { include: { workspace: true } } },
       });
       if (staffByEmail) {
+        const currentExtra = await getStaffExtra(staffByEmail.staff_id);
+        if (currentExtra.deleted_at || staffByEmail.status === 'inactive' || staffByEmail.status === 'Nonaktif') {
+          return res.status(403).json({
+            status: 'error',
+            message: 'Akun staf Anda berstatus Nonaktif atau telah dihapus.',
+          });
+        }
         const updateData = {};
         if (typeof name === 'string' && name.trim()) updateData.name = name.trim();
-        if (profilePicture !== undefined) updateData.photo = encryptImageData(profilePicture);
+        if (profilePicture !== undefined) {
+          updateData.photo = !profilePicture ? null : (profilePicture.startsWith('ENC:v1:') || profilePicture.startsWith('enc:v1:')) ? profilePicture : encryptImageData(profilePicture);
+        }
 
         const updatedStaff = await prisma.staff.update({
           where: { staff_id: staffByEmail.staff_id },
           data: updateData,
           include: { store: { include: { workspace: true } } },
         });
+        const updatedExtra = await getStaffExtra(updatedStaff.staff_id);
 
         return res.status(200).json({
           status: 'success',
@@ -768,6 +834,24 @@ exports.updateProfile = async (req, res) => {
           data: {
             fullName: updatedStaff.name,
             profilePicture: updatedStaff.photo,
+            user: {
+              id: `staff-${updatedStaff.staff_id.toString()}`,
+              rawId: updatedStaff.staff_id.toString(),
+              fullName: updatedStaff.name,
+              email: updatedStaff.email,
+              phone: updatedStaff.phone_number || '-',
+              role: 'Staff',
+              position: updatedExtra.position || 'Auditor Lapangan',
+              storeId: updatedStaff.store_id ? updatedStaff.store_id.toString() : null,
+              storeName: updatedStaff.store ? updatedStaff.store.store_name : 'Toko Cabang',
+              storeLocation: updatedStaff.store ? (updatedStaff.store.address || updatedStaff.store.city || 'Cabang') : 'Cabang',
+              storeAddress: updatedStaff.store?.address || updatedStaff.store?.city || '-',
+              storeCode: updatedStaff.store ? `ST-${updatedStaff.store.store_id.toString()}` : 'ST-01',
+              workspaceId: updatedStaff.store?.workspace_id?.toString() || '',
+              workspaceName: updatedStaff.store?.workspace?.company_name || 'Workspace',
+              status: updatedStaff.status === 'inactive' || updatedStaff.status === 'Nonaktif' ? 'Nonaktif' : 'Aktif',
+              profilePicture: updatedStaff.photo || null,
+            },
           },
         });
       }
@@ -779,7 +863,9 @@ exports.updateProfile = async (req, res) => {
       if (admByEmail) {
         const updateData = {};
         if (typeof name === 'string' && name.trim()) updateData.name = name.trim();
-        if (profilePicture !== undefined) updateData.profile_picture = encryptImageData(profilePicture);
+        if (profilePicture !== undefined) {
+          updateData.profile_picture = !profilePicture ? null : (profilePicture.startsWith('ENC:v1:') || profilePicture.startsWith('enc:v1:')) ? profilePicture : encryptImageData(profilePicture);
+        }
 
         const updatedAdm = await prisma.admin.update({
           where: { admin_id: admByEmail.admin_id },
@@ -803,7 +889,9 @@ exports.updateProfile = async (req, res) => {
       if (saByEmail) {
         const updateData = {};
         if (typeof name === 'string' && name.trim()) updateData.name = name.trim();
-        if (profilePicture !== undefined) updateData.profile_picture = encryptImageData(profilePicture);
+        if (profilePicture !== undefined) {
+          updateData.profile_picture = !profilePicture ? null : (profilePicture.startsWith('ENC:v1:') || profilePicture.startsWith('enc:v1:')) ? profilePicture : encryptImageData(profilePicture);
+        }
 
         const updatedSa = await prisma.super_admin.update({
           where: { super_admin_id: saByEmail.super_admin_id },

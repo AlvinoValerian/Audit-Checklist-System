@@ -15,6 +15,9 @@ import {
 } from "lucide-react";
 import { StoreItem, StoreTimezone } from "@/types/toko";
 import { toast } from "sonner";
+import { optimizeAndResizeImage } from "@/lib/image-crypto";
+import { CryptoService } from "@/lib/crypto";
+import DecryptedImage from "@/components/DecryptedImage";
 
 // Dynamic import Leaflet component to prevent SSR 'window is not defined' error
 const AuditPointPickerMap = dynamic(
@@ -71,6 +74,7 @@ export default function EditStoreModal({
     previewUrl: string;
   } | null>(null);
   const [isPhotoDeleted, setIsPhotoDeleted] = useState<boolean>(false);
+  const [isPhotoChanged, setIsPhotoChanged] = useState<boolean>(false);
 
   // Submitting state for loading animation
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -95,6 +99,7 @@ export default function EditStoreModal({
       setLongitude(store.longitude ?? 106.823456);
       setIsSubmitting(false);
       setIsPhotoDeleted(false);
+      setIsPhotoChanged(false);
 
       if (store.storePicture) {
         const cleanName = store.name.toLowerCase().replace(/\s+/g, "_");
@@ -206,31 +211,53 @@ export default function EditStoreModal({
     );
   };
 
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 5 * 1024 * 1024) {
-        toast.error("Ukuran file foto maksimal 5MB.");
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      toast.error("File harus berupa gambar (JPG, PNG, atau WEBP)");
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error("Ukuran file foto maksimal 10MB.");
+      return;
+    }
+
+    try {
+      toast.loading("Mengompresi & mengenkripsi foto toko...", { id: "edit-store-photo" });
+
+      // 1. Resize proporsional (max 1024x768, quality 0.82) agar ukuran file ringkas
+      const resizedBase64 = await optimizeAndResizeImage(file, 1024, 768, 0.82);
+      if (!resizedBase64) {
+        toast.error("Gagal memproses gambar foto toko.", { id: "edit-store-photo" });
         return;
       }
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
-        setPhotoInfo({
-          fileName: file.name,
-          fileSize: `${sizeMb} MB • Terunggah`,
-          previewUrl: reader.result as string,
-        });
-        setIsPhotoDeleted(false);
-        toast.success(`Foto ${file.name} berhasil diunggah.`);
-      };
-      reader.readAsDataURL(file);
+
+      // 2. Enkripsi foto toko menggunakan AES-256-GCM
+      const encrypted = await CryptoService.encryptImage(resizedBase64);
+
+      setPhotoInfo({
+        fileName: file.name,
+        fileSize: "Di-resize & Terenkripsi AES-256",
+        previewUrl: encrypted,
+      });
+      setIsPhotoDeleted(false);
+      setIsPhotoChanged(true);
+      toast.success(`Foto ${file.name} berhasil di-resize & dienkripsi!`, { id: "edit-store-photo" });
+    } catch (err) {
+      console.warn("Gagal memproses foto toko:", err);
+      toast.error("Terjadi kesalahan saat memproses foto toko.", { id: "edit-store-photo" });
+    } finally {
+      e.target.value = "";
     }
   };
 
   const handleRemovePhoto = () => {
     setPhotoInfo(null);
     setIsPhotoDeleted(true);
+    setIsPhotoChanged(true);
     toast.info("Foto toko telah dihapus. Klik 'Simpan Perubahan' untuk mengonfirmasi.");
   };
 
@@ -254,11 +281,12 @@ export default function EditStoreModal({
 
     const matchedTz = TIMEZONE_OPTIONS.find((t) => t.value === timezone);
 
-    // Jika user menghapus foto: kirim explicit null. Jika ada foto baru/lama: kirim previewUrl.
-    const finalStorePicture = isPhotoDeleted
-      ? null
-      : photoInfo
-      ? photoInfo.previewUrl
+    // Hanya kirim storePicture jika foto benar-benar diubah oleh user (upload baru atau hapus)
+    // Mencegah pengiriman ulang string gambar base64 besar yang tidak perlu saat hanya mengedit nama/alamat
+    const finalStorePicture = isPhotoChanged
+      ? isPhotoDeleted
+        ? null
+        : photoInfo?.previewUrl
       : undefined;
 
     setIsSubmitting(true);
@@ -482,7 +510,7 @@ export default function EditStoreModal({
                   {photoInfo ? (
                     <div className="bg-white border border-slate-200 rounded-xl p-3 flex items-center justify-between gap-3 shadow-2xs">
                       <div className="flex items-center gap-3 min-w-0">
-                        <img
+                        <DecryptedImage
                           src={photoInfo.previewUrl}
                           alt={photoInfo.fileName}
                           className="w-12 h-12 rounded-lg object-cover border border-slate-200 shrink-0"

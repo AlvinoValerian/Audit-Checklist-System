@@ -36,6 +36,13 @@ export default function DecryptedImage({
 
     setLoading(true);
     decryptImageData(src)
+      .then(async (dec) => {
+        if ((!dec || dec === src) && src.startsWith("enc:v1:")) {
+          const { CryptoService } = await import("@/lib/crypto");
+          return CryptoService.decryptImage(src);
+        }
+        return dec;
+      })
       .then((dec) => {
         if (isMounted) {
           setDecryptedSrc(dec);

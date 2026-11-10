@@ -41,59 +41,88 @@ const getAuthHeaders = (): Record<string, string> => {
   return headers;
 };
 
+const inFlightStoreFetches = new Map<string, Promise<StoreItem[]>>();
+const lastStoreFetchTimes = new Map<string, number>();
+
 export const TokoService = {
   cachedStores: [] as StoreItem[],
+
+  invalidateCache() {
+    lastStoreFetchTimes.clear();
+    inFlightStoreFetches.clear();
+  },
 
   /**
    * Mengambil data toko langsung dari backend PostgreSQL
    * Secara otomatis menyaring toko yang berelasi dengan Workspace aktif
+   * Dilengkapi in-flight request deduplication & short-lived caching (5 detik)
    */
-  async fetchAll(customWorkspaceId?: string): Promise<StoreItem[]> {
-    try {
-      const user = AuthService.getCurrentUser();
-      const activeWs = AuthService.getActiveWorkspace();
-      const targetWsId =
-        customWorkspaceId ||
-        activeWs?.id ||
-        (user && user.workspaceId ? user.workspaceId : undefined);
+  async fetchAll(customWorkspaceId?: string, force = false): Promise<StoreItem[]> {
+    const user = AuthService.getCurrentUser();
+    const activeWs = AuthService.getActiveWorkspace();
+    const targetWsId =
+      customWorkspaceId ||
+      activeWs?.id ||
+      (user && user.workspaceId ? user.workspaceId : undefined);
 
-      const params = new URLSearchParams();
-      if (targetWsId && targetWsId !== "all") {
-        params.append("workspaceId", targetWsId);
-      }
+    const cacheKey = targetWsId || "all";
+    const now = Date.now();
+    const lastFetch = lastStoreFetchTimes.get(cacheKey) || 0;
 
-      const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
-      if (rawId && !rawId.startsWith("adm-")) {
-        params.append("superAdminId", rawId);
-      } else if (user?.email) {
-        params.append("email", user.email);
-      }
-
-      const queryString = params.toString() ? `?${params.toString()}` : "";
-      const res = await fetch(`${BACKEND_URL}/api/stores${queryString}`, {
-        method: "GET",
-        headers: getAuthHeaders(),
-        cache: "no-store",
-      });
-
-      if (!res.ok) {
-        throw new Error(`Gagal memuat toko dari server (HTTP ${res.status})`);
-      }
-
-      const json = await res.json();
-      if (json.status === "success" && Array.isArray(json.data)) {
-        this.cachedStores = json.data;
-        if (typeof window !== "undefined") {
-          localStorage.setItem(TOKO_STORAGE_KEY, JSON.stringify(json.data));
-        }
-        return json.data;
-      }
-
-      return [];
-    } catch (error) {
-      console.warn("Backend API offline or unreachable, using local cache:", error);
-      return this.getAll();
+    if (!force && this.cachedStores.length > 0 && now - lastFetch < 5000) {
+      return this.cachedStores;
     }
+
+    if (inFlightStoreFetches.has(cacheKey)) {
+      return inFlightStoreFetches.get(cacheKey)!;
+    }
+
+    const fetchPromise = (async () => {
+      try {
+        const params = new URLSearchParams();
+        if (targetWsId && targetWsId !== "all") {
+          params.append("workspaceId", targetWsId);
+        }
+
+        const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
+        if (rawId && !rawId.startsWith("adm-")) {
+          params.append("superAdminId", rawId);
+        } else if (user?.email) {
+          params.append("email", user.email);
+        }
+
+        const queryString = params.toString() ? `?${params.toString()}` : "";
+        const res = await fetch(`${BACKEND_URL}/api/stores${queryString}`, {
+          method: "GET",
+          headers: getAuthHeaders(),
+          cache: "no-store",
+        });
+
+        if (!res.ok) {
+          throw new Error(`Gagal memuat toko dari server (HTTP ${res.status})`);
+        }
+
+        const json = await res.json();
+        if (json.status === "success" && Array.isArray(json.data)) {
+          this.cachedStores = json.data;
+          lastStoreFetchTimes.set(cacheKey, Date.now());
+          if (typeof window !== "undefined") {
+            localStorage.setItem(TOKO_STORAGE_KEY, JSON.stringify(json.data));
+          }
+          return json.data;
+        }
+
+        return [];
+      } catch (error) {
+        console.warn("Backend API offline or unreachable, using local cache:", error);
+        return this.getAll();
+      } finally {
+        inFlightStoreFetches.delete(cacheKey);
+      }
+    })();
+
+    inFlightStoreFetches.set(cacheKey, fetchPromise);
+    return fetchPromise;
   },
 
   getAll(): StoreItem[] {

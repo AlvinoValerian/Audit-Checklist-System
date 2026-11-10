@@ -22,7 +22,7 @@ import {
   X,
   Building2,
 } from "lucide-react";
-import { ScheduleService, defaultSchedules, isScheduleInProgress, to24HourString, calculateDuration } from "@/services/schedule.service";
+import { ScheduleService, defaultSchedules, getWibDateParts, isScheduleInProgress, to24HourString, calculateDuration } from "@/services/schedule.service";
 import { AuditSchedule, ScheduleStats, ScheduleStatus } from "@/types/schedule";
 import { toast } from "sonner";
 import ActionButtons from "@/components/ui/ActionButtons";
@@ -215,19 +215,11 @@ export default function JadwalAuditPage() {
       setScheduleToEdit(null);
       refreshData(false);
     } catch (err: unknown) {
-      console.warn("Backend save failed, using local fallback:", err);
-      if (scheduleToEdit && !Array.isArray(scheduleData)) {
-        ScheduleService.update(scheduleToEdit.id, scheduleData);
-      } else if (Array.isArray(scheduleData)) {
-        ScheduleService.createBatch(scheduleData);
-      } else {
-        ScheduleService.create(scheduleData);
-      }
-      toast.success("Jadwal audit berhasil disimpan!");
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      setIsSchedulePanelOpen(false);
-      setScheduleToEdit(null);
-      refreshData(false);
+      const msg =
+        err instanceof Error
+          ? err.message
+          : "Gagal menyimpan jadwal audit ke database. Pastikan server backend aktif.";
+      toast.error(msg);
     } finally {
       setIsSubmittingSchedule(false);
     }
@@ -236,34 +228,31 @@ export default function JadwalAuditPage() {
   const handleUpdateSchedule = async (scheduleId: string, updatedData: Partial<AuditSchedule>) => {
     try {
       await ScheduleService.updateAsync(scheduleId, updatedData);
-    } catch {
-      ScheduleService.update(scheduleId, updatedData);
+      toast.success("Jadwal audit berhasil diperbarui!");
+      setSelectedScheduleToView(null);
+      refreshData(false);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Gagal memperbarui jadwal audit di server.";
+      toast.error(msg);
     }
-    toast.success("Jadwal audit berhasil diperbarui!");
-    setSelectedScheduleToView(null);
-    refreshData(false);
   };
 
   const handleConfirmDelete = async () => {
     if (scheduleToDelete) {
       setIsSubmittingDelete(true);
-      const todayStr = format(new Date(), "yyyy-MM-dd");
+      const { dateStr: todayStr } = getWibDateParts(new Date());
       try {
-        try {
-          await ScheduleService.updateAsync(scheduleToDelete.id, {
-            status: "Dibatalkan",
-            deletedAt: todayStr,
-          });
-        } catch {
-          ScheduleService.update(scheduleToDelete.id, {
-            status: "Dibatalkan",
-            deletedAt: todayStr,
-          });
-        }
+        await ScheduleService.updateAsync(scheduleToDelete.id, {
+          status: "Dibatalkan",
+          deletedAt: todayStr,
+        });
         toast.success(`Jadwal untuk "${scheduleToDelete.storeName}" telah dibatalkan.`);
         setIsDeleteModalOpen(false);
         setScheduleToDelete(null);
         refreshData(false);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Gagal membatalkan jadwal audit di server.";
+        toast.error(msg);
       } finally {
         setIsSubmittingDelete(false);
       }
@@ -273,25 +262,21 @@ export default function JadwalAuditPage() {
   const handleCompleteAndDeactivate = async () => {
     if (scheduleForChecklist) {
       setIsSubmittingChecklist(true);
-      const todayStr = format(new Date(), "yyyy-MM-dd");
+      const { dateStr: todayStr } = getWibDateParts(new Date());
       try {
-        try {
-          await ScheduleService.updateAsync(scheduleForChecklist.id, {
-            status: "Dibatalkan",
-            deletedAt: todayStr,
-          });
-        } catch {
-          ScheduleService.update(scheduleForChecklist.id, {
-            status: "Dibatalkan",
-            deletedAt: todayStr,
-          });
-        }
+        await ScheduleService.updateAsync(scheduleForChecklist.id, {
+          status: "Dibatalkan",
+          deletedAt: todayStr,
+        });
         toast.success(
           `Template checklist telah diselesaikan & jadwal "${scheduleForChecklist.storeName}" berhasil dinonaktifkan!`
         );
         setIsChecklistRequiredOpen(false);
         setScheduleForChecklist(null);
         refreshData(false);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Gagal menonaktifkan jadwal audit di server.";
+        toast.error(msg);
       } finally {
         setIsSubmittingChecklist(false);
       }
@@ -302,17 +287,10 @@ export default function JadwalAuditPage() {
     if (scheduleToRestore) {
       setIsSubmittingRestore(true);
       try {
-        try {
-          await ScheduleService.updateAsync(scheduleToRestore.id, {
-            status: "Terjadwal",
-            deletedAt: undefined,
-          });
-        } catch {
-          ScheduleService.update(scheduleToRestore.id, {
-            status: "Terjadwal",
-            deletedAt: undefined,
-          });
-        }
+        await ScheduleService.updateAsync(scheduleToRestore.id, {
+          status: "Terjadwal",
+          deletedAt: null,
+        });
         toast.success(`Jadwal untuk "${scheduleToRestore.storeName}" diaktifkan kembali.`);
         setIsRestoreModalOpen(false);
         setScheduleToRestore(null);
@@ -394,12 +372,24 @@ export default function JadwalAuditPage() {
           matchesDate = schedule.date === selectedDateStr;
         } else {
           // Hari ini (0) s/d 7 hari ke depan (dalam batas 1 minggu):
-          matchesDate =
-            schedule.date === selectedDateStr ||
-            schedule.recurrence === "Setiap Hari" ||
-            (schedule.recurrence === "Hari Tertentu" &&
-              Array.isArray(schedule.selectedDays) &&
-              schedule.selectedDays.includes(dayOfWeekShort));
+          const withinRange =
+            (!schedule.date || selectedDateStr >= schedule.date) &&
+            (!schedule.endDate ||
+              schedule.endDate <= schedule.date ||
+              selectedDateStr <= schedule.endDate);
+
+          if (!withinRange) {
+            matchesDate = false;
+          } else if (schedule.recurrence === "Setiap Hari") {
+            matchesDate = true;
+          } else if (schedule.recurrence === "Hari Tertentu") {
+            matchesDate =
+              !Array.isArray(schedule.selectedDays) ||
+              schedule.selectedDays.length === 0 ||
+              schedule.selectedDays.includes(dayOfWeekShort);
+          } else {
+            matchesDate = schedule.date === selectedDateStr;
+          }
         }
       }
 
@@ -417,20 +407,26 @@ export default function JadwalAuditPage() {
   const startIndex = filteredSchedules.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0;
   const endIndex = Math.min(currentPage * itemsPerPage, filteredSchedules.length);
 
-  // Helper: Cek apakah jadwal terjadwal pada hari ini (tanggal tersebut)
+  // Helper: Cek apakah jadwal terjadwal aktif pada hari ini (WIB)
   const isScheduleRunningToday = (schedule: AuditSchedule) => {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, "0");
-    const d = String(now.getDate()).padStart(2, "0");
-    const todayStr = `${y}-${m}-${d}`;
-    const dayOfWeekShort = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"][now.getDay()];
+    if (schedule.isHolidayToday || schedule.status === "Dibatalkan" || schedule.deletedAt) {
+      return false;
+    }
+    const { dateStr: todayStr, dayOfWeekShort } = getWibDateParts(new Date());
+    if (schedule.date && schedule.date > todayStr) return false;
+    if (schedule.endDate && (!schedule.date || schedule.endDate > schedule.date) && schedule.endDate < todayStr) {
+      return false;
+    }
 
     if (schedule.recurrence === "Setiap Hari") {
-      return (schedule.date || todayStr) <= todayStr;
+      return true;
     }
-    if (schedule.recurrence === "Hari Tertentu" && Array.isArray(schedule.selectedDays)) {
-      return (schedule.date || todayStr) <= todayStr && schedule.selectedDays.includes(dayOfWeekShort);
+    if (schedule.recurrence === "Hari Tertentu") {
+      return (
+        !Array.isArray(schedule.selectedDays) ||
+        schedule.selectedDays.length === 0 ||
+        schedule.selectedDays.includes(dayOfWeekShort)
+      );
     }
     return schedule.date === todayStr;
   };
@@ -795,10 +791,27 @@ export default function JadwalAuditPage() {
                             Sedang Berjalan
                           </span>
                         ) : schedule.status === "Terjadwal" ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-50 text-purple-700 border border-purple-200">
-                            <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
-                            Terjadwal
-                          </span>
+                          <div className="inline-flex flex-col items-center gap-1">
+                            <span
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-50 text-purple-700 border border-purple-200"
+                              title={
+                                schedule.isHolidayToday
+                                  ? `Toko sedang libur hari ini: ${schedule.holidayReason || "Libur Operasional"}`
+                                  : undefined
+                              }
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+                              Terjadwal
+                            </span>
+                            {schedule.isHolidayToday && (
+                              <span
+                                className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold bg-sky-50 text-sky-700 border border-sky-200"
+                                title={schedule.holidayReason || "Toko sedang libur hari ini"}
+                              >
+                                Toko Libur
+                              </span>
+                            )}
+                          </div>
                         ) : schedule.status === "Selesai" ? (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-600 border border-emerald-200">
                             <Check className="w-2.5 h-2.5 stroke-[2.5]" />

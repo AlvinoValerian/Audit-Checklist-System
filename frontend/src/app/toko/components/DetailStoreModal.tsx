@@ -16,6 +16,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { StoreItem } from "@/types/toko";
+import DecryptedImage from "@/components/DecryptedImage";
 
 // Dynamic import Leaflet component to prevent SSR 'window is not defined' error
 const GeofenceMap = dynamic(() => import("./GeofenceMap"), {
@@ -95,15 +96,10 @@ export default function DetailStoreModal({
             <div className="flex items-center gap-3">
               <div className="w-11 h-11 rounded-xl bg-[#e2ecf3] text-[#193f53] font-bold text-base flex items-center justify-center shrink-0 border border-slate-200 overflow-hidden shadow-2xs relative">
                 {store.storePicture ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
+                  <DecryptedImage
                     src={store.storePicture}
                     alt={store.name}
                     className="w-full h-full object-cover"
-                    referrerPolicy="no-referrer"
-                    onError={(e) => {
-                      (e.currentTarget as HTMLElement).style.display = "none";
-                    }}
                   />
                 ) : (
                   initialLetter.toUpperCase()
@@ -114,12 +110,12 @@ export default function DetailStoreModal({
                   <h4 className="font-semibold text-slate-900 text-sm sm:text-base leading-tight">
                     {store.name}
                   </h4>
-                  {store.isImageEncrypted && (
+                  {/* {store.isImageEncrypted && (
                     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9.5px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
                       <Lock className="w-2.5 h-2.5 text-emerald-600" />
                       AES-256
                     </span>
-                  )}
+                  )} */}
                 </div>
                 <p className="text-xs text-slate-500 font-normal mt-0.5">
                   {store.city || "Kota Malang"}
@@ -163,12 +159,10 @@ export default function DetailStoreModal({
                 </div>
               </div>
               <div className="relative w-full h-40 sm:h-48 rounded-xl overflow-hidden bg-slate-900 border border-slate-200 shadow-2xs group">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
+                <DecryptedImage
                   src={store.storePicture}
                   alt={store.name}
                   className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-102"
-                  referrerPolicy="no-referrer"
                 />
                 <div className="absolute bottom-2 left-2 px-2.5 py-1 rounded-md bg-slate-900/80 backdrop-blur-xs text-white text-[11px] font-normal flex items-center gap-1.5 shadow-xs">
                   <span>Outlet: {store.name}</span>

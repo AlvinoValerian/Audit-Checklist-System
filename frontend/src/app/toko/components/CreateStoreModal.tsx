@@ -15,6 +15,9 @@ import {
 } from "lucide-react";
 import { StoreItem, StoreTimezone } from "@/types/toko";
 import { toast } from "sonner";
+import { optimizeAndResizeImage } from "@/lib/image-crypto";
+import { CryptoService } from "@/lib/crypto";
+import DecryptedImage from "@/components/DecryptedImage";
 
 // Dynamic import Leaflet component to prevent SSR 'window is not defined' error
 const AuditPointPickerMap = dynamic(
@@ -174,19 +177,40 @@ export default function CreateStoreModal({
     );
   };
 
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 5 * 1024 * 1024) {
-        toast.error("Ukuran file foto maksimal 5MB.");
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      toast.error("File harus berupa gambar (JPG, PNG, atau WEBP)");
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error("Ukuran file foto maksimal 10MB.");
+      return;
+    }
+
+    try {
+      toast.loading("Mengompresi & mengenkripsi foto toko...", { id: "create-store-photo" });
+
+      // 1. Resize proporsional (max 1024x768, quality 0.82) agar ukuran file ringkas
+      const resizedBase64 = await optimizeAndResizeImage(file, 1024, 768, 0.82);
+      if (!resizedBase64) {
+        toast.error("Gagal memproses gambar foto toko.", { id: "create-store-photo" });
         return;
       }
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setPhotoPreview(reader.result as string);
-        toast.success(`Foto ${file.name} berhasil diunggah.`);
-      };
-      reader.readAsDataURL(file);
+
+      // 2. Enkripsi foto toko menggunakan AES-256-GCM
+      const encrypted = await CryptoService.encryptImage(resizedBase64);
+
+      setPhotoPreview(encrypted);
+      toast.success(`Foto ${file.name} berhasil di-resize & dienkripsi!`, { id: "create-store-photo" });
+    } catch (err) {
+      console.warn("Gagal memproses foto toko:", err);
+      toast.error("Terjadi kesalahan saat memproses foto toko.", { id: "create-store-photo" });
+    } finally {
+      e.target.value = "";
     }
   };
 
@@ -419,7 +443,7 @@ export default function CreateStoreModal({
                     />
                     {photoPreview ? (
                       <div className="space-y-1.5">
-                        <img
+                        <DecryptedImage
                           src={photoPreview}
                           alt="Preview Foto Toko"
                           className="w-28 h-16 object-cover rounded-xl border border-slate-200 mx-auto"
