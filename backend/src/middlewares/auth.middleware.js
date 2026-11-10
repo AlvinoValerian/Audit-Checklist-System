@@ -3,6 +3,18 @@ const prisma = require('../config/prisma');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'audit_checklist_system_jwt_secret_key_2024';
 
+const getStaffExtras = async (staffId) => {
+  try {
+    const rows = await prisma.$queryRawUnsafe(
+      `SELECT position, deleted_at FROM staff WHERE staff_id = $1 LIMIT 1`,
+      staffId
+    );
+    return rows && rows[0] ? rows[0] : {};
+  } catch (e) {
+    return {};
+  }
+};
+
 /**
  * Ekstraksi informasi user dari request (Bearer Token, Header khusus, atau Query/Body)
  * Mendukung resolusi cerdas berdasarkan Token, ID, maupun Email
@@ -92,13 +104,17 @@ const extractUser = async (req) => {
           });
         }
         if (st) {
+          const extra = await getStaffExtras(st.staff_id);
           user = {
             ...(user || {}),
             rawId: st.staff_id.toString(),
             id: `staff-${st.staff_id.toString()}`,
             role: 'Staff',
+            position: extra.position || 'Auditor Lapangan',
             email: st.email,
             fullName: st.name,
+            status: st.status,
+            deletedAt: extra.deleted_at || null,
             storeId: st.store_id ? st.store_id.toString() : null,
             storeName: st.store ? st.store.store_name : null,
             storeLocation: st.store ? (st.store.address || st.store.city || 'Cabang') : 'Cabang',
@@ -150,13 +166,17 @@ const extractUser = async (req) => {
               include: { store: true },
             });
             if (st) {
+              const extra = await getStaffExtras(st.staff_id);
               user = {
                 ...(user || {}),
                 rawId: st.staff_id.toString(),
                 id: `staff-${st.staff_id.toString()}`,
                 role: 'Staff',
+                position: extra.position || 'Auditor Lapangan',
                 email: st.email,
                 fullName: st.name,
+                status: st.status,
+                deletedAt: extra.deleted_at || null,
                 storeId: st.store_id ? st.store_id.toString() : null,
                 storeName: st.store ? st.store.store_name : null,
                 storeLocation: st.store ? (st.store.address || st.store.city || 'Cabang') : 'Cabang',

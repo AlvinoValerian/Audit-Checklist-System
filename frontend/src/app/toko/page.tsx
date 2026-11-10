@@ -28,6 +28,7 @@ import EditStoreModal from "./components/EditStoreModal";
 import DetailStoreModal from "./components/DetailStoreModal";
 import SoftDeleteModal from "./components/SoftDeleteModal";
 import RestoreStoreModal from "./components/RestoreStoreModal";
+import DecryptedImage from "@/components/DecryptedImage";
 
 export default function TokoPage() {
   const [stores, setStores] = useState<StoreItem[]>([]);
@@ -500,15 +501,10 @@ export default function TokoPage() {
                         <div className="flex items-center gap-3">
                           <div className="w-8 h-8 rounded-lg bg-slate-100 border border-slate-200/80 text-slate-700 font-bold text-xs flex items-center justify-center shrink-0 overflow-hidden shadow-2xs relative">
                             {store.storePicture ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img
+                              <DecryptedImage
                                 src={store.storePicture}
                                 alt={store.name}
                                 className="w-full h-full object-cover"
-                                referrerPolicy="no-referrer"
-                                onError={(e) => {
-                                  (e.currentTarget as HTMLElement).style.display = "none";
-                                }}
                               />
                             ) : (
                               initialLetter.toUpperCase()

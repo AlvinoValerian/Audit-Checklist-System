@@ -21,6 +21,13 @@ const formatTimeString = (time) => {
   if (!time) return '09:00';
   if (typeof time === 'string') {
     if (time.includes('T')) {
+      const d = new Date(time);
+      if (!isNaN(d.getTime()) && d.getFullYear() > 1970) {
+        const wib = new Date(d.getTime() + 7 * 60 * 60 * 1000);
+        const h = String(wib.getUTCHours()).padStart(2, '0');
+        const m = String(wib.getUTCMinutes()).padStart(2, '0');
+        return `${h}:${m}`;
+      }
       const parts = time.split('T')[1].split(':');
       return `${parts[0]}:${parts[1]}`;
     }
@@ -31,6 +38,12 @@ const formatTimeString = (time) => {
     return time.substring(0, 5);
   }
   if (time instanceof Date) {
+    if (time.getFullYear() > 1970) {
+      const wib = new Date(time.getTime() + 7 * 60 * 60 * 1000);
+      const hours = String(wib.getUTCHours()).padStart(2, '0');
+      const minutes = String(wib.getUTCMinutes()).padStart(2, '0');
+      return `${hours}:${minutes}`;
+    }
     const hours = String(time.getUTCHours()).padStart(2, '0');
     const minutes = String(time.getUTCMinutes()).padStart(2, '0');
     return `${hours}:${minutes}`;
@@ -39,24 +52,39 @@ const formatTimeString = (time) => {
 };
 
 const formatDateString = (date) => {
-  if (!date) return new Date().toISOString().split('T')[0];
+  if (!date) return '';
   if (typeof date === 'string') {
-    return date.split('T')[0];
+    if (date.includes('T')) {
+      const d = new Date(date);
+      if (!isNaN(d.getTime())) {
+        const wib = new Date(d.getTime() + 7 * 60 * 60 * 1000);
+        const y = wib.getUTCFullYear();
+        const m = String(wib.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(wib.getUTCDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+      }
+    }
+    return date.split('T')[0].substring(0, 10);
   }
   if (date instanceof Date) {
-    return date.toISOString().split('T')[0];
+    const wib = new Date(date.getTime() + 7 * 60 * 60 * 1000);
+    const y = wib.getUTCFullYear();
+    const m = String(wib.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(wib.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
   }
   return String(date).substring(0, 10);
 };
 
 const lastSyncCache = new Map();
+const inFlightSyncs = new Map();
 
 /**
  * Auto-submit jadwal yang melewati batas toleransi keterlambatan (1 jam setelah end_time)
  * secara otomatis ke tabel `checklist_report` di PostgreSQL dengan status 'tidak_mengerjakan'.
  * Memeriksa hingga 7 hari ke belakang agar seluruh toko dalam workspace memiliki laporan kepatuhan yang akurat.
  * Memiliki idempotent guard sehingga tidak akan pernah membuat duplikat untuk jadwal dan tanggal yang sama.
- * Dilengkapi caching throttle 30 detik agar request dashboard/laporan sangat cepat dan ringan.
+ * Dilengkapi caching throttle 60 detik & in-flight deduplication agar request dashboard/laporan sangat cepat dan ringan.
  *
  * @param {Object} options
  * @param {string|number|BigInt} [options.storeId] - Filter gerai tertentu
@@ -66,45 +94,70 @@ const lastSyncCache = new Map();
  * @returns {Promise<number>} Jumlah jadwal yang baru saja di-auto-submit
  */
 const syncExpiredSchedulesToDb = async ({ storeId, workspaceId, staffId, force = false } = {}) => {
-  try {
-    const cacheKey = `${storeId || 'all'}_${workspaceId || 'all'}_${staffId || 'all'}`;
-    const nowTimestamp = Date.now();
-    if (!force && lastSyncCache.has(cacheKey) && nowTimestamp - lastSyncCache.get(cacheKey) < 30000) {
-      // Throttle: baru saja di-sync dalam 30 detik terakhir, lewati untuk menghemat resource
-      return 0;
-    }
-    lastSyncCache.set(cacheKey, nowTimestamp);
+  const cacheKey = `${storeId || 'all'}_${workspaceId || 'all'}_${staffId || 'all'}`;
+  const nowTimestamp = Date.now();
+  if (!force && lastSyncCache.has(cacheKey) && nowTimestamp - lastSyncCache.get(cacheKey) < 60000) {
+    // Throttle: baru saja di-sync dalam 60 detik terakhir, lewati untuk menghemat resource
+    return 0;
+  }
 
-    const scheduleWhere = {
-      deleted_at: null,
-      status: { not: 'cancelled' },
-    };
+  // In-flight deduplication: jika sudah ada request sync yang sedang berjalan untuk target yang sama, reuse promise
+  if (inFlightSyncs.has(cacheKey)) {
+    return inFlightSyncs.get(cacheKey);
+  }
 
-    if (storeId) {
-      scheduleWhere.store_id = BigInt(storeId.toString().replace(/^str-/, '').replace(/^st-/, ''));
-    } else if (workspaceId) {
-      const cleanWs = BigInt(workspaceId.toString().replace(/^ws-/, ''));
-      scheduleWhere.store = { workspace_id: cleanWs };
-    }
+  const syncPromise = (async () => {
+    try {
+      lastSyncCache.set(cacheKey, Date.now());
 
-    const schedules = await prisma.schedule.findMany({
-      where: scheduleWhere,
-      include: {
-        store: true,
-        checklist_template: {
-          include: {
-            template_category: {
-              include: { template_task: true },
+      const scheduleWhere = {
+        deleted_at: null,
+        status: { notIn: ['cancelled', 'inactive', 'Dibatalkan', 'Nonaktif'] },
+      };
+
+      if (storeId) {
+        scheduleWhere.store_id = BigInt(storeId.toString().replace(/^str-/, '').replace(/^st-/, ''));
+      } else if (workspaceId) {
+        const cleanWs = BigInt(workspaceId.toString().replace(/^ws-/, ''));
+        scheduleWhere.store = { workspace_id: cleanWs };
+      }
+
+      const schedules = await prisma.schedule.findMany({
+        where: scheduleWhere,
+        include: {
+          store: {
+            select: {
+              store_id: true,
+              store_name: true,
+            },
+          },
+          checklist_template: {
+            include: {
+              template_category: {
+                include: {
+                  template_task: {
+                    select: { task_id: true },
+                  },
+                },
+              },
+            },
+          },
+          schedule_staff: {
+            include: { staff: true },
+          },
+          schedule_exception: true,
+          checklist_report: {
+            select: {
+              report_id: true,
+              schedule_id: true,
+              completed_at: true,
+              created_at: true,
+              started_at: true,
+              status: true,
             },
           },
         },
-        schedule_staff: {
-          include: { staff: true },
-        },
-        schedule_exception: true,
-        checklist_report: true,
-      },
-    });
+      });
 
     if (!schedules || schedules.length === 0) return 0;
 
@@ -133,26 +186,53 @@ const syncExpiredSchedulesToDb = async ({ storeId, workspaceId, staffId, force =
     }
 
     for (const s of schedules) {
-      // 1. Cek apakah libur / pengecualian umum
+      // 1. Cek apakah libur / pengecualian umum tingkat jadwal
       const exceptions = s.schedule_exception || [];
-      const isHoliday = exceptions.some(e => e.is_skip) || s.status === 'Libur' || s.notes?.toLowerCase().includes('libur');
-      if (isHoliday) continue;
+      const isScheduleAlwaysLibur = s.status === 'Libur' || s.notes?.toLowerCase().includes('libur');
+      if (isScheduleAlwaysLibur) continue;
 
       const scheduleStartDateStr = formatDateString(s.start_date);
-      const recurrence = s.repeat_time === 'daily'
+      const scheduleEndDateStr = s.end_date ? formatDateString(s.end_date) : null;
+      const rtLower = (s.repeat_time || '').toLowerCase();
+      const recurrence = rtLower === 'daily' || rtLower === 'setiap hari'
         ? 'Setiap Hari'
-        : (s.repeat_time === 'custom' || s.repeat_time === 'weekly' ? 'Hari Tertentu' : s.repeat_time);
+        : (rtLower === 'custom' || rtLower === 'weekly' || rtLower === 'hari tertentu' ? 'Hari Tertentu' : s.repeat_time);
+
+      const DAY_NAME_SHORT_MAP = {
+        senin: 'Sen',
+        sen: 'Sen',
+        selasa: 'Sel',
+        sel: 'Sel',
+        rabu: 'Rab',
+        rab: 'Rab',
+        kamis: 'Kam',
+        kam: 'Kam',
+        jumat: 'Jum',
+        "jum'at": 'Jum',
+        jum: 'Jum',
+        sabtu: 'Sab',
+        sab: 'Sab',
+        minggu: 'Min',
+        min: 'Min',
+      };
+      const normalizeDayToken = (day) => {
+        const key = String(day || '').trim().toLowerCase();
+        return DAY_NAME_SHORT_MAP[key] || String(day || '').trim();
+      };
 
       let selectedDays = [];
       if (s.selected_days) {
         if (typeof s.selected_days === 'string') {
           try {
-            selectedDays = JSON.parse(s.selected_days);
+            const parsed = JSON.parse(s.selected_days);
+            selectedDays = Array.isArray(parsed)
+              ? parsed.map(normalizeDayToken).filter(Boolean)
+              : [];
           } catch {
-            selectedDays = s.selected_days.split(',').map(x => x.trim());
+            selectedDays = s.selected_days.split(',').map(normalizeDayToken).filter(Boolean);
           }
         } else if (Array.isArray(s.selected_days)) {
-          selectedDays = s.selected_days;
+          selectedDays = s.selected_days.map(normalizeDayToken).filter(Boolean);
         }
       }
 
@@ -171,8 +251,9 @@ const syncExpiredSchedulesToDb = async ({ storeId, workspaceId, staffId, force =
           const tDate = new Date(wibTimestamp - offset * 24 * 60 * 60 * 1000);
           const tDateStr = `${tDate.getUTCFullYear()}-${String(tDate.getUTCMonth() + 1).padStart(2, '0')}-${String(tDate.getUTCDate()).padStart(2, '0')}`;
 
-          // Jadwal tidak boleh sebelum tanggal mulai aktif jadwal (start_date)
+          // Jadwal tidak boleh sebelum tanggal mulai aktif jadwal (start_date) atau setelah end_date (jika > start_date)
           if (scheduleStartDateStr && tDateStr < scheduleStartDateStr) continue;
+          if (scheduleEndDateStr && scheduleEndDateStr > scheduleStartDateStr && tDateStr > scheduleEndDateStr) continue;
 
           // Periksa apakah hari ini dijadwalkan
           const tDayShort = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'][tDate.getUTCDay()];
@@ -208,6 +289,14 @@ const syncExpiredSchedulesToDb = async ({ storeId, workspaceId, staffId, force =
           continue;
         }
 
+        // 2a. Cek schedule_exception spesifik untuk tanggal occ.dateStr
+        const hasExceptionOnDate = exceptions.some((e) => {
+          if (e.is_skip === false) return false;
+          const eStart = formatDateString(e.start_date);
+          const eEnd = formatDateString(e.end_date || e.start_date);
+          return Boolean(eStart) && occ.dateStr >= eStart && occ.dateStr <= (eEnd || eStart);
+        });
+
         // 2b. Cek apakah toko / jadwal sedang berstatus LIBUR pada tanggal ini (store_holiday)
         const sIdStr = s.schedule_id.toString();
         const sStoreName = (s.store?.store_name || '').trim().toLowerCase();
@@ -227,10 +316,10 @@ const syncExpiredSchedulesToDb = async ({ storeId, workspaceId, staffId, force =
           if (lType === 'full') return true;
 
           let hSchedules = [];
-          if (Array.isArray(h.schedules)) hSchedules = h.schedules.map(String);
+          if (Array.isArray(h.schedules)) hSchedules = h.schedules.map((x) => String(x).replace(/^sch-/, ''));
           else if (typeof h.schedules === 'string') {
             try {
-              hSchedules = JSON.parse(h.schedules).map(String);
+              hSchedules = JSON.parse(h.schedules).map((x) => String(x).replace(/^sch-/, ''));
             } catch {
               hSchedules = [];
             }
@@ -238,7 +327,7 @@ const syncExpiredSchedulesToDb = async ({ storeId, workspaceId, staffId, force =
           return hSchedules.includes(sIdStr);
         });
 
-        if (matchingHoliday) {
+        if (hasExceptionOnDate || matchingHoliday) {
           // Toko atau jadwal berstatus LIBUR pada tanggal ini: JANGAN PERNAH dibuatkan laporan 'tidak_mengerjakan'.
           // Jika sebelumnya sempat ada laporan 'tidak_mengerjakan' yang terbuat pada tanggal libur ini, bersihkan otomatis:
           try {
@@ -247,8 +336,8 @@ const syncExpiredSchedulesToDb = async ({ storeId, workspaceId, staffId, force =
                 schedule_id: s.schedule_id,
                 status: { in: ['tidak_mengerjakan', 'tidak_patuh'] },
                 completed_at: {
-                  gte: new Date(occ.dateStr + 'T00:00:00Z'),
-                  lte: new Date(occ.dateStr + 'T23:59:59.999Z'),
+                  gte: new Date(occ.dateStr + 'T00:00:00+07:00'),
+                  lte: new Date(occ.dateStr + 'T23:59:59.999+07:00'),
                 },
               },
             });
@@ -280,28 +369,35 @@ const syncExpiredSchedulesToDb = async ({ storeId, workspaceId, staffId, force =
         }
 
         if (!targetStaffId && s.store_id) {
-          const fallbackStaff = await prisma.staff.findFirst({
-            where: { store_id: s.store_id, status: 'active' },
-            orderBy: { staff_id: 'asc' },
-          });
-          if (fallbackStaff) targetStaffId = fallbackStaff.staff_id;
+          const fallbackStaffRows = await prisma.$queryRawUnsafe(
+            `SELECT staff_id FROM staff WHERE store_id = $1 AND status IN ('active', 'Aktif') AND deleted_at IS NULL ORDER BY staff_id ASC LIMIT 1`,
+            s.store_id
+          );
+          if (fallbackStaffRows && fallbackStaffRows[0]?.staff_id) {
+            targetStaffId = fallbackStaffRows[0].staff_id;
+          }
         }
 
         if (!targetStaffId) {
-          const anyStaff = await prisma.staff.findFirst({ orderBy: { staff_id: 'asc' } });
-          if (anyStaff) targetStaffId = anyStaff.staff_id;
-          else continue;
+          const anyStaffRows = await prisma.$queryRawUnsafe(
+            `SELECT staff_id FROM staff WHERE deleted_at IS NULL ORDER BY staff_id ASC LIMIT 1`
+          );
+          if (anyStaffRows && anyStaffRows[0]?.staff_id) {
+            targetStaffId = anyStaffRows[0].staff_id;
+          } else {
+            continue;
+          }
         }
 
         // 5. Hitung butir pertanyaan template
         const tasks = s.checklist_template?.template_category?.flatMap(cat => cat.template_task || []) || [];
-        const taskCount = tasks.length || 8;
+        const taskCount = tasks.length || 0;
 
-        // 6. Buat timestamp selesai sesuai tanggal kejadian penugasan
+        // 6. Buat timestamp selesai sesuai tanggal kejadian penugasan (WIB UTC+7 -> UTC)
         const [targetY, targetM, targetD] = occ.dateStr.split('-').map(Number);
-        // Set ke jam akhir jadwal di hari tersebut dalam UTC (UTC = WIB - 7 jam)
-        const utcHours = (eH - 7 + 24) % 24;
-        const submitDateTime = new Date(Date.UTC(targetY, targetM - 1, targetD, utcHours, eM || 0, 0));
+        const submitDateTime = new Date(
+          Date.UTC(targetY, targetM - 1, targetD, isNaN(eH) ? 23 : eH, isNaN(eM) ? 0 : eM, 0) - 7 * 60 * 60 * 1000
+        );
 
         await prisma.checklist_report.create({
           data: {
@@ -331,11 +427,17 @@ const syncExpiredSchedulesToDb = async ({ storeId, workspaceId, staffId, force =
       }
     }
 
-    return createdCount;
-  } catch (err) {
-    console.warn('⚠️ [syncExpiredSchedulesToDb] Warning:', err.message);
-    return 0;
-  }
+      return createdCount;
+    } catch (err) {
+      console.warn('⚠️ [syncExpiredSchedulesToDb] Warning:', err.message);
+      return 0;
+    } finally {
+      inFlightSyncs.delete(cacheKey);
+    }
+  })();
+
+  inFlightSyncs.set(cacheKey, syncPromise);
+  return syncPromise;
 };
 
 module.exports = {

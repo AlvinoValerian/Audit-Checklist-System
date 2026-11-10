@@ -36,30 +36,64 @@ const getAuthHeaders = (): Record<string, string> => {
 
 const SCHEDULE_STORAGE_KEY = "audit_pro_jadwal_audit_v6";
 
-// Helper to calculate dynamic dates relative to today's date
+const DAY_NAMES_SHORT = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
+
+const DAY_MAP_TO_SHORT: Record<string, string> = {
+  senin: "Sen",
+  selasa: "Sel",
+  rabu: "Rab",
+  kamis: "Kam",
+  jumat: "Jum",
+  "jum'at": "Jum",
+  sabtu: "Sab",
+  minggu: "Min",
+  sen: "Sen",
+  sel: "Sel",
+  rab: "Rab",
+  kam: "Kam",
+  jum: "Jum",
+  sab: "Sab",
+  min: "Min",
+};
+
+const normalizeDayToken = (day?: string): string => {
+  const raw = String(day || "").trim();
+  if (!raw) return "";
+  return DAY_MAP_TO_SHORT[raw.toLowerCase()] || raw;
+};
+
+export const getWibDateParts = (date: Date = new Date()) => {
+  const safeDate = isNaN(date.getTime()) ? new Date() : date;
+  const wibDate = new Date(safeDate.getTime() + 7 * 60 * 60 * 1000);
+  const y = wibDate.getUTCFullYear();
+  const m = String(wibDate.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(wibDate.getUTCDate()).padStart(2, "0");
+  const hours = wibDate.getUTCHours();
+  const minutes = wibDate.getUTCMinutes();
+  const dayOfWeekShort = DAY_NAMES_SHORT[wibDate.getUTCDay()];
+  return {
+    dateStr: `${y}-${m}-${d}`,
+    dayOfWeekShort,
+    currentMinutes: hours * 60 + minutes,
+    yearMonth: `${y}-${m}`,
+    wibDate,
+  };
+};
+
+// Helper to calculate dynamic dates relative to today's WIB date
 const getRelativeDate = (offsetDays: number = 0) => {
-  const target = new Date();
-  target.setDate(target.getDate() + offsetDays);
-  const y = target.getFullYear();
-  const m = String(target.getMonth() + 1).padStart(2, "0");
-  const d = String(target.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+  const target = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1000);
+  return getWibDateParts(target).dateStr;
 };
 
 const getRelativeCreated = (offsetDays: number = 0) => {
-  const target = new Date();
-  target.setDate(target.getDate() + offsetDays - 2);
-  const y = target.getFullYear();
-  const m = String(target.getMonth() + 1).padStart(2, "0");
-  const d = String(target.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+  const target = new Date(Date.now() + (offsetDays - 2) * 24 * 60 * 60 * 1000);
+  return getWibDateParts(target).dateStr;
 };
 
-const DAY_NAMES_SHORT = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
 const getDayNameOffset = (offsetDays: number = 0) => {
-  const target = new Date();
-  target.setDate(target.getDate() + offsetDays);
-  return DAY_NAMES_SHORT[target.getDay()];
+  const target = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1000);
+  return getWibDateParts(target).dayOfWeekShort;
 };
 
 /**
@@ -114,17 +148,17 @@ export const calculateDuration = (
 };
 
 /**
- * Resolves the realtime status of a schedule:
- * - If cancelled ("Dibatalkan"), it remains "Dibatalkan".
- * - If completed by staff ("Selesai"), it is "Selesai".
- * - If not yet completed by staff, and time has reached/passed startTime (even past endTime), it is "Sedang Berjalan".
- * - If before startTime, it is "Terjadwal".
+ * Resolves the realtime status of a schedule in WIB (UTC+7):
+ * - If cancelled ("Dibatalkan") or soft-deleted (deletedAt), it returns "Dibatalkan".
+ * - If completed by staff ("Selesai"), it returns "Selesai".
+ * - If start date is in the future (> today), past endDate (< today), or on store holiday today, returns "Terjadwal" (or "Selesai" when past).
+ * - If active today within startTime..endTime, returns "Sedang Berjalan"; before startTime returns "Terjadwal"; past endTime returns "Selesai".
  */
 export const resolveScheduleStatus = (
   schedule: AuditSchedule,
   now: Date = new Date()
 ): ScheduleStatus => {
-  if (schedule.status === "Dibatalkan") {
+  if (schedule.status === "Dibatalkan" || Boolean(schedule.deletedAt)) {
     return "Dibatalkan";
   }
 
@@ -134,26 +168,44 @@ export const resolveScheduleStatus = (
     return "Selesai";
   }
 
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  const todayStr = `${y}-${m}-${d}`;
-  const dayOfWeekShort = DAY_NAMES_SHORT[now.getDay()];
-
+  const { dateStr: todayStr, dayOfWeekShort, currentMinutes } = getWibDateParts(now);
   const scheduleDateStr = schedule.date || todayStr;
 
-  // Jika tanggal jadwal lampau (< today) dan bukan pengulangan berulang, maka sudah selesai:
-  if (scheduleDateStr < todayStr && schedule.recurrence !== "Setiap Hari" && schedule.recurrence !== "Hari Tertentu") {
+  // Jika tanggal mulai jadwal belum tiba (> hari ini), jadwal masih Terjadwal
+  if (scheduleDateStr > todayStr) {
+    return "Terjadwal";
+  }
+
+  // Jika endDate sudah lewat (< hari ini) dan bukan penanda single-day endDate === date
+  if (
+    schedule.endDate &&
+    (!isRecurring || schedule.endDate > scheduleDateStr) &&
+    schedule.endDate < todayStr
+  ) {
     return "Selesai";
   }
 
+  // Jika tanggal jadwal lampau (< today) dan bukan pengulangan berulang, maka sudah selesai:
+  if (scheduleDateStr < todayStr && !isRecurring) {
+    return "Selesai";
+  }
+
+  // Jika toko atau jadwal sedang libur hari ini, tidak berstatus Sedang Berjalan
+  if (schedule.isHolidayToday) {
+    return "Terjadwal";
+  }
+
+  const normalizedDays = Array.isArray(schedule.selectedDays)
+    ? schedule.selectedDays.map((d) => normalizeDayToken(d)).filter(Boolean)
+    : [];
+
   // Cek apakah jadwal ini aktif/berlaku pada hari ini (today):
   const runsToday =
-    scheduleDateStr === todayStr ||
-    schedule.recurrence === "Setiap Hari" ||
-    (schedule.recurrence === "Hari Tertentu" &&
-      Array.isArray(schedule.selectedDays) &&
-      schedule.selectedDays.includes(dayOfWeekShort));
+    schedule.recurrence === "Setiap Hari"
+      ? true
+      : schedule.recurrence === "Hari Tertentu"
+      ? normalizedDays.length === 0 || normalizedDays.includes(dayOfWeekShort)
+      : scheduleDateStr === todayStr;
 
   if (runsToday) {
     let startStr = schedule.startTime;
@@ -178,7 +230,6 @@ export const resolveScheduleStatus = (
         const endM = parseInt(eParts[1], 10);
 
         if (!isNaN(startH) && !isNaN(endH)) {
-          const currentMinutes = now.getHours() * 60 + now.getMinutes();
           const startMinutes = startH * 60 + (isNaN(startM) ? 0 : startM);
           const endMinutes = endH * 60 + (isNaN(endM) ? 0 : endM);
 
@@ -209,7 +260,6 @@ export const resolveScheduleStatus = (
         const startH = parseInt(sParts[0], 10);
         const startM = parseInt(sParts[1], 10);
         if (!isNaN(startH)) {
-          const currentMinutes = now.getHours() * 60 + now.getMinutes();
           const startMinutes = startH * 60 + (isNaN(startM) ? 0 : startM);
           if (currentMinutes < startMinutes) {
             return "Terjadwal";
@@ -222,11 +272,7 @@ export const resolveScheduleStatus = (
     return "Terjadwal";
   }
 
-  // Jika tanggal lampau (< today):
-  if (scheduleDateStr < todayStr) {
-    return "Selesai";
-  }
-
+  // Jadwal berulang yang masih aktif namun tidak jatuh pada hari ini tetap Terjadwal
   return "Terjadwal";
 };
 
@@ -467,23 +513,6 @@ export const defaultSchedules: AuditSchedule[] = [
   },
 ];
 
-const DAY_MAP_TO_SHORT: Record<string, string> = {
-  Senin: "Sen",
-  Selasa: "Sel",
-  Rabu: "Rab",
-  Kamis: "Kam",
-  Jumat: "Jum",
-  Sabtu: "Sab",
-  Minggu: "Min",
-  Sen: "Sen",
-  Sel: "Sel",
-  Rab: "Rab",
-  Kam: "Kam",
-  Jum: "Jum",
-  Sab: "Sab",
-  Min: "Min",
-};
-
 export const ScheduleService = {
   cachedSchedules: [] as AuditSchedule[],
 
@@ -565,9 +594,8 @@ export const ScheduleService = {
         headers: getAuthHeaders(),
         body: JSON.stringify(data),
       });
-    } catch (err) {
-      console.warn("Backend offline, saving locally:", err);
-      return this.create(data);
+    } catch {
+      throw new Error("Tidak dapat terhubung ke server backend untuk membuat jadwal.");
     }
 
     const json = await res.json().catch(() => ({}));
@@ -588,9 +616,8 @@ export const ScheduleService = {
         headers: getAuthHeaders(),
         body: JSON.stringify({ items }),
       });
-    } catch (err) {
-      console.warn("Backend offline, saving batch locally:", err);
-      return this.createBatch(items);
+    } catch {
+      throw new Error("Tidak dapat terhubung ke server backend untuk membuat jadwal.");
     }
 
     const json = await res.json().catch(() => ({}));
@@ -611,11 +638,8 @@ export const ScheduleService = {
         headers: getAuthHeaders(),
         body: JSON.stringify(data),
       });
-    } catch (err) {
-      console.warn("Backend offline, updating locally:", err);
-      const updated = this.update(id, data);
-      if (!updated) throw new Error("Jadwal tidak ditemukan.");
-      return updated;
+    } catch {
+      throw new Error("Tidak dapat terhubung ke server backend untuk memperbarui jadwal.");
     }
 
     const json = await res.json().catch(() => ({}));
@@ -634,9 +658,8 @@ export const ScheduleService = {
         method: "DELETE",
         headers: getAuthHeaders(),
       });
-    } catch (err) {
-      console.warn("Backend offline, deleting locally:", err);
-      return this.delete(id);
+    } catch {
+      throw new Error("Tidak dapat terhubung ke server backend untuk menghapus jadwal.");
     }
 
     const json = await res.json().catch(() => ({}));
@@ -658,7 +681,7 @@ export const ScheduleService = {
         }))
         .filter((item) => {
           if (item.status === "Dibatalkan") {
-            const expired = isSoftDeletedExpired(item.deletedAt, item.date, now);
+            const expired = isSoftDeletedExpired(item.deletedAt ?? undefined, item.date, now);
             if (expired) return false;
           }
           return true;
@@ -678,7 +701,7 @@ export const ScheduleService = {
         list = [];
       }
 
-      const currentYearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+      const { yearMonth: currentYearMonth } = getWibDateParts(now);
       let changed = false;
 
       const updated = list.map((item) => {
@@ -693,7 +716,7 @@ export const ScheduleService = {
         }
         if (Array.isArray(nextItem.selectedDays)) {
           const normalized = nextItem.selectedDays.map(
-            (d: string) => DAY_MAP_TO_SHORT[d] || d
+            (d: string) => normalizeDayToken(d)
           );
           if (JSON.stringify(normalized) !== JSON.stringify(nextItem.selectedDays)) {
             nextItem.selectedDays = normalized;
@@ -727,7 +750,7 @@ export const ScheduleService = {
       // Sembunyikan item yang sudah di-soft delete setelah 15 hari
       return cleanedList.filter((item) => {
         if (item.status === "Dibatalkan") {
-          const expired = isSoftDeletedExpired(item.deletedAt, item.date, now);
+          const expired = isSoftDeletedExpired(item.deletedAt ?? undefined, item.date, now);
           if (expired) return false;
         }
         return true;
@@ -746,7 +769,7 @@ export const ScheduleService = {
     const newSchedule: AuditSchedule = {
       ...data,
       id: `sch-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-      createdAt: data.createdAt || new Date().toISOString().split("T")[0],
+      createdAt: data.createdAt || getWibDateParts(new Date()).dateStr,
     };
     const updated = [newSchedule, ...list];
     if (typeof window !== "undefined") {
@@ -758,10 +781,11 @@ export const ScheduleService = {
   createBatch(items: Array<Omit<AuditSchedule, "id">>): AuditSchedule[] {
     const list = this.getAll();
     const now = Date.now();
+    const wibTodayStr = getWibDateParts(new Date()).dateStr;
     const newSchedules: AuditSchedule[] = items.map((data, idx) => ({
       ...data,
       id: `sch-${now}-${idx}-${Math.floor(Math.random() * 10000)}`,
-      createdAt: data.createdAt || new Date().toISOString().split("T")[0],
+      createdAt: data.createdAt || wibTodayStr,
     }));
     const updated = [...newSchedules, ...list];
     if (typeof window !== "undefined") {

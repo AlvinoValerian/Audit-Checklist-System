@@ -207,22 +207,22 @@ const formatReportItem = (report) => {
   // Ambil tanda tangan digital & foto selfie verifikasi auditor jika ada
   let signatureUrl = '';
   let selfieUrl = '';
-  if (Array.isArray(report.attachment)) {
+  if (!isNonCompliant && Array.isArray(report.attachment)) {
     const sig = report.attachment.find((a) => a.file_type === 'signature');
     if (sig) signatureUrl = decryptAttachmentUrl(sig.file_url);
 
     const selfie = report.attachment.find((a) => a.file_type === 'report_photo');
     if (selfie) selfieUrl = decryptAttachmentUrl(selfie.file_url);
   }
-  const auditorPhoto = selfieUrl || (staff.photo ? decryptAttachmentUrl(staff.photo) : undefined);
+  const auditorPhoto = isNonCompliant ? undefined : (selfieUrl || (staff.photo ? decryptAttachmentUrl(staff.photo) : undefined));
 
   return {
     id: `rep-${report.report_id.toString()}`,
     storeName: store.store_name || 'Outlet Ritel Audit',
     storeLocation: store.city || store.address || 'Indonesia',
     scheduleName: schedule.title || 'Checklist Operasional Harian',
-    auditorName: staff.name || 'Auditor Lapangan',
-    auditorRole: staff.position || 'Auditor Lapangan',
+    auditorName: isNonCompliant ? '-' : (staff.name || 'Auditor Lapangan'),
+    auditorRole: isNonCompliant ? '-' : (staff.position || 'Auditor Lapangan'),
     submitDate: submitDateStr,
     submitTime: submitTimeStr,
     month: monthStr,
@@ -231,8 +231,8 @@ const formatReportItem = (report) => {
     complianceScore,
     summaryNote,
     findings,
-    signatureUrl: signatureUrl || undefined,
-    auditorPhoto: auditorPhoto || undefined,
+    signatureUrl: isNonCompliant ? undefined : (signatureUrl || undefined),
+    auditorPhoto,
     workspaceName: workspace.company_name || 'Workspace',
   };
 };
@@ -307,7 +307,13 @@ exports.getAllReports = async (req, res) => {
         schedule: {
           include: {
             store: {
-              include: { workspace: true },
+              select: {
+                store_id: true,
+                store_name: true,
+                city: true,
+                address: true,
+                workspace: true,
+              },
             },
             checklist_template: true,
           },
@@ -519,8 +525,8 @@ exports.getReportById = async (req, res) => {
             storeName: s.store?.store_name || 'Outlet Ritel Audit',
             storeLocation: s.store?.city || s.store?.address || 'Indonesia',
             scheduleName: s.title || s.checklist_template?.template_name || 'Checklist Operasional Harian',
-            auditorName: assignedStaff?.name || 'Staf Lapangan',
-            auditorRole: assignedStaff?.position || 'Auditor Lapangan',
+            auditorName: '-',
+            auditorRole: '-',
             submitDate: submitDateStr,
             submitTime: submitTimeStr,
             month: monthStr,
@@ -545,7 +551,13 @@ exports.getReportById = async (req, res) => {
         schedule: {
           include: {
             store: {
-              include: { workspace: true },
+              select: {
+                store_id: true,
+                store_name: true,
+                city: true,
+                address: true,
+                workspace: true,
+              },
             },
             checklist_template: true,
           },

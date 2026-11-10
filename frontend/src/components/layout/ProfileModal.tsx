@@ -16,6 +16,8 @@ import { toast } from "sonner";
 import { AuthService } from "@/lib/auth";
 import { ApiAuthService } from "@/services/auth.service";
 import { CryptoService } from "@/lib/crypto";
+import { optimizeAndResizeImage } from "@/lib/image-crypto";
+import DecryptedImage from "@/components/DecryptedImage";
 
 interface ProfileModalProps {
   isOpen: boolean;
@@ -104,8 +106,8 @@ export default function ProfileModal({
     }
   }, [isOpen, propName, propEmail, propRole, avatarUrl]);
 
-  // Handle image upload from file picker dengan enkripsi AES-256
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle image upload from file picker: Resize -> Encrypt AES-256 -> Simpan ke Database
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -114,43 +116,41 @@ export default function ProfileModal({
       return;
     }
 
-    if (file.size > 3 * 1024 * 1024) {
-      toast.error("Ukuran foto maksimal 3MB");
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error("Ukuran file foto maksimal 10MB");
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const dataUrl = event.target?.result as string;
-      setAvatar(dataUrl);
+    try {
+      toast.loading("Mengompresi & mengenkripsi foto profil...", { id: "profile-upload" });
 
-      try {
-        // Enkripsi gambar foto profil menggunakan algoritma AES-256-GCM
-        const encrypted = await CryptoService.encryptImage(dataUrl);
-        if (typeof window !== "undefined") {
-          localStorage.setItem("audit_pro_avatar", encrypted);
-        }
-        setIsEncryptedAvatar(true);
-        onUpdateProfile?.({ avatar: dataUrl });
-
-        // Simpan foto terenkripsi ke database server agar tidak hilang saat logout
-        await ApiAuthService.updateProfile({ profilePicture: encrypted });
-        toast.success("Foto profil berhasil dienkripsi (AES-256) & disimpan!");
-      } catch (err) {
-        console.warn("Simpan unencrypted fallback:", err);
-        if (typeof window !== "undefined") {
-          localStorage.setItem("audit_pro_avatar", dataUrl);
-        }
-        onUpdateProfile?.({ avatar: dataUrl });
-
-        // Simpan ke database server
-        await ApiAuthService.updateProfile({ profilePicture: dataUrl });
-        toast.success("Foto profil berhasil diperbarui!");
+      // 1. Resize proporsional & kompresi foto terlebih dahulu sebelum disimpan (maksimal 512x512)
+      const resizedBase64 = await optimizeAndResizeImage(file, 512, 512, 0.85);
+      if (!resizedBase64) {
+        toast.error("Gagal memproses gambar foto profil.", { id: "profile-upload" });
+        return;
       }
-    };
-    reader.readAsDataURL(file);
 
-    e.target.value = "";
+      // Tampilkan foto hasil resize di preview lokal dan perbarui avatar di TopBar
+      setAvatar(resizedBase64);
+      onUpdateProfile?.({ avatar: resizedBase64 });
+
+      // 2. Enkripsi foto hasil resize menggunakan algoritma AES-256-GCM
+      const encrypted = await CryptoService.encryptImage(resizedBase64);
+      if (typeof window !== "undefined") {
+        localStorage.setItem("audit_pro_avatar", encrypted);
+      }
+      setIsEncryptedAvatar(true);
+
+      // 3. Simpan foto hasil resize yang telah terenkripsi ke database server
+      await ApiAuthService.updateProfile({ profilePicture: encrypted });
+      toast.success("Foto profil berhasil di-resize, dienkripsi (AES-256) & disimpan!", { id: "profile-upload" });
+    } catch (err) {
+      console.warn("Gagal memproses foto profil:", err);
+      toast.error("Terjadi kesalahan saat memproses foto profil.", { id: "profile-upload" });
+    } finally {
+      e.target.value = "";
+    }
   };
 
   // Handle removing uploaded photo
@@ -246,7 +246,7 @@ export default function ProfileModal({
             <div className="sm:col-span-5 relative rounded-2xl bg-slate-50 border border-slate-200/90 overflow-hidden flex flex-col items-center justify-center min-h-[175px] sm:min-h-[195px] shadow-2xs group">
               {avatar ? (
                 <>
-                  <img
+                  <DecryptedImage
                     src={avatar}
                     alt={currentName || "Foto Profil"}
                     className="w-full h-full object-cover"

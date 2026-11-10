@@ -44,11 +44,25 @@ function ProfileContent() {
         const headers: Record<string, string> = {};
         if (token) headers["Authorization"] = `Bearer ${token}`;
 
-        let res = await fetch("/api/auth/me", { headers });
-        if (!res.ok) {
-          res = await fetch("http://127.0.0.1:5000/api/auth/me", { headers });
+        let res: Response | null = null;
+        try {
+          res = await fetch("/api/auth/me", { headers, cache: "no-store" });
+          if (!res || res.status >= 500) {
+            throw new Error(`HTTP ${res?.status}`);
+          }
+        } catch {
+          res = await fetch("http://127.0.0.1:5000/api/auth/me", { headers, cache: "no-store" });
         }
-        if (res.ok) {
+
+        if (res && (res.status === 401 || res.status === 403)) {
+          const errJson = await res.json().catch(() => null);
+          toast.error(errJson?.message || "Akun Anda dinonaktifkan atau sesi telah berakhir.");
+          AuthService.logout();
+          router.replace("/login");
+          return;
+        }
+
+        if (res && res.ok) {
           const json = await res.json();
           if (json.status === "success" && json.data?.user) {
             setCurrentUser(json.data.user);
@@ -61,7 +75,13 @@ function ProfileContent() {
     };
 
     fetchLatestProfile();
-  }, []);
+
+    const handleFocus = () => {
+      fetchLatestProfile();
+    };
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, [router]);
 
   const handleLogout = () => {
     setLogoutNotice({
@@ -99,18 +119,28 @@ function ProfileContent() {
         "Content-Type": "application/json",
       };
       if (token) headers["Authorization"] = `Bearer ${token}`;
-      if (currentUser?.id) headers["x-user-id"] = currentUser.id;
+      const rawId =
+        currentUser?.rawId ||
+        (currentUser?.id
+          ? currentUser.id.replace(/^staff-/, "").replace(/^sa-/, "").replace(/^adm-/, "")
+          : undefined);
+      if (rawId) headers["x-user-id"] = rawId;
       if (currentUser?.email) headers["x-user-email"] = currentUser.email;
+      if (currentUser?.role) headers["x-user-role"] = currentUser.role;
 
-      let res = await fetch("/api/auth/profile", {
-        method: "PUT",
-        headers,
-        body: JSON.stringify({
-          profilePicture: encryptedPhoto,
-        }),
-      });
-
-      if (!res.ok) {
+      let res: Response | null = null;
+      try {
+        res = await fetch("/api/auth/profile", {
+          method: "PUT",
+          headers,
+          body: JSON.stringify({
+            profilePicture: encryptedPhoto,
+          }),
+        });
+        if (!res || res.status >= 500) {
+          throw new Error(`HTTP ${res?.status}`);
+        }
+      } catch {
         res = await fetch("http://127.0.0.1:5000/api/auth/profile", {
           method: "PUT",
           headers,
@@ -120,9 +150,17 @@ function ProfileContent() {
         });
       }
 
-      if (res.ok) {
+      if (res && (res.status === 401 || res.status === 403)) {
+        const errJson = await res.json().catch(() => null);
+        toast.error(errJson?.message || "Sesi berakhir atau akun tidak aktif.", { id: "profile-upload" });
+        AuthService.logout();
+        router.replace("/login");
+        return;
+      }
+
+      if (res && res.ok) {
         const json = await res.json();
-        const updatedUser = {
+        const updatedUser = json?.data?.user || {
           ...currentUser!,
           profilePicture: encryptedPhoto,
         };
@@ -130,7 +168,7 @@ function ProfileContent() {
         AuthService.setCurrentUser(updatedUser);
         toast.success("Foto profil berhasil diperbarui & dienkripsi dengan aman!", { id: "profile-upload" });
       } else {
-        const errJson = await res.json().catch(() => null);
+        const errJson = await res?.json().catch(() => null);
         toast.error(errJson?.message || "Gagal memperbarui foto profil ke server.", { id: "profile-upload" });
       }
     } catch (err: any) {
@@ -151,12 +189,14 @@ function ProfileContent() {
   const displayEmail = currentUser?.email || "-";
   const displayPhone = currentUser?.phone && currentUser.phone !== "-" ? currentUser.phone : "-";
   const displayStore = currentUser?.storeName || "Belum Ditugaskan";
-  const displayStoreCode = currentUser?.storeCode || "-";
   const displayAddress =
     currentUser?.storeAddress && currentUser.storeAddress !== "-"
       ? currentUser.storeAddress
       : "Alamat gerai belum diatur di database";
   const displayWorkspace = currentUser?.workspaceName || "Mie Gacoan";
+  const isUserActive =
+    !currentUser?.status ||
+    (currentUser.status !== "Nonaktif" && currentUser.status !== "inactive");
 
   const getInitials = (name: string) => {
     if (!name || name === "Memuat...") return "ST";
@@ -244,7 +284,11 @@ function ProfileContent() {
               </div>
 
               {/* Status Online Dot */}
-              <span className="w-3.5 h-3.5 bg-emerald-500 rounded-full border-2 border-white absolute top-0 right-0 shadow-2xs" />
+              <span
+                className={`w-3.5 h-3.5 rounded-full border-2 border-white absolute top-0 right-0 shadow-2xs ${
+                  isUserActive ? "bg-emerald-500" : "bg-rose-500"
+                }`}
+              />
 
               {/* Tombol Kamera Ganti Foto Profil */}
               <label
@@ -300,11 +344,6 @@ function ProfileContent() {
                   </h3>
                 </div>
               </div>
-              {displayStoreCode !== "-" && (
-                <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
-                  {displayStoreCode}
-                </span>
-              )}
             </div>
 
             {/* Alamat Lengkap Outlet di Bawahnya (Tanpa Terpotong) */}
@@ -362,9 +401,19 @@ function ProfileContent() {
                 <ShieldCheck className="w-4 h-4 text-slate-400 shrink-0" />
                 <span className="font-medium text-[11px]">Status Akun</span>
               </div>
-              <div className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200/80 rounded-full text-[10px] font-bold flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span>Aktif Bertugas</span>
+              <div
+                className={`px-2 py-0.5 border rounded-full text-[10px] font-bold flex items-center gap-1 ${
+                  isUserActive
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200/80"
+                    : "bg-rose-50 text-rose-700 border-rose-200/80"
+                }`}
+              >
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    isUserActive ? "bg-emerald-500 animate-pulse" : "bg-rose-500"
+                  }`}
+                />
+                <span>{isUserActive ? "Aktif Bertugas" : "Nonaktif"}</span>
               </div>
             </div>
           </div>

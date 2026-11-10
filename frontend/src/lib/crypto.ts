@@ -6,6 +6,7 @@
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 const PREFIX = "enc:v1:";
+const PREFIX_ALT = "ENC:v1:";
 
 export const CryptoService = {
   /**
@@ -13,7 +14,7 @@ export const CryptoService = {
    */
   isEncrypted(str: string | null | undefined): boolean {
     if (!str || typeof str !== "string") return false;
-    return str.startsWith(PREFIX);
+    return str.startsWith(PREFIX) || str.startsWith(PREFIX_ALT);
   },
 
   /**
@@ -51,6 +52,17 @@ export const CryptoService = {
   async decryptImage(encryptedImage: string): Promise<string> {
     if (!encryptedImage) return encryptedImage;
     if (!this.isEncrypted(encryptedImage)) return encryptedImage;
+
+    // Jika format ENC:v1:, gunakan Web Crypto API lokal terlebih dahulu
+    if (encryptedImage.startsWith(PREFIX_ALT)) {
+      try {
+        const { decryptImageData } = await import("@/lib/image-crypto");
+        const dec = await decryptImageData(encryptedImage);
+        if (dec && dec !== encryptedImage) return dec;
+      } catch (e) {
+        // Fallback ke backend decrypt
+      }
+    }
 
     // Cek apakah fallback client
     if (encryptedImage.startsWith(`${PREFIX}client:`)) {

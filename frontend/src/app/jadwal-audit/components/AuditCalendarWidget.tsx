@@ -89,16 +89,14 @@ export default function AuditCalendarWidget({
 
     // Hari Ini (0) atau Mendatang dalam 1 Minggu (1 s/d 7):
     const daySchedules = schedules.filter((s) => {
-      if (s.date === checkDateStr) return true;
+      if (s.date && checkDateStr < s.date) return false;
+      if (s.endDate && (!s.date || s.endDate > s.date) && checkDateStr > s.endDate) return false;
       if (s.recurrence === "Setiap Hari") return true;
-      if (
-        s.recurrence === "Hari Tertentu" &&
-        Array.isArray(s.selectedDays) &&
-        s.selectedDays.includes(dayOfWeekShort)
-      ) {
-        return true;
+      if (s.recurrence === "Hari Tertentu") {
+        if (!Array.isArray(s.selectedDays) || s.selectedDays.length === 0) return true;
+        return s.selectedDays.includes(dayOfWeekShort);
       }
-      return false;
+      return s.date === checkDateStr;
     });
 
     if (daySchedules.length === 0) return [];

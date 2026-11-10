@@ -14,6 +14,7 @@ export interface AuthUser {
   storeLocation?: string;
   storeCode?: string;
   storeAddress?: string;
+  status?: string;
   profilePicture?: string | null;
   token?: string;
 }
