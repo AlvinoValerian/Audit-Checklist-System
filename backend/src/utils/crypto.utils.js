@@ -14,7 +14,7 @@ const PREFIX = 'enc:v1:';
  */
 const isEncrypted = (str) => {
   if (typeof str !== 'string') return false;
-  return str.startsWith(PREFIX);
+  return str.startsWith(PREFIX) || str.startsWith('ENC:v1:');
 };
 
 /**
@@ -46,11 +46,19 @@ const encryptImage = (text) => {
 
 /**
  * Dekripsi string gambar yang terenkripsi menggunakan AES-256-GCM
- * @param {string} encryptedText - String terenkripsi format enc:v1:<iv>:<tag>:<ciphertext>
+ * @param {string} encryptedText - String terenkripsi format enc:v1:<iv>:<tag>:<ciphertext> atau ENC:v1:...
  * @returns {string} - String asli hasil dekripsi
  */
 const decryptImage = (encryptedText) => {
   if (!encryptedText || typeof encryptedText !== 'string') return encryptedText;
+  if (encryptedText.startsWith('ENC:v1:')) {
+    try {
+      const { decryptImageData } = require('./imageCrypto');
+      return decryptImageData(encryptedText);
+    } catch (e) {
+      return encryptedText;
+    }
+  }
   // Jika bukan format terenkripsi (misal string biasa / URL polos), kembalikan langsung (backward compatible)
   if (!isEncrypted(encryptedText)) return encryptedText;
 

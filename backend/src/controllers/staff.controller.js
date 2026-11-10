@@ -713,6 +713,13 @@ const formatTimeString = (time) => {
   if (!time) return '09:00';
   if (typeof time === 'string') {
     if (time.includes('T')) {
+      const d = new Date(time);
+      if (!isNaN(d.getTime()) && d.getFullYear() > 1970) {
+        const wib = new Date(d.getTime() + 7 * 60 * 60 * 1000);
+        const h = String(wib.getUTCHours()).padStart(2, '0');
+        const m = String(wib.getUTCMinutes()).padStart(2, '0');
+        return `${h}:${m}`;
+      }
       const parts = time.split('T')[1].split(':');
       return `${parts[0]}:${parts[1]}`;
     }
@@ -723,6 +730,12 @@ const formatTimeString = (time) => {
     return time.substring(0, 5);
   }
   if (time instanceof Date) {
+    if (time.getFullYear() > 1970) {
+      const wib = new Date(time.getTime() + 7 * 60 * 60 * 1000);
+      const hours = String(wib.getUTCHours()).padStart(2, '0');
+      const minutes = String(wib.getUTCMinutes()).padStart(2, '0');
+      return `${hours}:${minutes}`;
+    }
     const hours = String(time.getUTCHours()).padStart(2, '0');
     const minutes = String(time.getUTCMinutes()).padStart(2, '0');
     return `${hours}:${minutes}`;
@@ -731,17 +744,226 @@ const formatTimeString = (time) => {
 };
 
 /**
- * Format string tanggal atau Date object menjadi "YYYY-MM-DD"
+ * Format string tanggal atau Date object menjadi "YYYY-MM-DD" dalam zona waktu WIB (UTC+7)
  */
 const formatDateString = (date) => {
-  if (!date) return new Date().toISOString().split('T')[0];
+  if (!date) return '';
   if (typeof date === 'string') {
-    return date.split('T')[0];
+    if (date.includes('T')) {
+      const d = new Date(date);
+      if (!isNaN(d.getTime())) {
+        const wib = new Date(d.getTime() + 7 * 60 * 60 * 1000);
+        const y = wib.getUTCFullYear();
+        const m = String(wib.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(wib.getUTCDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+      }
+    }
+    return date.split('T')[0].substring(0, 10);
   }
   if (date instanceof Date) {
-    return date.toISOString().split('T')[0];
+    const wib = new Date(date.getTime() + 7 * 60 * 60 * 1000);
+    const y = wib.getUTCFullYear();
+    const m = String(wib.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(wib.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
   }
   return String(date).substring(0, 10);
+};
+
+/**
+ * Helper untuk mengambil kolom tambahan staff (position, deleted_at)
+ * yang belum didefinisikan pada Prisma schema statik
+ */
+const getStaffExtra = async (staffId) => {
+  if (!staffId) return {};
+  try {
+    const rows = await prisma.$queryRawUnsafe(
+      `SELECT staff_id, position, deleted_at FROM staff WHERE staff_id = $1 LIMIT 1`,
+      staffId
+    );
+    return rows && rows[0] ? rows[0] : {};
+  } catch (e) {
+    return {};
+  }
+};
+
+const getStaffExtrasMap = async (staffIds = []) => {
+  const map = new Map();
+  const uniqueIds = Array.from(new Set(staffIds.filter(Boolean).map((id) => id.toString())));
+  if (uniqueIds.length === 0) return map;
+  try {
+    const rows = await prisma.$queryRawUnsafe(
+      `SELECT staff_id, position, deleted_at FROM staff WHERE staff_id = ANY($1::bigint[])`,
+      uniqueIds.map((id) => BigInt(id))
+    );
+    for (const r of rows || []) {
+      map.set(r.staff_id.toString(), r);
+    }
+  } catch (e) {}
+  return map;
+};
+
+/**
+ * Helper zona waktu WIB (UTC+7)
+ */
+const getWibDateParts = (date = new Date()) => {
+  const safeDate = date instanceof Date && !isNaN(date.getTime()) ? date : new Date();
+  const wibTimestamp = safeDate.getTime() + 7 * 60 * 60 * 1000;
+  const wibDate = new Date(wibTimestamp);
+  const year = wibDate.getUTCFullYear();
+  const month = wibDate.getUTCMonth();
+  const day = wibDate.getUTCDate();
+  const monthStr = String(month + 1).padStart(2, '0');
+  const dayStr = String(day).padStart(2, '0');
+  const hours = wibDate.getUTCHours();
+  const minutes = wibDate.getUTCMinutes();
+  const hoursStr = String(hours).padStart(2, '0');
+  const minsStr = String(minutes).padStart(2, '0');
+  const shortMonths = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+  const dayOfWeekShort = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'][wibDate.getUTCDay()];
+
+  return {
+    dateStr: `${year}-${monthStr}-${dayStr}`,
+    dayOfWeekShort,
+    wibHours: hours,
+    wibMinutes: minutes,
+    currentMinutes: hours * 60 + minutes,
+    timeStr: `${hoursStr}:${minsStr}`,
+    formattedDateTime: `${day} ${shortMonths[month]} ${year}, ${hoursStr}:${minsStr} WIB`,
+    formattedDateLong: safeDate.toLocaleDateString('id-ID', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'Asia/Jakarta',
+    }),
+  };
+};
+
+const DAY_NAME_SHORT_MAP = {
+  senin: 'Sen',
+  sen: 'Sen',
+  selasa: 'Sel',
+  sel: 'Sel',
+  rabu: 'Rab',
+  rab: 'Rab',
+  kamis: 'Kam',
+  kam: 'Kam',
+  jumat: 'Jum',
+  "jum'at": 'Jum',
+  jum: 'Jum',
+  sabtu: 'Sab',
+  sab: 'Sab',
+  minggu: 'Min',
+  min: 'Min',
+};
+
+const normalizeDayToken = (day) => {
+  const key = String(day || '').trim().toLowerCase();
+  return DAY_NAME_SHORT_MAP[key] || String(day || '').trim();
+};
+
+const parseSelectedDays = (selectedDaysRaw) => {
+  if (!selectedDaysRaw) return [];
+  if (Array.isArray(selectedDaysRaw)) return selectedDaysRaw.map(normalizeDayToken).filter(Boolean);
+  if (typeof selectedDaysRaw === 'string') {
+    try {
+      const parsed = JSON.parse(selectedDaysRaw);
+      if (Array.isArray(parsed)) return parsed.map(normalizeDayToken).filter(Boolean);
+    } catch {}
+    return selectedDaysRaw.split(',').map(normalizeDayToken).filter(Boolean);
+  }
+  return [];
+};
+
+const normalizeRecurrence = (repeatTime) => {
+  const val = (repeatTime || '').toString().trim().toLowerCase();
+  if (val === 'daily' || val === 'setiap hari' || val === 'harian') return 'daily';
+  if (val === 'custom' || val === 'weekly' || val === 'hari tertentu' || val === 'mingguan') return 'custom';
+  return 'once';
+};
+
+const isRecurringSchedule = (schedule) => normalizeRecurrence(schedule?.repeat_time) !== 'once';
+
+const doesScheduleApplyOnDate = (schedule, targetDateStr, targetDayShort) => {
+  if (!schedule) return false;
+  const scheduleDateStr = formatDateString(schedule.start_date);
+  if (scheduleDateStr && scheduleDateStr > targetDateStr) return false;
+
+  const rec = normalizeRecurrence(schedule.repeat_time);
+  const isRec = rec !== 'once';
+
+  if (schedule.end_date) {
+    const scheduleEndDateStr = formatDateString(schedule.end_date);
+    if (scheduleEndDateStr && (!isRec || scheduleEndDateStr > scheduleDateStr) && scheduleEndDateStr < targetDateStr) {
+      return false;
+    }
+  }
+
+  if (rec === 'daily') return true;
+  if (rec === 'custom') {
+    const selectedDays = parseSelectedDays(schedule.selected_days);
+    if (selectedDays.length === 0) return true;
+    return selectedDays.some((d) => d.toLowerCase() === targetDayShort.toLowerCase());
+  }
+  return scheduleDateStr === targetDateStr;
+};
+
+const getActiveHolidaysOnDate = async (targetDateStr) => {
+  try {
+    return await prisma.$queryRawUnsafe(`
+      SELECT * FROM store_holiday
+      WHERE deleted_at IS NULL
+        AND status != 'Dibatalkan'
+        AND start_date <= $1::date
+        AND end_date >= $1::date
+    `, targetDateStr);
+  } catch (e) {
+    return [];
+  }
+};
+
+const evaluateHolidayForSchedule = (schedule, targetDateStr, storeHolidays = [], fallbackStoreName = '') => {
+  if (!schedule) return { isHoliday: false, reason: null, matchedStoreHoliday: null, matchedException: null };
+  const sIdStr = schedule.schedule_id.toString();
+  const sStoreId = schedule.store_id ? schedule.store_id.toString() : '';
+  const sStoreName = (schedule.store?.store_name || fallbackStoreName || '').trim().toLowerCase();
+
+  const matchedException = (schedule.schedule_exception || []).find((e) => {
+    if (e.is_skip === false) return false;
+    const eStart = formatDateString(e.start_date);
+    const eEnd = formatDateString(e.end_date);
+    if (!eStart || !eEnd) return false;
+    return targetDateStr >= eStart && targetDateStr <= eEnd;
+  }) || null;
+
+  const matchedStoreHoliday = (storeHolidays || []).find((h) => {
+    const hStoreId = h.store_id ? h.store_id.toString() : '';
+    const hStoreName = (h.store_name || '').trim().toLowerCase();
+    const storeMatches = (hStoreId && hStoreId === sStoreId) || (hStoreName && hStoreName === sStoreName);
+    if (!storeMatches) return false;
+
+    const lType = h.libur_type || 'full';
+    if (lType === 'full') return true;
+
+    let hSchedules = [];
+    if (Array.isArray(h.schedules)) hSchedules = h.schedules.map((id) => String(id).replace(/^sch-/, ''));
+    else if (typeof h.schedules === 'string') {
+      try {
+        hSchedules = JSON.parse(h.schedules).map((id) => String(id).replace(/^sch-/, ''));
+      } catch {
+        hSchedules = [];
+      }
+    }
+    return hSchedules.includes(sIdStr);
+  }) || null;
+
+  const isStatusHoliday = schedule.status === 'Libur' || Boolean(schedule.notes?.toLowerCase().includes('libur'));
+  const isHoliday = Boolean(matchedException) || Boolean(matchedStoreHoliday) || isStatusHoliday;
+  const reason = matchedStoreHoliday?.reason || matchedException?.note || matchedException?.reason || schedule.notes || 'Toko Sedang Libur';
+
+  return { isHoliday, reason, matchedStoreHoliday, matchedException };
 };
 
 /**
@@ -758,7 +980,7 @@ exports.getMySchedules = async (req, res) => {
     let storeName = 'Toko Cabang';
     let storeLocation = 'Kota Malang';
     let storeCode = 'ST-01';
-    let staffPosition = 'Auditor Lapangan';
+    let staffPosition = user?.position || 'Auditor Lapangan';
     let staffPhoto = user?.profilePicture || null;
 
     const isStaffUser =
@@ -779,14 +1001,21 @@ exports.getMySchedules = async (req, res) => {
             include: { store: true },
           });
           if (st) {
+            const extra = await getStaffExtra(st.staff_id);
+            if (extra.deleted_at || st.status === 'inactive' || st.status === 'Nonaktif') {
+              return res.status(403).json({
+                status: 'error',
+                message: 'Akun staf Anda berstatus Nonaktif atau telah dihapus. Hubungi Admin untuk mengaktifkan kembali.',
+              });
+            }
             staffId = st.staff_id;
             storeId = st.store_id;
             staffName = st.name;
-            staffPosition = st.position || 'Auditor Lapangan';
+            staffPosition = extra.position || 'Auditor Lapangan';
             staffPhoto = st.photo || staffPhoto;
             if (st.store) {
               storeName = st.store.store_name;
-              storeLocation = `${st.store.address || st.store.city || 'Cabang'} • ST-${st.store.store_id}`;
+              storeLocation = st.store.address || st.store.city || 'Cabang';
               storeCode = `ST-${st.store.store_id.toString()}`;
             }
           }
@@ -804,21 +1033,28 @@ exports.getMySchedules = async (req, res) => {
           include: { store: true },
         });
         if (stByEmail) {
+          const extra = await getStaffExtra(stByEmail.staff_id);
+          if (extra.deleted_at || stByEmail.status === 'inactive' || stByEmail.status === 'Nonaktif') {
+            return res.status(403).json({
+              status: 'error',
+              message: 'Akun staf Anda berstatus Nonaktif atau telah dihapus.',
+            });
+          }
           staffId = stByEmail.staff_id;
           storeId = stByEmail.store_id;
           staffName = stByEmail.name;
-          staffPosition = stByEmail.position || 'Auditor Lapangan';
+          staffPosition = extra.position || 'Auditor Lapangan';
           staffPhoto = stByEmail.photo || staffPhoto;
           if (stByEmail.store) {
             storeName = stByEmail.store.store_name;
-            storeLocation = `${stByEmail.store.address || stByEmail.store.city || 'Cabang'} • ST-${stByEmail.store.store_id}`;
+            storeLocation = stByEmail.store.address || stByEmail.store.city || 'Cabang';
             storeCode = `ST-${stByEmail.store.store_id.toString()}`;
           }
         }
       } catch (e) {}
     }
 
-    if (req.query.staffId) {
+    if (req.query.staffId && !isStaffUser) {
       // Dukungan query param jika Admin/SuperAdmin ingin melihat jadwal staf tertentu
       try {
         const cleanStaffId = req.query.staffId.toString().replace(/^staff-/, '');
@@ -827,13 +1063,15 @@ exports.getMySchedules = async (req, res) => {
           include: { store: true },
         });
         if (st) {
+          const extra = await getStaffExtra(st.staff_id);
           staffId = st.staff_id;
           storeId = st.store_id;
           staffName = st.name;
-          staffPosition = st.position || 'Auditor Lapangan';
+          staffPosition = extra.position || 'Auditor Lapangan';
+          staffPhoto = st.photo || null;
           if (st.store) {
             storeName = st.store.store_name;
-            storeLocation = `${st.store.address || st.store.city || 'Cabang'} • ST-${st.store.store_id}`;
+            storeLocation = st.store.address || st.store.city || 'Cabang';
             storeCode = `ST-${st.store.store_id.toString()}`;
           }
         }
@@ -880,7 +1118,7 @@ exports.getMySchedules = async (req, res) => {
       if (activeStore) {
         storeId = activeStore.store_id;
         storeName = activeStore.store_name;
-        storeLocation = `${activeStore.address || activeStore.city || 'Cabang'} • ST-${activeStore.store_id}`;
+        storeLocation = activeStore.address || activeStore.city || 'Cabang';
         storeCode = `ST-${activeStore.store_id.toString()}`;
       }
     }
@@ -888,7 +1126,7 @@ exports.getMySchedules = async (req, res) => {
     // 2. Kriteria pencarian jadwal dari database: HANYA untuk toko yang dinaungi
     const where = {
       deleted_at: null,
-      status: { not: 'cancelled' },
+      status: { notIn: ['cancelled', 'inactive', 'Dibatalkan', 'Nonaktif'] },
       store_id: targetStoreId,
     };
 
@@ -905,7 +1143,12 @@ exports.getMySchedules = async (req, res) => {
         checklist_template: {
           include: {
             template_category: {
-              include: { template_task: true },
+              orderBy: { sort_order: 'asc' },
+              include: {
+                template_task: {
+                  orderBy: { sort_order: 'asc' },
+                },
+              },
             },
           },
         },
@@ -914,7 +1157,11 @@ exports.getMySchedules = async (req, res) => {
         },
         schedule_exception: true,
         checklist_report: {
-          include: { staff: true },
+          include: {
+            staff: true,
+            attachment: true,
+          },
+          orderBy: { created_at: 'desc' },
         },
       },
       orderBy: [
@@ -926,72 +1173,23 @@ exports.getMySchedules = async (req, res) => {
     // Jika storeName belum didapat dari staff tetapi schedules ada:
     if (!storeId && schedules.length > 0 && schedules[0].store) {
       storeName = schedules[0].store.store_name;
-      storeLocation = `${schedules[0].store.address || schedules[0].store.city || 'Cabang'} • ST-${schedules[0].store.store_id}`;
+      storeLocation = schedules[0].store.address || schedules[0].store.city || 'Cabang';
       storeCode = `ST-${schedules[0].store.store_id.toString()}`;
     }
 
     // Waktu realtime saat ini di WIB (UTC+7)
     const now = new Date();
-    const wibTimestamp = now.getTime() + 7 * 60 * 60 * 1000;
-    const wibDate = new Date(wibTimestamp);
-    const y = wibDate.getUTCFullYear();
-    const m = String(wibDate.getUTCMonth() + 1).padStart(2, '0');
-    const d = String(wibDate.getUTCDate()).padStart(2, '0');
-    const todayStr = `${y}-${m}-${d}`;
-    const dayOfWeekShort = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'][wibDate.getUTCDay()];
-
-    const utcHours = now.getUTCHours();
-    const wibHours = (utcHours + 7) % 24;
-    const currentMinutes = wibHours * 60 + now.getUTCMinutes();
-
-    const todayFormatted = now.toLocaleDateString('id-ID', {
-      weekday: 'long',
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric',
-    });
+    const wibNow = getWibDateParts(now);
+    const todayStr = wibNow.dateStr;
+    const dayOfWeekShort = wibNow.dayOfWeekShort;
+    const currentMinutes = wibNow.currentMinutes;
+    const todayFormatted = wibNow.formattedDateLong;
 
     // 4. Filter HANYA jadwal yang berlaku hari ini (realtime)
-    const todaySchedules = schedules.filter((s) => {
-      const scheduleDateStr = formatDateString(s.start_date);
-      const recurrence = s.repeat_time === 'daily' ? 'Setiap Hari' : (s.repeat_time === 'custom' || s.repeat_time === 'weekly' ? 'Hari Tertentu' : s.repeat_time);
-      let selectedDays = [];
-      if (s.selected_days) {
-        if (typeof s.selected_days === 'string') {
-          try {
-            selectedDays = JSON.parse(s.selected_days);
-          } catch {
-            selectedDays = s.selected_days.split(',').map(x => x.trim());
-          }
-        } else if (Array.isArray(s.selected_days)) {
-          selectedDays = s.selected_days;
-        }
-      }
+    const todaySchedules = schedules.filter((s) => doesScheduleApplyOnDate(s, todayStr, dayOfWeekShort));
 
-      // Jadwal harian / daily selalu aktif hari ini
-      if (recurrence === 'Setiap Hari' || recurrence === 'daily') return true;
-      // Jadwal hari tertentu
-      if (recurrence === 'Hari Tertentu' || recurrence === 'weekly' || recurrence === 'custom') {
-        if (!selectedDays || selectedDays.length === 0) return true;
-        return selectedDays.includes(dayOfWeekShort);
-      }
-      // Jadwal satu kali
-      return scheduleDateStr === todayStr;
-    });
-
-    // Ambil data libur toko (store_holiday) aktif hari ini untuk seluruh toko staf
-    let todayStoreHolidays = [];
-    try {
-      todayStoreHolidays = await prisma.$queryRawUnsafe(`
-        SELECT * FROM store_holiday 
-        WHERE deleted_at IS NULL 
-          AND status != 'Dibatalkan'
-          AND start_date <= $1::date 
-          AND end_date >= $1::date
-      `, todayStr);
-    } catch (e) {
-      todayStoreHolidays = [];
-    }
+    // Ambil data libur toko (store_holiday) aktif hari ini
+    const todayStoreHolidays = await getActiveHolidaysOnDate(todayStr);
 
     // 5. Transformasi data jadwal real hari ini dari database
     const scheduleItems = todaySchedules.map((s) => {
@@ -1008,12 +1206,17 @@ exports.getMySchedules = async (req, res) => {
 
       // Cek laporan penyelesaian (termasuk status terlambat dan filter hari ini untuk jadwal berulang)
       const reports = s.checklist_report || [];
-      const isRecurring = s.repeat_time === 'daily' || s.repeat_time === 'custom' || s.repeat_time === 'weekly';
+      const isRecurring = isRecurringSchedule(s);
       const completedReport = reports.find(r => {
-        const isFinished = r.status === 'submitted' || r.status === 'completed' || r.status === 'terlambat';
+        const isFinished =
+          r.status === 'submitted' ||
+          r.status === 'completed' ||
+          r.status === 'terlambat' ||
+          r.status === 'late' ||
+          r.status === 'submitted_late';
         if (!isFinished) return false;
         if (isRecurring) {
-          const rDateStr = formatDateString(r.completed_at || r.created_at || r.submitted_at);
+          const rDateStr = formatDateString(r.completed_at || r.submitted_at || r.created_at);
           return rDateStr === todayStr;
         }
         return true;
@@ -1023,40 +1226,15 @@ exports.getMySchedules = async (req, res) => {
         const isUndone = r.status === 'tidak_mengerjakan' || r.status === 'tidak_patuh';
         if (!isUndone) return false;
         if (isRecurring) {
-          const rDateStr = formatDateString(r.completed_at || r.created_at || r.submitted_at);
+          const rDateStr = formatDateString(r.completed_at || r.submitted_at || r.created_at);
           return rDateStr === todayStr;
         }
         return true;
       });
 
       // Cek pengecualian / libur dari tabel schedule_exception atau store_holiday
-      const exceptions = s.schedule_exception || [];
-      const sIdStr = s.schedule_id.toString();
-      const sStoreName = (s.store?.store_name || storeName || '').trim().toLowerCase();
-      const sStoreId = s.store_id ? s.store_id.toString() : '';
-
-      const activeStoreHoliday = todayStoreHolidays.find((h) => {
-        const hStoreId = h.store_id ? h.store_id.toString() : '';
-        const hStoreName = (h.store_name || '').trim().toLowerCase();
-        const storeMatches = (hStoreId && hStoreId === sStoreId) || (hStoreName && hStoreName === sStoreName);
-        if (!storeMatches) return false;
-
-        const lType = h.libur_type || 'full';
-        if (lType === 'full') return true;
-
-        let hSchedules = [];
-        if (Array.isArray(h.schedules)) hSchedules = h.schedules.map(String);
-        else if (typeof h.schedules === 'string') {
-          try {
-            hSchedules = JSON.parse(h.schedules).map(String);
-          } catch {
-            hSchedules = [];
-          }
-        }
-        return hSchedules.includes(sIdStr);
-      });
-
-      const hasHolidayException = exceptions.some(e => e.is_skip) || s.status === 'Libur' || s.notes?.toLowerCase().includes('libur') || Boolean(activeStoreHoliday);
+      const holidayEval = evaluateHolidayForSchedule(s, todayStr, todayStoreHolidays, storeName);
+      const hasHolidayException = holidayEval.isHoliday;
 
       const [sH, sM] = startTimeStr.split(':').map(v => parseInt(v, 10));
       const [eH, eM] = endTimeStr.split(':').map(v => parseInt(v, 10));
@@ -1085,22 +1263,28 @@ exports.getMySchedules = async (req, res) => {
       let infoNote;
       let exemptionText;
       let unlockText;
+      let resolvedSubmitterName = null;
 
       if (completedReport) {
         status = 'Selesai';
-        const isLateSubmission = completedReport.status === 'terlambat';
+        const isLateSubmission =
+          completedReport.status === 'terlambat' ||
+          completedReport.status === 'late' ||
+          completedReport.status === 'submitted_late';
         statusBadge = isLateSubmission ? 'Selesai (Terlambat)' : 'Selesai';
         const repTime = completedReport.submitted_at || completedReport.completed_at || completedReport.created_at;
         const timeStr = repTime ? formatTimeString(repTime) : startTimeStr;
-        const repStaffName = completedReport.staff?.name || staffName;
-        submittedInfo = `Diserahkan pukul ${timeStr} WIB oleh ${repStaffName}${isLateSubmission ? ' (Terlambat)' : ''}`;
+        const sigAttachment = completedReport.attachment?.find((a) => a.file_type === 'signature' || a.signer_name);
+        resolvedSubmitterName = sigAttachment?.signer_name || completedReport.staff?.name || staffName;
+        submittedInfo = `Diserahkan pukul ${timeStr} WIB oleh ${resolvedSubmitterName}${isLateSubmission ? ' (Terlambat)' : ''}`;
         isCompleted = true;
+        isLate = isLateSubmission;
         hasDetail = true;
         canStart = false;
       } else if (hasHolidayException) {
         status = 'Libur';
         statusBadge = 'Libur';
-        const exReason = activeStoreHoliday?.reason || exceptions[0]?.reason || s.notes || 'Toko Sedang Libur';
+        const exReason = holidayEval.reason;
         infoNote = `Toko Diliburkan / ${exReason}`;
         exemptionText = `Bebas Tugas: ${exReason}`;
         isHoliday = true;
@@ -1136,6 +1320,8 @@ exports.getMySchedules = async (req, res) => {
         actionText = 'Kerjakan Checklist →';
       }
 
+      const activeReport = completedReport || uncompletedReport;
+
       return {
         id: s.schedule_id.toString(),
         timeRange,
@@ -1169,12 +1355,12 @@ exports.getMySchedules = async (req, res) => {
           isPhotoRequired: t.is_photo_required === true,
           priority: t.priority || 'Low',
         })),
-        report: (completedReport || uncompletedReport) ? {
-          reportId: (completedReport || uncompletedReport).report_id.toString(),
-          status: (completedReport || uncompletedReport).status,
-          submittedAt: (completedReport || uncompletedReport).submitted_at || (completedReport || uncompletedReport).completed_at,
-          submittedBy: (completedReport || uncompletedReport).staff?.name || staffName,
-          notes: (completedReport || uncompletedReport).notes,
+        report: activeReport ? {
+          reportId: activeReport.report_id.toString(),
+          status: activeReport.status,
+          submittedAt: activeReport.submitted_at || activeReport.completed_at,
+          submittedBy: completedReport ? resolvedSubmitterName : null,
+          notes: activeReport.notes,
         } : null,
       };
     });
@@ -1204,6 +1390,7 @@ exports.getMySchedules = async (req, res) => {
           photo: staffPhoto || null,
         },
         store: {
+          id: storeId ? storeId.toString() : null,
           name: storeName,
           location: storeLocation,
           code: storeCode,
@@ -1236,9 +1423,75 @@ exports.getMySchedules = async (req, res) => {
 exports.getStaffScheduleDetail = async (req, res) => {
   try {
     const rawId = req.params.id.toString().replace(/^sch-/, '');
+    if (!rawId || isNaN(Number(rawId))) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'ID jadwal audit tidak valid.',
+      });
+    }
     const scheduleId = BigInt(rawId);
 
-    const schedule = await prisma.schedule.findUnique({
+    const user = await extractUser(req);
+    const isStaffUser =
+      user &&
+      (user.role === 'Staff' ||
+       user.role === 'Auditor Lapangan' ||
+       user.id?.toString().startsWith('staff-') ||
+       user.role?.toLowerCase().includes('staff') ||
+       user.role?.toLowerCase().includes('auditor'));
+
+    let viewerStoreId = null;
+    if (isStaffUser) {
+      let st = null;
+      const cleanStaffId = user.rawId || user.id?.toString().replace(/^staff-/, '');
+      if (cleanStaffId && !isNaN(Number(cleanStaffId))) {
+        st = await prisma.staff.findUnique({ where: { staff_id: BigInt(cleanStaffId) } });
+      }
+      if (!st && user.email) {
+        st = await prisma.staff.findUnique({ where: { email: user.email.trim().toLowerCase() } });
+      }
+      if (st) {
+        const extra = await getStaffExtra(st.staff_id);
+        if (extra.deleted_at || st.status === 'inactive' || st.status === 'Nonaktif') {
+          return res.status(403).json({
+            status: 'error',
+            message: 'Akun staf Anda berstatus Nonaktif atau telah dihapus.',
+          });
+        }
+        viewerStoreId = st.store_id;
+      }
+    }
+
+    const baseSchedule = await prisma.schedule.findUnique({
+      where: { schedule_id: scheduleId },
+      select: { schedule_id: true, store_id: true, deleted_at: true, status: true },
+    });
+
+    if (!baseSchedule || baseSchedule.deleted_at) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Jadwal audit tidak ditemukan atau telah dihapus',
+      });
+    }
+
+    if (['cancelled', 'inactive', 'Dibatalkan', 'Nonaktif'].includes(baseSchedule.status)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Jadwal audit ini berstatus Nonaktif atau telah dibatalkan.',
+      });
+    }
+
+    if (isStaffUser && viewerStoreId && baseSchedule.store_id.toString() !== viewerStoreId.toString()) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Anda tidak memiliki akses ke jadwal cabang gerai lain.',
+      });
+    }
+
+    // Sinkronkan status jadwal kedaluwarsa terlebih dahulu sebelum membaca detail
+    await syncExpiredSchedulesToDb({ storeId: baseSchedule.store_id });
+
+    const currentSchedule = await prisma.schedule.findUnique({
       where: { schedule_id: scheduleId },
       include: {
         store: true,
@@ -1257,41 +1510,21 @@ exports.getStaffScheduleDetail = async (req, res) => {
         schedule_staff: {
           include: { staff: true },
         },
+        schedule_exception: true,
         checklist_report: {
-          include: { staff: true },
+          include: {
+            staff: true,
+            attachment: true,
+          },
           orderBy: { created_at: 'desc' },
         },
       },
     });
 
-    let currentSchedule = schedule;
-    if (!currentSchedule) {
-      currentSchedule = await prisma.schedule.findFirst({
-        where: { schedule_id: BigInt(2) },
-        include: {
-          store: true,
-          checklist_template: {
-            include: {
-              template_category: {
-                orderBy: { sort_order: 'asc' },
-                include: {
-                  template_task: {
-                    orderBy: { sort_order: 'asc' },
-                  },
-                },
-              },
-            },
-          },
-          schedule_staff: { include: { staff: true } },
-          checklist_report: { include: { staff: true }, orderBy: { created_at: 'desc' } },
-        },
-      });
-    }
-
-    if (!currentSchedule) {
+    if (!currentSchedule || currentSchedule.deleted_at) {
       return res.status(404).json({
         status: 'error',
-        message: 'Jadwal audit tidak ditemukan',
+        message: 'Jadwal audit tidak ditemukan atau telah dihapus',
       });
     }
 
@@ -1361,21 +1594,37 @@ exports.getStaffScheduleDetail = async (req, res) => {
       });
     });
 
-    const now = new Date();
-    const utcHours = now.getUTCHours();
-    const wibHours = (utcHours + 7) % 24;
-    const currentMinutes = wibHours * 60 + now.getUTCMinutes();
+    const wibNow = getWibDateParts(new Date());
+    const todayStr = wibNow.dateStr;
+    const currentMinutes = wibNow.currentMinutes;
 
-    const wibTimestamp = now.getTime() + 7 * 60 * 60 * 1000;
-    const wibDate = new Date(wibTimestamp);
-    const todayStr = `${wibDate.getUTCFullYear()}-${String(wibDate.getUTCMonth() + 1).padStart(2, '0')}-${String(wibDate.getUTCDate()).padStart(2, '0')}`;
+    const isRecurring = isRecurringSchedule(currentSchedule);
+    const appliesToday = doesScheduleApplyOnDate(currentSchedule, todayStr, wibNow.dayOfWeekShort);
 
-    const isRecurring = currentSchedule.repeat_time === 'daily' || currentSchedule.repeat_time === 'custom' || currentSchedule.repeat_time === 'weekly';
-    const completedReport = (currentSchedule.checklist_report || []).find((r) => {
-      const isFinished = r.status === 'submitted' || r.status === 'completed' || r.status === 'terlambat';
+    const todayStoreHolidays = await getActiveHolidaysOnDate(todayStr);
+    const holidayEval = evaluateHolidayForSchedule(currentSchedule, todayStr, todayStoreHolidays);
+
+    const reports = currentSchedule.checklist_report || [];
+    const completedReport = reports.find((r) => {
+      const isFinished =
+        r.status === 'submitted' ||
+        r.status === 'completed' ||
+        r.status === 'terlambat' ||
+        r.status === 'late' ||
+        r.status === 'submitted_late';
       if (!isFinished) return false;
       if (isRecurring) {
-        const rDateStr = formatDateString(r.completed_at || r.created_at || r.submitted_at);
+        const rDateStr = formatDateString(r.completed_at || r.submitted_at || r.created_at);
+        return rDateStr === todayStr;
+      }
+      return true;
+    });
+
+    const uncompletedReport = reports.find((r) => {
+      const isUndone = r.status === 'tidak_mengerjakan' || r.status === 'tidak_patuh';
+      if (!isUndone) return false;
+      if (isRecurring) {
+        const rDateStr = formatDateString(r.completed_at || r.submitted_at || r.created_at);
         return rDateStr === todayStr;
       }
       return true;
@@ -1392,16 +1641,25 @@ exports.getStaffScheduleDetail = async (req, res) => {
     const tolM = toleranceMinutes % 60;
     const toleranceTimeStr = `${String(tolH).padStart(2, '0')}:${String(tolM).padStart(2, '0')}`;
 
-    const isLocked = !completedReport && currentMinutes < startMinutes;
-    const isLate = !completedReport && currentMinutes > endMinutes && currentMinutes <= toleranceMinutes;
-    const isExpired = !completedReport && currentMinutes > toleranceMinutes;
-    const canStart = !completedReport && !isLocked && !isExpired;
+    const isHoliday = holidayEval.isHoliday;
+    const isNotScheduledToday = !appliesToday;
+    const isLocked = !completedReport && !isHoliday && !isNotScheduledToday && currentMinutes < startMinutes;
+    const isExpired = !completedReport && !isHoliday && !isNotScheduledToday && (Boolean(uncompletedReport) || currentMinutes > toleranceMinutes);
+    const isLate = !completedReport && !isHoliday && !isNotScheduledToday && !isExpired && currentMinutes > endMinutes;
+    const canStart = !completedReport && !isHoliday && !isNotScheduledToday && !isLocked && !isExpired;
 
     let scheduleStatus = 'Siap Dimulai';
     let scheduleBadge = 'Siap Dimulai';
     if (completedReport) {
       scheduleStatus = 'Selesai';
-      scheduleBadge = completedReport.status === 'terlambat' ? 'Selesai (Terlambat)' : 'Selesai';
+      const isRepLate = completedReport.status === 'terlambat' || completedReport.status === 'late' || completedReport.status === 'submitted_late';
+      scheduleBadge = isRepLate ? 'Selesai (Terlambat)' : 'Selesai';
+    } else if (isHoliday) {
+      scheduleStatus = 'Libur';
+      scheduleBadge = 'Libur';
+    } else if (isNotScheduledToday) {
+      scheduleStatus = 'Tidak Aktif Hari Ini';
+      scheduleBadge = 'Tidak Berlaku Hari Ini';
     } else if (isExpired) {
       scheduleStatus = 'Kedaluwarsa';
       scheduleBadge = 'Tidak Patuh';
@@ -1412,6 +1670,9 @@ exports.getStaffScheduleDetail = async (req, res) => {
       scheduleStatus = 'Terkunci';
       scheduleBadge = 'Terkunci';
     }
+
+    const activeReport = completedReport || uncompletedReport;
+    const completedSig = completedReport?.attachment?.find((a) => a.file_type === 'signature' || a.signer_name);
 
     return res.status(200).json({
       status: 'success',
@@ -1433,23 +1694,28 @@ exports.getStaffScheduleDetail = async (req, res) => {
           address: currentSchedule.store?.address || '',
           city: currentSchedule.store?.city || '',
           code: `ST-${currentSchedule.store?.store_id?.toString() || '01'}`,
-          latitude: currentSchedule.store?.latitude ? Number(currentSchedule.store.latitude) : -7.9553,
-          longitude: currentSchedule.store?.longitude ? Number(currentSchedule.store.longitude) : 112.6412,
-          radius: currentSchedule.store?.location_radius_gps ? Number(currentSchedule.store.location_radius_gps) : 100,
+          latitude: currentSchedule.store?.latitude != null ? Number(currentSchedule.store.latitude) : -7.9553,
+          longitude: currentSchedule.store?.longitude != null ? Number(currentSchedule.store.longitude) : 112.6412,
+          radius: currentSchedule.store?.location_radius_gps != null ? Number(currentSchedule.store.location_radius_gps) : 100,
+          hasCoordinates: currentSchedule.store?.latitude != null && currentSchedule.store?.longitude != null,
         },
         totalQuestions: tasks.length,
         tasks,
         isCompleted: Boolean(completedReport),
+        isHoliday,
+        holidayReason: isHoliday ? holidayEval.reason : null,
+        isNotScheduledToday,
+        isNonCompliant: isExpired,
         isLate,
         isExpired,
         isLocked,
         canStart,
-        report: completedReport
+        report: activeReport
           ? {
-              reportId: completedReport.report_id.toString(),
-              status: completedReport.status,
-              submittedAt: completedReport.submitted_at || completedReport.completed_at,
-              submittedBy: completedReport.staff?.name,
+              reportId: activeReport.report_id.toString(),
+              status: activeReport.status,
+              submittedAt: activeReport.submitted_at || activeReport.completed_at,
+              submittedBy: completedReport ? (completedSig?.signer_name || completedReport.staff?.name || null) : null,
             }
           : null,
       },
@@ -1471,52 +1737,132 @@ exports.getStaffScheduleDetail = async (req, res) => {
 exports.submitStaffAudit = async (req, res) => {
   try {
     const rawId = req.params.id.toString().replace(/^sch-/, '');
+    if (!rawId || isNaN(Number(rawId))) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'ID jadwal audit tidak valid.',
+      });
+    }
     const scheduleId = BigInt(rawId);
 
+    const schedule = await prisma.schedule.findUnique({
+      where: { schedule_id: scheduleId },
+      include: {
+        store: true,
+        checklist_template: {
+          include: {
+            template_category: {
+              include: { template_task: true },
+            },
+          },
+        },
+        schedule_exception: true,
+        schedule_staff: true,
+      },
+    });
+
+    if (!schedule || schedule.deleted_at) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Jadwal audit tidak ditemukan atau telah dihapus.',
+      });
+    }
+
+    if (['cancelled', 'inactive', 'Dibatalkan', 'Nonaktif'].includes(schedule.status)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Jadwal audit ini berstatus Nonaktif atau telah dibatalkan.',
+      });
+    }
+
     const user = await extractUser(req);
+    const isStaffUser =
+      user &&
+      (user.role === 'Staff' ||
+       user.role === 'Auditor Lapangan' ||
+       user.id?.toString().startsWith('staff-') ||
+       user.role?.toLowerCase().includes('staff') ||
+       user.role?.toLowerCase().includes('auditor'));
+
     let staffId = null;
+    let resolvedStaff = null;
+    let staffPosition = 'Auditor Lapangan';
 
     if (user?.id) {
-      const rawStaffId = user.id.toString().replace(/^staff-/, '');
-      if (!isNaN(Number(rawStaffId))) {
-        staffId = BigInt(rawStaffId);
+      const rawStaffId = (user.rawId || user.id.toString()).replace(/^staff-/, '');
+      if (isStaffUser && rawStaffId && !isNaN(Number(rawStaffId))) {
+        resolvedStaff = await prisma.staff.findUnique({
+          where: { staff_id: BigInt(rawStaffId) },
+        });
       }
     }
 
-    if (!staffId && user?.email) {
-      const st = await prisma.staff.findUnique({
+    if (!resolvedStaff && user?.email) {
+      resolvedStaff = await prisma.staff.findUnique({
         where: { email: user.email.trim().toLowerCase() },
       });
-      if (st) staffId = st.staff_id;
+    }
+
+    if (resolvedStaff) {
+      const extra = await getStaffExtra(resolvedStaff.staff_id);
+      if (extra.deleted_at || resolvedStaff.status === 'inactive' || resolvedStaff.status === 'Nonaktif') {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Akun staf Anda berstatus Nonaktif atau telah dihapus.',
+        });
+      }
+      if (isStaffUser && resolvedStaff.store_id && resolvedStaff.store_id.toString() !== schedule.store_id.toString()) {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Anda tidak dapat menyerahkan laporan audit untuk cabang gerai lain.',
+        });
+      }
+      staffId = resolvedStaff.staff_id;
+      staffPosition = extra.position || 'Auditor Lapangan';
     }
 
     if (!staffId) {
-      const schedule = await prisma.schedule.findUnique({
-        where: { schedule_id: scheduleId },
-        include: {
-          schedule_staff: true,
-          store: { include: { staff: true } },
-        },
-      });
-      if (schedule?.schedule_staff?.length > 0) {
-        staffId = schedule.schedule_staff[0].staff_id;
-      } else if (schedule?.store?.staff?.length > 0) {
-        staffId = schedule.store.staff[0].staff_id;
+      // Cari staf aktif yang tidak terhapus pada jadwal atau toko terkait
+      const activeStoreStaff = await prisma.$queryRawUnsafe(`
+        SELECT s.staff_id, s.name, s.position
+        FROM staff s
+        WHERE s.store_id = $1
+          AND s.deleted_at IS NULL
+          AND s.status IN ('active', 'Aktif')
+        ORDER BY s.staff_id ASC
+        LIMIT 1
+      `, schedule.store_id);
+
+      if (activeStoreStaff && activeStoreStaff[0]) {
+        staffId = activeStoreStaff[0].staff_id;
+        resolvedStaff = activeStoreStaff[0];
+        staffPosition = activeStoreStaff[0].position || 'Auditor Lapangan';
       } else {
-        const firstStaff = await prisma.staff.findFirst();
-        if (firstStaff) staffId = firstStaff.staff_id;
+        const anyActiveStaff = await prisma.$queryRawUnsafe(`
+          SELECT staff_id, name, position
+          FROM staff
+          WHERE deleted_at IS NULL
+            AND status IN ('active', 'Aktif')
+          ORDER BY staff_id ASC
+          LIMIT 1
+        `);
+        if (anyActiveStaff && anyActiveStaff[0]) {
+          staffId = anyActiveStaff[0].staff_id;
+          resolvedStaff = anyActiveStaff[0];
+          staffPosition = anyActiveStaff[0].position || 'Auditor Lapangan';
+        }
       }
     }
 
     if (!staffId) {
       return res.status(400).json({
         status: 'error',
-        message: 'Tidak dapat mengidentifikasi staf pelapor.',
+        message: 'Tidak dapat mengidentifikasi staf pelapor aktif.',
       });
     }
 
     const {
-      answers = [], // array of { taskId, answer: 'standard' | 'na', note, photo }
+      answers = [], // array of { taskId, answer: 'standard' | 'na' | 'issue', note, photo }
       notes,
       selfiePhoto,
       signature,
@@ -1529,79 +1875,101 @@ exports.submitStaffAudit = async (req, res) => {
     const answeredCount = answers.filter((a) => a.answer).length;
     const photoCount = answers.filter((a) => a.photo).length + (selfiePhoto ? 1 : 0);
 
-    const now = new Date();
-
-    // Periksa apakah waktu penyerahan melewati jam akhir shift jadwal (status terlambat)
-    const schedule = await prisma.schedule.findUnique({
-      where: { schedule_id: scheduleId },
-      include: {
-        store: true,
-        checklist_template: true,
-      },
-    });
-
-    // Cek apakah toko / jadwal sedang berstatus LIBUR hari ini
-    const wibTimestamp = now.getTime() + 7 * 60 * 60 * 1000;
-    const wibDate = new Date(wibTimestamp);
-    const yToday = wibDate.getUTCFullYear();
-    const mToday = String(wibDate.getUTCMonth() + 1).padStart(2, '0');
-    const dToday = String(wibDate.getUTCDate()).padStart(2, '0');
-    const todayDateStr = `${yToday}-${mToday}-${dToday}`;
-
-    let storeHolidays = [];
-    try {
-      storeHolidays = await prisma.$queryRawUnsafe(`
-        SELECT * FROM store_holiday 
-        WHERE deleted_at IS NULL 
-          AND status != 'Dibatalkan'
-          AND start_date <= $1::date 
-          AND end_date >= $1::date
-      `, todayDateStr);
-    } catch (e) {
-      storeHolidays = [];
-    }
-
-    const sStoreId = schedule?.store_id ? schedule.store_id.toString() : '';
-    const sStoreName = (schedule?.store?.store_name || '').trim().toLowerCase();
-    const isHolidayBlocked = storeHolidays.some((h) => {
-      const hStoreId = h.store_id ? h.store_id.toString() : '';
-      const hStoreName = (h.store_name || '').trim().toLowerCase();
-      const storeMatches = (hStoreId && hStoreId === sStoreId) || (hStoreName && hStoreName === sStoreName);
-      if (!storeMatches) return false;
-
-      const lType = h.libur_type || 'full';
-      if (lType === 'full') return true;
-
-      let hSchedules = [];
-      if (Array.isArray(h.schedules)) hSchedules = h.schedules.map(String);
-      else if (typeof h.schedules === 'string') {
-        try {
-          hSchedules = JSON.parse(h.schedules).map(String);
-        } catch {
-          hSchedules = [];
-        }
-      }
-      return hSchedules.includes(scheduleId.toString());
-    });
-
-    if (isHolidayBlocked) {
+    if (totalQuestions === 0) {
       return res.status(400).json({
         status: 'error',
-        message: 'Laporan audit tidak dapat diserahkan karena gerai toko sedang berstatus libur operasional.',
+        message: 'Jawaban butir checklist wajib diisi sebelum menyerahkan laporan.',
+      });
+    }
+
+    const now = new Date();
+    const wibNow = getWibDateParts(now);
+    const todayDateStr = wibNow.dateStr;
+
+    // Cek apakah jadwal berlaku hari ini
+    if (!doesScheduleApplyOnDate(schedule, todayDateStr, wibNow.dayOfWeekShort)) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Jadwal audit ini tidak berlaku atau belum dijadwalkan untuk hari ini.',
+      });
+    }
+
+    // Cek apakah toko / jadwal sedang berstatus LIBUR hari ini
+    const storeHolidays = await getActiveHolidaysOnDate(todayDateStr);
+    const holidayEval = evaluateHolidayForSchedule(schedule, todayDateStr, storeHolidays);
+
+    if (holidayEval.isHoliday) {
+      return res.status(400).json({
+        status: 'error',
+        message: `Laporan audit tidak dapat diserahkan karena gerai sedang libur (${holidayEval.reason}).`,
+      });
+    }
+
+    // Sinkronkan status kedaluwarsa & cek apakah laporan sudah pernah ada hari ini
+    await syncExpiredSchedulesToDb({ storeId: schedule.store_id });
+    const existingReports = await prisma.checklist_report.findMany({
+      where: { schedule_id: scheduleId },
+      orderBy: { created_at: 'desc' },
+    });
+    const isRecurring = isRecurringSchedule(schedule);
+
+    const existingCompleted = existingReports.find((r) => {
+      const isFinished =
+        r.status === 'submitted' ||
+        r.status === 'completed' ||
+        r.status === 'terlambat' ||
+        r.status === 'late' ||
+        r.status === 'submitted_late';
+      if (!isFinished) return false;
+      if (isRecurring) {
+        return formatDateString(r.completed_at || r.submitted_at || r.created_at) === todayDateStr;
+      }
+      return true;
+    });
+
+    if (existingCompleted) {
+      return res.status(409).json({
+        status: 'error',
+        message: 'Jadwal audit ini sudah selesai dikerjakan dan dilaporkan ke database.',
+      });
+    }
+
+    const existingNonCompliant = existingReports.find((r) => {
+      const isUndone = r.status === 'tidak_mengerjakan' || r.status === 'tidak_patuh';
+      if (!isUndone) return false;
+      if (isRecurring) {
+        return formatDateString(r.completed_at || r.submitted_at || r.created_at) === todayDateStr;
+      }
+      return true;
+    });
+
+    if (existingNonCompliant) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Jadwal audit ini telah ditutup otomatis sebagai Tidak Patuh dan tidak dapat diserahkan.',
       });
     }
 
     let isLate = false;
-    if (schedule?.end_time) {
+    if (schedule?.start_time || schedule?.end_time) {
+      const startTimeStr = formatTimeString(schedule.start_time);
       const endTimeStr = formatTimeString(schedule.end_time);
+      const [sH, sM] = startTimeStr.split(':').map(Number);
       const [eH, eM] = endTimeStr.split(':').map(Number);
-      const wibHours = (now.getUTCHours() + 7) % 24;
-      const currentMinutes = wibHours * 60 + now.getUTCMinutes();
+      const startMinutes = (isNaN(sH) ? 0 : sH) * 60 + (isNaN(sM) ? 0 : sM);
       const endMinutes = (isNaN(eH) ? 23 : eH) * 60 + (isNaN(eM) ? 0 : eM);
+      const currentMinutes = wibNow.currentMinutes;
       const toleranceMinutes = endMinutes + 60;
       const tolH = Math.floor(toleranceMinutes / 60) % 24;
       const tolM = toleranceMinutes % 60;
       const toleranceTimeStr = `${String(tolH).padStart(2, '0')}:${String(tolM).padStart(2, '0')}`;
+
+      if (currentMinutes < startMinutes) {
+        return res.status(400).json({
+          status: 'error',
+          message: `Jadwal audit belum dimulai. Jadwal baru dibuka pukul ${startTimeStr} WIB.`,
+        });
+      }
 
       // Tolak penyerahan jika sudah melewati batas toleransi 1 jam
       if (currentMinutes > toleranceMinutes) {
@@ -1625,13 +1993,19 @@ exports.submitStaffAudit = async (req, res) => {
     const compliancePercent = Math.max(0, Math.min(100, Math.round(((applicableTotal - noAnswers.length) / applicableTotal) * 100)));
     const calculatedScoreText = `${compliancePercent}%`;
 
+    const startDateObj = startedAt && !isNaN(new Date(startedAt).getTime()) ? new Date(startedAt) : now;
+    const durationMinute = Math.max(1, Math.min(1440, Math.round((now.getTime() - startDateObj.getTime()) / 60000)));
+
+    const resolvedSignerName = (signerName || '').trim() || resolvedStaff?.name || user?.fullName || 'Staf Lapangan';
+    const resolvedSignerRole = (signerRole || '').trim() || staffPosition || user?.position || 'Auditor Lapangan';
+
     const report = await prisma.checklist_report.create({
       data: {
         schedule_id: scheduleId,
         staff_id: staffId,
-        started_at: startedAt ? new Date(startedAt) : now,
+        started_at: startDateObj,
         completed_at: now,
-        duration_minute: 15,
+        duration_minute: durationMinute,
         status: reportStatus, // Simpan status terlambat di database jika melewati jam akhir
         total_questions: totalQuestions,
         answered_questions: answeredCount,
@@ -1716,8 +2090,8 @@ exports.submitStaffAudit = async (req, res) => {
           data: {
             report_id: report.report_id,
             caption: 'Foto Verifikasi Kehadiran Bertugas',
-            signer_name: signerName || user?.fullName || 'Staff Auditor',
-            signer_role: signerRole || user?.position || 'Auditor Lapangan',
+            signer_name: resolvedSignerName,
+            signer_role: resolvedSignerRole,
             file_url: Buffer.from(encryptedSelfie, 'utf8'),
             file_type: 'report_photo',
           },
@@ -1734,8 +2108,8 @@ exports.submitStaffAudit = async (req, res) => {
           data: {
             report_id: report.report_id,
             caption: 'Tanda Tangan Digital Verifikasi Staff',
-            signer_name: signerName || user?.fullName || 'Staff Auditor',
-            signer_role: signerRole || user?.position || 'Auditor Lapangan',
+            signer_name: resolvedSignerName,
+            signer_role: resolvedSignerRole,
             file_url: Buffer.from(encryptedSig, 'utf8'),
             file_type: 'signature',
           },
@@ -1745,11 +2119,8 @@ exports.submitStaffAudit = async (req, res) => {
       }
     }
 
-    const reportNumber = `CHK-${formatDateString(now).replace(/-/g, '')}-${report.report_id.toString().padStart(4, '0')}`;
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
-    const wibHoursStr = String((now.getUTCHours() + 7) % 24).padStart(2, '0');
-    const wibMinsStr = String(now.getUTCMinutes()).padStart(2, '0');
-    const submittedAtFormatted = `${now.getDate()} ${months[now.getMonth()]} ${now.getFullYear()}, ${wibHoursStr}:${wibMinsStr} WIB`;
+    const reportNumber = `CHK-${todayDateStr.replace(/-/g, '')}-${report.report_id.toString().padStart(4, '0')}`;
+    const submittedAtFormatted = wibNow.formattedDateTime;
 
     return res.status(201).json({
       status: 'success',
@@ -1764,11 +2135,11 @@ exports.submitStaffAudit = async (req, res) => {
         totalQuestions,
         answeredQuestions: answeredCount,
         scoreText: calculatedScoreText,
-        storeName: schedule?.store?.store_name || user?.storeName || 'Mie Gacoan - Malang Ciliwung',
+        storeName: schedule?.store?.store_name || user?.storeName || 'Toko Cabang',
         storeCode: `ST-${schedule?.store?.store_id?.toString() || '01'}`,
         scheduleTitle: schedule?.title || schedule?.checklist_template?.template_name || 'Jadwal Audit Operasional Reguler',
-        signerName: signerName || user?.fullName || 'Staf Lapangan',
-        signerRole: signerRole || user?.position || 'Auditor Lapangan',
+        signerName: resolvedSignerName,
+        signerRole: resolvedSignerRole,
         submittedAt: now.toISOString(),
         submittedAtFormatted,
       },
@@ -1789,10 +2160,51 @@ exports.submitStaffAudit = async (req, res) => {
  */
 exports.getReportDetail = async (req, res) => {
   try {
-    const rawId = req.params.id ? req.params.id.toString().replace(/\D/g, '') : '';
+    const user = await extractUser(req);
+    const isStaffUser =
+      user &&
+      (user.role === 'Staff' ||
+       user.role === 'Auditor Lapangan' ||
+       user.id?.toString().startsWith('staff-') ||
+       user.role?.toLowerCase().includes('staff') ||
+       user.role?.toLowerCase().includes('auditor'));
+
+    let viewerStaffId = null;
+    let viewerStoreId = null;
+    if (isStaffUser) {
+      let st = null;
+      const cleanStaffId = user.rawId || user.id?.toString().replace(/^staff-/, '');
+      if (cleanStaffId && !isNaN(Number(cleanStaffId))) {
+        st = await prisma.staff.findUnique({ where: { staff_id: BigInt(cleanStaffId) } });
+      }
+      if (!st && user.email) {
+        st = await prisma.staff.findUnique({ where: { email: user.email.trim().toLowerCase() } });
+      }
+      if (st) {
+        const extra = await getStaffExtra(st.staff_id);
+        if (extra.deleted_at || st.status === 'inactive' || st.status === 'Nonaktif') {
+          return res.status(403).json({
+            status: 'error',
+            message: 'Akun staf Anda berstatus Nonaktif atau telah dihapus.',
+          });
+        }
+        viewerStaffId = st.staff_id;
+        viewerStoreId = st.store_id;
+      }
+    }
+
+    const rawParam = req.params.id ? req.params.id.toString() : '';
+    const isLatestRequest = !rawParam || rawParam.toLowerCase() === 'latest';
+    const rawId = !isLatestRequest ? rawParam.replace(/\D/g, '') : '';
     let report = null;
 
-    if (rawId) {
+    if (!isLatestRequest) {
+      if (!rawId) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'ID laporan audit tidak valid.',
+        });
+      }
       report = await prisma.checklist_report.findUnique({
         where: { report_id: BigInt(rawId) },
         include: {
@@ -1807,11 +2219,24 @@ exports.getReportDetail = async (req, res) => {
           attachment: true,
         },
       });
-    }
-
-    // Jika tidak ditemukan berdasarkan ID, ambil laporan terbaru dari database
-    if (!report) {
+      if (!report) {
+        return res.status(404).json({
+          status: 'error',
+          message: 'Laporan audit tidak ditemukan di database.',
+        });
+      }
+      if (isStaffUser && viewerStoreId && report.schedule?.store_id?.toString() !== viewerStoreId.toString()) {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Anda tidak memiliki akses ke laporan audit gerai lain.',
+        });
+      }
+    } else {
+      const latestWhere = viewerStoreId
+        ? { schedule: { store_id: viewerStoreId } }
+        : (viewerStaffId ? { staff_id: viewerStaffId } : {});
       report = await prisma.checklist_report.findFirst({
+        where: latestWhere,
         include: {
           schedule: {
             include: {
@@ -1838,32 +2263,38 @@ exports.getReportDetail = async (req, res) => {
     }
 
     const dateObj = report.completed_at || report.created_at || new Date();
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
-    const wibHours = String((dateObj.getUTCHours() + 7) % 24).padStart(2, '0');
-    const wibMins = String(dateObj.getUTCMinutes()).padStart(2, '0');
-    const submittedAtFormatted = `${dateObj.getDate()} ${months[dateObj.getMonth()]} ${dateObj.getFullYear()}, ${wibHours}:${wibMins} WIB`;
+    const wibDateParts = getWibDateParts(dateObj);
+    const submittedAtFormatted = wibDateParts.formattedDateTime;
 
-    const totalQuestions = report.total_questions || report.checklist_answer?.length || 8;
-    const answeredCount = report.answered_questions || totalQuestions;
-    const noAnswers = report.checklist_answer?.filter(a => a.answer === 'no') || [];
-    const compliancePercent =
-      totalQuestions > 0
-        ? Math.round(((totalQuestions - noAnswers.length) / totalQuestions) * 100)
-        : 100;
+    const isNonCompliant = report.status === 'tidak_mengerjakan' || report.status === 'tidak_patuh';
+    const answersList = report.checklist_answer || [];
+    const totalQuestions = report.total_questions || answersList.length || 0;
+    const answeredCount = isNonCompliant ? 0 : (report.answered_questions ?? totalQuestions);
 
+    let compliancePercent = 0;
+    if (!isNonCompliant && totalQuestions > 0) {
+      const noCount = answersList.filter((a) => a.answer === 'no').length;
+      const naCount = answersList.filter((a) => a.answer === 'N/A' || a.answer === 'na').length;
+      const applicableTotal = Math.max(1, totalQuestions - naCount);
+      compliancePercent = Math.max(0, Math.min(100, Math.round(((applicableTotal - noCount) / applicableTotal) * 100)));
+    }
+
+    const repStaffExtra = await getStaffExtra(report.staff_id);
     const sigAttachment = report.attachment?.find(
       (a) => a.file_type === 'signature' || a.signer_name
     );
-    const signerName =
-      sigAttachment?.signer_name || report.staff?.name || 'Staff Lapangan';
-    const signerRole =
-      sigAttachment?.signer_role || report.staff?.position || 'Auditor Lapangan';
+    const signerName = isNonCompliant
+      ? '-'
+      : (sigAttachment?.signer_name || report.staff?.name || 'Staf Lapangan');
+    const signerRole = isNonCompliant
+      ? null
+      : (sigAttachment?.signer_role || repStaffExtra.position || 'Auditor Lapangan');
 
     const isLate =
       report.status === 'terlambat' ||
       report.status === 'late' ||
       report.status === 'submitted_late';
-    const reportNumber = `CHK-${formatDateString(dateObj).replace(/-/g, '')}-${report.report_id.toString().padStart(4, '0')}`;
+    const reportNumber = `CHK-${wibDateParts.dateStr.replace(/-/g, '')}-${report.report_id.toString().padStart(4, '0')}`;
 
     return res.status(200).json({
       status: 'success',
@@ -1872,6 +2303,7 @@ exports.getReportDetail = async (req, res) => {
         reportNumber,
         status: report.status || (isLate ? 'terlambat' : 'submitted'),
         isLate,
+        isNonCompliant,
         totalQuestions,
         answeredQuestions: answeredCount,
         scoreText: `${compliancePercent}%`,
@@ -1908,18 +2340,61 @@ exports.getMyHistory = async (req, res) => {
     let staffId = null;
     let storeId = null;
 
-    if (user?.id) {
-      const rawStaffId = user.id.toString().replace(/^staff-/, '');
-      if (!isNaN(Number(rawStaffId))) staffId = BigInt(rawStaffId);
-    }
-    if (!staffId && user?.email) {
+    const isStaffUser =
+      user &&
+      (user.role === 'Staff' ||
+       user.role === 'Auditor Lapangan' ||
+       user.id?.toString().startsWith('staff-') ||
+       user.role?.toLowerCase().includes('staff') ||
+       user.role?.toLowerCase().includes('auditor'));
+
+    // 1. Prioritaskan resolusi store_id dari database tabel staff (bukan cache client/query param)
+    if (isStaffUser) {
+      let st = null;
+      const cleanStaffId = user.rawId || user.id?.toString().replace(/^staff-/, '');
+      if (cleanStaffId && !isNaN(Number(cleanStaffId))) {
+        st = await prisma.staff.findUnique({ where: { staff_id: BigInt(cleanStaffId) } });
+      }
+      if (!st && user.email) {
+        st = await prisma.staff.findUnique({ where: { email: user.email.trim().toLowerCase() } });
+      }
+      if (st) {
+        const extra = await getStaffExtra(st.staff_id);
+        if (extra.deleted_at || st.status === 'inactive' || st.status === 'Nonaktif') {
+          return res.status(403).json({
+            status: 'error',
+            message: 'Akun staf Anda berstatus Nonaktif atau telah dihapus.',
+          });
+        }
+        staffId = st.staff_id;
+        storeId = st.store_id;
+      }
+    } else if (user?.email) {
       const st = await prisma.staff.findUnique({
         where: { email: user.email.trim().toLowerCase() },
       });
       if (st) {
+        const extra = await getStaffExtra(st.staff_id);
+        if (extra.deleted_at || st.status === 'inactive' || st.status === 'Nonaktif') {
+          return res.status(403).json({
+            status: 'error',
+            message: 'Akun staf Anda berstatus Nonaktif atau telah dihapus.',
+          });
+        }
         staffId = st.staff_id;
         storeId = st.store_id;
       }
+    }
+
+    if (req.query.staffId && !isStaffUser) {
+      try {
+        const cleanStaffId = req.query.staffId.toString().replace(/^staff-/, '');
+        const st = await prisma.staff.findUnique({ where: { staff_id: BigInt(cleanStaffId) } });
+        if (st) {
+          staffId = st.staff_id;
+          storeId = st.store_id;
+        }
+      } catch (e) {}
     }
 
     if (!storeId) {
@@ -1957,8 +2432,8 @@ exports.getMyHistory = async (req, res) => {
       ],
     });
 
-    // Fallback: Jika gerai belum memiliki laporan, tampilkan seluruh laporan riwayat di DB agar data sinkron
-    if (reports.length === 0) {
+    // Jangan bocorkan laporan gerai lain jika gerai staf ini memang belum memiliki riwayat
+    if (reports.length === 0 && !storeId) {
       reports = await prisma.checklist_report.findMany({
         include: {
           schedule: {
@@ -1978,28 +2453,35 @@ exports.getMyHistory = async (req, res) => {
       });
     }
 
+    const staffExtrasMap = await getStaffExtrasMap(reports.map((r) => r.staff_id));
     const groupsMap = new Map();
 
     for (const r of reports) {
       const dateObj = r.completed_at || r.created_at || new Date();
       const dateKey = formatDateString(dateObj);
 
-      const totalAnswers = r.checklist_answer?.length || r.total_questions || 0;
-      const noAnswers = r.checklist_answer?.filter(a => a.answer === 'no') || [];
+      const answersList = r.checklist_answer || [];
+      const totalAnswers = r.total_questions || answersList.length || 0;
+      const noAnswers = answersList.filter(a => a.answer === 'no');
+      const naAnswers = answersList.filter(a => a.answer === 'N/A' || a.answer === 'na');
       const hasIssues = noAnswers.length > 0;
+      const applicableTotal = Math.max(1, totalAnswers - naAnswers.length);
 
       const isNonCompliant = r.status === 'tidak_mengerjakan' || r.status === 'tidak_patuh';
       let scoreText = '100% Sesuai';
       if (isNonCompliant) {
         scoreText = '0% (Tidak Patuh)';
       } else if (totalAnswers > 0) {
-        const yesCount = totalAnswers - noAnswers.length;
-        const pct = Math.round((yesCount / totalAnswers) * 100);
+        const compliantCount = Math.max(0, applicableTotal - noAnswers.length);
+        const pct = Math.max(0, Math.min(100, Math.round((compliantCount / applicableTotal) * 100)));
         scoreText = `${pct}% Skor SOP`;
+      } else {
+        scoreText = '0% Skor SOP';
       }
 
-      let isLate = false;
-      if (!isNonCompliant && r.schedule?.end_time && (r.completed_at || r.created_at)) {
+      const isExplicitLate = r.status === 'terlambat' || r.status === 'late' || r.status === 'submitted_late';
+      let isLate = isExplicitLate;
+      if (!isNonCompliant && !isLate && r.schedule?.end_time && (r.completed_at || r.created_at)) {
         const schedEndTime = formatTimeString(r.schedule.end_time);
         const reportTime = formatTimeString(r.completed_at || r.created_at);
         const [eH, eM] = schedEndTime.split(':').map(Number);
@@ -2019,8 +2501,8 @@ exports.getMyHistory = async (req, res) => {
         rightBadge = 'Tidak Mengerjakan';
       } else if (hasIssues) {
         statusType = 'temuan';
-        statusBadge = `${noAnswers.length} Temuan`;
-        rightBadge = `${noAnswers.length} Temuan`;
+        statusBadge = isLate ? `${noAnswers.length} Temuan (Terlambat)` : `${noAnswers.length} Temuan`;
+        rightBadge = isLate ? 'Terlambat' : `${noAnswers.length} Temuan`;
       } else if (isLate) {
         statusType = 'terlambat';
         statusBadge = 'Terlambat';
@@ -2029,10 +2511,11 @@ exports.getMyHistory = async (req, res) => {
 
       const completedTimeStr = formatTimeString(dateObj);
 
-      // Ambil nama dan role auditor dari attachment tanda tangan atau staff
+      // Ambil nama dan role auditor dari attachment tanda tangan atau staff DB
       const sigAttachment = r.attachment?.find(a => a.file_type === 'signature' || a.signer_name);
-      const auditor = sigAttachment?.signer_name || r.staff?.name || user?.fullName || 'Staf Lapangan';
-      const auditorRole = sigAttachment?.signer_role || r.staff?.position || 'Auditor Lapangan';
+      const staffExtra = r.staff_id ? staffExtrasMap.get(r.staff_id.toString()) : null;
+      const auditor = isNonCompliant ? '-' : (sigAttachment?.signer_name || r.staff?.name || user?.fullName || 'Staf Lapangan');
+      const auditorRole = isNonCompliant ? null : (sigAttachment?.signer_role || staffExtra?.position || 'Auditor Lapangan');
 
       const firstIssueComment = noAnswers.find(a => a.comment)?.comment;
       const notes = isNonCompliant
@@ -2045,17 +2528,18 @@ exports.getMyHistory = async (req, res) => {
         title: r.schedule?.title || r.schedule?.checklist_template?.template_name || 'Checklist Operasional',
         auditor,
         auditorRole,
-        itemCount: isNonCompliant ? 'Tidak Dikerjakan' : `${r.total_questions || totalAnswers || 8} Item Checklist`,
+        itemCount: isNonCompliant ? 'Tidak Dikerjakan' : `${totalAnswers} Item Checklist`,
         scoreText,
         statusType,
         statusBadge,
         rightBadge,
+        isLate: Boolean(isLate && !isNonCompliant),
         isGpsValid: !isNonCompliant,
-        storeName: r.schedule?.store?.store_name || user?.storeName || 'Mie Gacoan',
+        storeName: r.schedule?.store?.store_name || user?.storeName || 'Toko Cabang',
         notes,
         completedAt: dateObj.toISOString(),
-        totalQuestions: r.total_questions || totalAnswers,
-        answeredQuestions: isNonCompliant ? 0 : (r.answered_questions || totalAnswers),
+        totalQuestions: totalAnswers,
+        answeredQuestions: isNonCompliant ? 0 : (r.answered_questions ?? totalAnswers),
         durationMinute: r.duration_minute || 0,
         issues: noAnswers.map(a => ({
           taskId: a.task_id?.toString(),
@@ -2069,21 +2553,20 @@ exports.getMyHistory = async (req, res) => {
       groupsMap.get(dateKey).push(item);
     }
 
-    const nowForHistory = new Date();
-    const wibNowTimestamp = nowForHistory.getTime() + 7 * 60 * 60 * 1000;
+    const wibNowTimestamp = Date.now() + 7 * 60 * 60 * 1000;
     const wibNowDate = new Date(wibNowTimestamp);
-    const todayWibStr = `${wibNowDate.getUTCFullYear()}-${String(wibNowDate.getUTCMonth() + 1).padStart(2, '0')}-${String(wibNowDate.getUTCDate()).padStart(2, '0')}`;
-    const todayStr = todayWibStr;
+    const todayStr = `${wibNowDate.getUTCFullYear()}-${String(wibNowDate.getUTCMonth() + 1).padStart(2, '0')}-${String(wibNowDate.getUTCDate()).padStart(2, '0')}`;
     const yesterdayDate = new Date(wibNowTimestamp - 24 * 60 * 60 * 1000);
     const yesterdayStr = `${yesterdayDate.getUTCFullYear()}-${String(yesterdayDate.getUTCMonth() + 1).padStart(2, '0')}-${String(yesterdayDate.getUTCDate()).padStart(2, '0')}`;
 
     const resultGroups = [];
     for (const [dKey, items] of groupsMap.entries()) {
-      const dObj = new Date(dKey);
+      const dObj = new Date(`${dKey}T12:00:00Z`);
       const dateFormatted = dObj.toLocaleDateString('id-ID', {
         day: 'numeric',
         month: 'short',
         year: 'numeric',
+        timeZone: 'Asia/Jakarta',
       }).toUpperCase();
 
       let dateHeader = dateFormatted;
@@ -2094,6 +2577,7 @@ exports.getMyHistory = async (req, res) => {
       }
 
       resultGroups.push({
+        dateKey: dKey,
         dateHeader,
         itemCountLabel: `${items.length} Checklist`,
         items,
@@ -2101,13 +2585,25 @@ exports.getMyHistory = async (req, res) => {
     }
 
     let primaryStore = null;
-    if (reports.length > 0 && reports[0].schedule?.store) {
+    if (storeId) {
+      const activeStore = await prisma.store.findUnique({ where: { store_id: storeId } });
+      if (activeStore) {
+        primaryStore = {
+          id: activeStore.store_id.toString(),
+          name: activeStore.store_name,
+          location: activeStore.city || activeStore.address || 'Cabang Gerai',
+          code: `ST-${activeStore.store_id}`,
+          address: activeStore.address || 'Alamat gerai belum diatur',
+        };
+      }
+    } else if (reports.length > 0 && reports[0].schedule?.store) {
       const s = reports[0].schedule.store;
       primaryStore = {
+        id: s.store_id.toString(),
         name: s.store_name,
-        location: s.city || 'Cabang Gerai',
-        code: `STR-${s.store_id}`,
-        address: s.address || 'Alamat gerai penugasan staf',
+        location: s.city || s.address || 'Cabang Gerai',
+        code: `ST-${s.store_id}`,
+        address: s.address || 'Alamat gerai belum diatur',
       };
     }
 

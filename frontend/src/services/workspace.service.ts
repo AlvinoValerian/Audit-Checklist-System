@@ -33,45 +33,70 @@ const getAuthHeaders = (): Record<string, string> => {
   return headers;
 };
 
+let inFlightWorkspaceFetch: Promise<Workspace[]> | null = null;
+let lastWorkspaceFetchTime = 0;
+
 export const WorkspaceService = {
   cachedWorkspaces: [] as Workspace[],
 
   /**
    * Mengambil data workspace yang HANYA berelasi dengan akun yang sedang login
+   * Dilengkapi in-flight request deduplication & short-lived caching (5 detik)
    */
-  async fetchAll(): Promise<Workspace[]> {
-    try {
-      const user = AuthService.getCurrentUser();
-      const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
-
-      let queryParam = "";
-      if (rawId && !rawId.startsWith("adm-")) {
-        queryParam = `?superAdminId=${rawId}`;
-      } else if (user?.email) {
-        queryParam = `?email=${encodeURIComponent(user.email)}`;
-      }
-
-      const res = await fetch(`${BACKEND_URL}/api/workspaces${queryParam}`, {
-        method: "GET",
-        headers: getAuthHeaders(),
-        cache: "no-store",
-      });
-
-      if (!res.ok) {
-        throw new Error(`Gagal mengambil data dari server (HTTP ${res.status})`);
-      }
-
-      const json = await res.json();
-      if (json.status === "success" && Array.isArray(json.data)) {
-        this.cachedWorkspaces = json.data;
-        return json.data;
-      }
-
-      return [];
-    } catch (error) {
-      console.warn("Backend API offline or unreachable:", error);
+  async fetchAll(force = false): Promise<Workspace[]> {
+    const now = Date.now();
+    if (!force && this.cachedWorkspaces.length > 0 && now - lastWorkspaceFetchTime < 5000) {
       return this.cachedWorkspaces;
     }
+
+    if (inFlightWorkspaceFetch) {
+      return inFlightWorkspaceFetch;
+    }
+
+    inFlightWorkspaceFetch = (async () => {
+      try {
+        const user = AuthService.getCurrentUser();
+        const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
+
+        let queryParam = "";
+        if (rawId && !rawId.startsWith("adm-")) {
+          queryParam = `?superAdminId=${rawId}`;
+        } else if (user?.email) {
+          queryParam = `?email=${encodeURIComponent(user.email)}`;
+        }
+
+        const res = await fetch(`${BACKEND_URL}/api/workspaces${queryParam}`, {
+          method: "GET",
+          headers: getAuthHeaders(),
+          cache: "no-store",
+        });
+
+        if (!res.ok) {
+          throw new Error(`Gagal mengambil data dari server (HTTP ${res.status})`);
+        }
+
+        const json = await res.json();
+        if (json.status === "success" && Array.isArray(json.data)) {
+          this.cachedWorkspaces = json.data;
+          lastWorkspaceFetchTime = Date.now();
+          return json.data;
+        }
+
+        return [];
+      } catch (error) {
+        console.warn("Backend API offline or unreachable:", error);
+        return this.cachedWorkspaces;
+      } finally {
+        inFlightWorkspaceFetch = null;
+      }
+    })();
+
+    return inFlightWorkspaceFetch;
+  },
+
+  invalidateCache() {
+    lastWorkspaceFetchTime = 0;
+    inFlightWorkspaceFetch = null;
   },
 
   getAll(): Workspace[] {
@@ -110,6 +135,7 @@ export const WorkspaceService = {
       throw new Error(json.message || `Gagal membuat workspace di server (HTTP ${res.status})`);
     }
 
+    this.invalidateCache();
     return json.data;
   },
 
@@ -131,6 +157,7 @@ export const WorkspaceService = {
       throw new Error(json.message || `Gagal memperbarui workspace di server (HTTP ${res.status})`);
     }
 
+    this.invalidateCache();
     return json.data;
   },
 
@@ -151,6 +178,7 @@ export const WorkspaceService = {
       throw new Error(json.message || `Gagal menghapus workspace di server (HTTP ${res.status})`);
     }
 
+    this.invalidateCache();
     return true;
   },
 

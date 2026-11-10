@@ -49,7 +49,6 @@ const formatStore = (s) => {
   const rawPic = s.store_picture;
   let resolvedPicture = null;
   let isImageEncrypted = false;
-  let encryptedPayload = null;
 
   if (rawPic && typeof rawPic === 'string' && rawPic.trim() !== '') {
     const hasEncryptedTag = isEncrypted(rawPic);
@@ -60,7 +59,6 @@ const formatStore = (s) => {
     if (resolvedPicture && resolvedPicture.includes('storage.googleapis.com')) {
       resolvedPicture = getStoreVisual(s.store_name, s.store_id);
     }
-    encryptedPayload = hasEncryptedTag ? rawPic : encryptImage(resolvedPicture);
   }
 
   return {

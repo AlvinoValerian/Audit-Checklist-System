@@ -18,7 +18,7 @@ import { toast } from "sonner";
 import { TokoService } from "@/services/toko.service";
 import { TemplateService } from "@/services/template.service";
 import { AuthService } from "@/lib/auth";
-import { calculateDuration, to24HourString } from "@/services/schedule.service";
+import { calculateDuration, getWibDateParts, to24HourString } from "@/services/schedule.service";
 
 interface CreateSchedulePanelProps {
   isOpen: boolean;
@@ -505,6 +505,7 @@ export default function CreateSchedulePanel({
 
     setIsSubmittingLocal(true);
     try {
+      const { dateStr: wibTodayStr } = getWibDateParts(new Date());
       if (isEdit) {
         // Mode Edit: edit 1 jadwal toko spesifik
         const chosenStore =
@@ -519,7 +520,7 @@ export default function CreateSchedulePanel({
           scheduleName: finalName,
           templateId: resolvedTemplateId,
           templateName: resolvedTemplateName,
-          date: targetData?.date || new Date().toISOString().split("T")[0],
+          date: targetData?.date || wibTodayStr,
           startTime,
           endTime,
           timeRange: `${startTime} - ${endTime}`,
@@ -527,7 +528,7 @@ export default function CreateSchedulePanel({
           selectedDays: recurrence === "Setiap Hari" ? [...ALL_DAYS] : selectedDays,
           status: finalStatus,
           notes: notes.trim() || undefined,
-          createdAt: targetData?.createdAt || new Date().toISOString().split("T")[0],
+          createdAt: targetData?.createdAt || wibTodayStr,
           auditorName: targetData?.auditorName,
           workspaceId: targetData?.workspaceId || workspaceId || AuthService.getActiveWorkspace()?.id,
         });
@@ -544,7 +545,7 @@ export default function CreateSchedulePanel({
             scheduleName: finalName,
             templateId: resolvedTemplateId,
             templateName: resolvedTemplateName,
-            date: new Date().toISOString().split("T")[0],
+            date: wibTodayStr,
             startTime,
             endTime,
             timeRange: `${startTime} - ${endTime}`,
@@ -552,7 +553,7 @@ export default function CreateSchedulePanel({
             selectedDays: recurrence === "Setiap Hari" ? [...ALL_DAYS] : selectedDays,
             status: finalStatus,
             notes: notes.trim() || undefined,
-            createdAt: new Date().toISOString().split("T")[0],
+            createdAt: wibTodayStr,
             workspaceId: workspaceId || AuthService.getActiveWorkspace()?.id,
           };
         });

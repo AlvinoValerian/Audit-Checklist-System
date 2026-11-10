@@ -83,6 +83,10 @@ interface ScheduleDetail {
   isLate?: boolean;
   isExpired?: boolean;
   isLocked?: boolean;
+  isHoliday?: boolean;
+  holidayReason?: string | null;
+  isNotScheduledToday?: boolean;
+  isCompleted?: boolean;
   canStart?: boolean;
   toleranceTime?: string;
   status?: string;
@@ -99,6 +103,13 @@ interface ScheduleDetail {
   };
   totalQuestions: number;
   tasks: QuestionItem[];
+}
+
+function getTodayWibDateStr(): string {
+  const wibDate = new Date(Date.now() + 7 * 60 * 60 * 1000);
+  return `${wibDate.getUTCFullYear()}-${String(wibDate.getUTCMonth() + 1).padStart(2, "0")}-${String(
+    wibDate.getUTCDate()
+  ).padStart(2, "0")}`;
 }
 
 // Rumus Haversine menghitung jarak dalam satuan meter
@@ -121,16 +132,17 @@ function PengerjaanContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // Kamera Live & Viewfinder Refs
+  // Kamera Live & Viewfinder Refs (Hanya Kamera Langsung, Tanpa Galeri)
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraCancelledRef = useRef<boolean>(false);
 
   const [isFullscreenMode, setIsFullscreenMode] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
 
   const scheduleId = searchParams.get("id") || "";
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [scheduleData, setScheduleData] = useState<ScheduleDetail | null>(null);
   const [questions, setQuestions] = useState<QuestionItem[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(0);
@@ -173,6 +185,8 @@ function PengerjaanContent() {
 
     const fetchSchedule = async () => {
       setIsLoading(true);
+      setLoadError(null);
+      const todayStr = getTodayWibDateStr();
       try {
         const token = AuthService.getToken();
         const headers: Record<string, string> = {};
@@ -185,11 +199,12 @@ function PengerjaanContent() {
             ? user.id.replace(/^staff-/, "").replace(/^sa-/, "").replace(/^adm-/, "")
             : undefined);
         if (rawId) headers["x-user-id"] = rawId;
+        if (user?.storeId) headers["x-store-id"] = user.storeId.toString();
 
         let res: Response | null = null;
         try {
           res = await fetch(`/api/staff/schedules/${scheduleId}`, { headers, cache: "no-store" });
-          if (!res || !res.ok) throw new Error(`Fetch /api/staff/schedules status: ${res?.status}`);
+          if (!res || res.status >= 500) throw new Error(`Fetch /api/staff/schedules status: ${res?.status}`);
         } catch {
           res = await fetch(`http://127.0.0.1:5000/api/staff/schedules/${scheduleId}`, {
             headers,
@@ -197,30 +212,58 @@ function PengerjaanContent() {
           });
         }
 
+        if (res && (res.status === 401 || res.status === 403)) {
+          const errJson = await res.json().catch(() => null);
+          toast.error(errJson?.message || "Akses ditolak atau sesi Anda telah berakhir.");
+          if (res.status === 401) {
+            AuthService.logout();
+            router.replace("/login");
+          } else {
+            router.replace("/jadwal-staff");
+          }
+          return;
+        }
+
+        if (res && (res.status === 404 || res.status === 400)) {
+          const errJson = await res.json().catch(() => null);
+          toast.error(errJson?.message || "Jadwal audit tidak ditemukan di database.");
+          router.replace("/jadwal-staff");
+          return;
+        }
+
         if (res && res.ok) {
           const json = await res.json();
           if (json.status === "success" && json.data) {
             const data: ScheduleDetail = json.data;
 
-            // Blokir jika jadwal sudah kedaluwarsa melewati batas toleransi 1 jam
-            if (data.canStart === false || data.isExpired || data.status === "Kedaluwarsa" || data.status === "Tidak Dikerjakan") {
-              toast.error("Audit Kedaluwarsa: Batas toleransi pengerjaan 1 jam telah habis. Jadwal ditutup otomatis sebagai Tidak Patuh.");
+            // Blokir jika jadwal libur, selesai, terkunci, bukan hari ini, atau sudah kedaluwarsa
+            if (data.canStart === false || data.isExpired || data.isHoliday || data.isCompleted || data.isLocked || data.isNotScheduledToday) {
+              if (data.isCompleted || data.status === "Selesai") {
+                toast.info("Jadwal audit ini sudah selesai dikerjakan dan dilaporkan.");
+              } else if (data.isHoliday || data.status === "Libur") {
+                toast.info(`Gerai sedang berstatus Libur Operasional (${data.holidayReason || "Libur"}).`);
+              } else if (data.isLocked || data.status === "Terkunci") {
+                toast.info(`Jadwal audit baru dibuka pukul ${data.timeRange.split("-")[0]?.trim() || "shift"}.`);
+              } else if (data.isNotScheduledToday) {
+                toast.error("Jadwal audit ini tidak berlaku untuk hari ini.");
+              } else {
+                toast.error("Audit Kedaluwarsa: Batas toleransi pengerjaan 1 jam telah habis. Jadwal ditutup otomatis sebagai Tidak Patuh.");
+              }
               router.replace("/jadwal-staff");
               return;
             }
 
             // Peringatan jika pengerjaan dalam masa toleransi keterlambatan
             if (data.isLate) {
-              toast.warning(`Peringatan: Jadwal audit ini dikerjakan dalam masa toleransi keterlambatan (hingga ${data.toleranceTime || '1 jam setelah jadwal'} WIB). Status laporan akan tercatat Terlambat.`);
+              toast.warning(`Peringatan: Jadwal audit ini dikerjakan dalam masa toleransi keterlambatan (hingga ${data.toleranceTime || "1 jam setelah jadwal"} WIB). Status laporan akan tercatat Terlambat.`);
             }
 
             setScheduleData(data);
             const taskList: QuestionItem[] = Array.isArray(data.tasks) ? data.tasks : [];
             setQuestions(taskList);
+            const validTaskIds = new Set(taskList.map((t) => t.id));
 
             // Cek apakah ada progres audit tersimpan hari ini di localStorage
-            const now = new Date();
-            const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
             let initialConditions: Record<number, ConditionType> = {};
             let initialPhotos: Record<number, string> = {};
             let initialMetas: Record<number, PhotoMeta> = {};
@@ -230,18 +273,39 @@ function PengerjaanContent() {
 
             try {
               const saveKey = `staff_saved_audit_${scheduleId}`;
-              const draftStr = localStorage.getItem(saveKey) || localStorage.getItem("staff_active_audit");
+              const specificDraftStr = localStorage.getItem(saveKey);
+              const activeDraftStr = localStorage.getItem("staff_active_audit");
+              const draftStr = specificDraftStr || activeDraftStr;
               if (draftStr) {
                 const draft = JSON.parse(draftStr);
-                // Validasi hari: aturan save hanya berlaku untuk hari pengerjaan itu saja
+                // Validasi hari (WIB) & kesesuaian scheduleId
                 if (draft.savedDate && draft.savedDate !== todayStr) {
                   localStorage.removeItem(saveKey);
-                  localStorage.removeItem("staff_active_audit");
+                  if (activeDraftStr) {
+                    try {
+                      const activeParsed = JSON.parse(activeDraftStr);
+                      if (activeParsed.scheduleId === scheduleId) {
+                        localStorage.removeItem("staff_active_audit");
+                      }
+                    } catch {}
+                  }
                 } else if (!draft.scheduleId || draft.scheduleId === scheduleId) {
-                  initialConditions = draft.selectedConditions || {};
-                  initialPhotos = draft.photos || {};
-                  initialMetas = draft.photoMetas || {};
-                  initialNotes = draft.notes || {};
+                  Object.entries(draft.selectedConditions || {}).forEach(([k, v]) => {
+                    const numId = Number(k);
+                    if (validTaskIds.has(numId)) initialConditions[numId] = v as ConditionType;
+                  });
+                  Object.entries(draft.photos || {}).forEach(([k, v]) => {
+                    const numId = Number(k);
+                    if (validTaskIds.has(numId)) initialPhotos[numId] = String(v);
+                  });
+                  Object.entries(draft.photoMetas || {}).forEach(([k, v]) => {
+                    const numId = Number(k);
+                    if (validTaskIds.has(numId)) initialMetas[numId] = v as PhotoMeta;
+                  });
+                  Object.entries(draft.notes || {}).forEach(([k, v]) => {
+                    const numId = Number(k);
+                    if (validTaskIds.has(numId)) initialNotes[numId] = String(v);
+                  });
                   savedStartTime = draft.startedAt || savedStartTime;
                   if (typeof draft.lastSavedIndex === "number" && draft.lastSavedIndex >= 0) {
                     resumeIndex = draft.lastSavedIndex;
@@ -278,156 +342,58 @@ function PengerjaanContent() {
             } else {
               setCurrentQuestionIndex(0);
             }
+            return;
           }
-        } else {
-          // Fallback data SOP Checklist 8 Butir persis sesuai screenshot
-          const mockTasks: QuestionItem[] = [
-            {
-              id: 1,
-              sopCode: "ITEM SOP #01",
-              isCritical: false,
-              isPhotoRequired: false,
-              category: "Area Bar & Peralatan",
-              title: "Pengecekan kebersihan meja bar dan grinder kopi",
-              defaultStandard: "Ya, Sesuai Standar",
-              defaultStandardSub: "Kondisi area kerja bersih & higienis",
-              defaultIssue: "Tidak / Bermasalah",
-              defaultIssueSub: "Terdapat sisa bubuk kopi menumpuk di meja bar",
-              defaultNA: "Tidak Relevan / N/A",
-              defaultNASub: "Meja bar sedang perbaikan",
-            },
-            {
-              id: 2,
-              sopCode: "ITEM SOP #02",
-              isCritical: true,
-              isPhotoRequired: true,
-              category: "Area Bar & Peralatan",
-              title: "Sanitasi pitcher susu dan steam wand mesin espresso",
-              defaultStandard: "Ya, Sesuai Standar",
-              defaultStandardSub: "Peralatan steril dan higienis",
-              defaultIssue: "Tidak / Bermasalah",
-              defaultIssueSub: "Terdapat kerak susu menumpuk atau tidak steril",
-              defaultNA: "Tidak Relevan / N/A",
-              defaultNASub: "N/A",
-            },
-            {
-              id: 3,
-              sopCode: "ITEM SOP #03",
-              isCritical: true,
-              isPhotoRequired: false,
-              category: "Area Bar & Peralatan",
-              title: "Kalibrasi rasa espresso dan rasio ekstraksi",
-              defaultStandard: "Ya, Sesuai Standar",
-              defaultStandardSub: "Rasio ekstraksi dan crema optimal",
-              defaultIssue: "Tidak / Bermasalah",
-              defaultIssueSub: "Ekstraksi under/over-extracted atau rasa asam/pahit",
-              defaultNA: "Tidak Relevan / N/A",
-              defaultNASub: "N/A",
-            },
-            {
-              id: 4,
-              sopCode: "ITEM SOP #04",
-              isCritical: false,
-              isPhotoRequired: false,
-              category: "Area Bar & Peralatan",
-              title: "Pengecekan ketersediaan es batu dan air reverse osmosis",
-              defaultStandard: "Ya, Sesuai Standar",
-              defaultStandardSub: "Kondisi es higienis dan suplai air normal",
-              defaultIssue: "Tidak / Bermasalah",
-              defaultIssueSub: "Es terkontaminasi atau tekanan air rendah",
-              defaultNA: "Tidak Relevan / N/A",
-              defaultNASub: "N/A",
-            },
-            {
-              id: 5,
-              sopCode: "ITEM SOP #05",
-              isCritical: true,
-              isPhotoRequired: false,
-              category: "Area Bar & Peralatan",
-              title: "Pemeriksaan masa simpan (FIFO) sirup dan susu di chiller",
-              defaultStandard: "Ya, Sesuai Standar",
-              defaultStandardSub: "Suhu chiller stabil pada batas aman SOP",
-              defaultIssue: "Tidak / Bermasalah",
-              defaultIssueSub: "Suhu chiller >4°C atau terdapat ketidaksesuaian",
-              defaultNA: "Tidak Relevan / N/A",
-              defaultNASub: "N/A",
-            },
-            {
-              id: 6,
-              sopCode: "ITEM SOP #06",
-              isCritical: false,
-              isPhotoRequired: false,
-              category: "Area Bar & Peralatan",
-              title: "Pemeriksaan fungsi blender dan perlengkapan beverage",
-              defaultStandard: "Ya, Sesuai Standar",
-              defaultStandardSub: "Kondisi area kerja bersih & higienis",
-              defaultIssue: "Tidak / Bermasalah",
-              defaultIssueSub: "Pisau tumpul atau motor blender overheat",
-              defaultNA: "Tidak Relevan / N/A",
-              defaultNASub: "N/A",
-            },
-            {
-              id: 7,
-              sopCode: "ITEM SOP #07",
-              isCritical: false,
-              isPhotoRequired: false,
-              category: "Area Bar & Peralatan",
-              title: "Apakah lantai area bar kering dan tidak licin?",
-              defaultStandard: "Ya, Sesuai Standar",
-              defaultStandardSub: "Kondisi area kerja bersih & higienis",
-              defaultIssue: "Tidak / Bermasalah",
-              defaultIssueSub: "Suhu chiller >4°C atau terdapat ketidaksesuaian",
-              defaultNA: "Tidak Relevan / N/A",
-              defaultNASub: "N/A",
-            },
-            {
-              id: 8,
-              sopCode: "ITEM SOP #08",
-              isCritical: true,
-              isPhotoRequired: true,
-              category: "Area Bar & Peralatan",
-              title: "Pembersihan sink cuci dan penataan perlengkapan bar",
-              defaultStandard: "Ya, Sesuai Standar",
-              defaultStandardSub: "Sink bersih dan saluran lancar",
-              defaultIssue: "Tidak / Bermasalah",
-              defaultIssueSub: "Saluran mampet atau terdapat ampas kopi menumpuk",
-              defaultNA: "Tidak Relevan / N/A",
-              defaultNASub: "N/A",
-            },
-          ];
-
-          const fallbackDetail: ScheduleDetail = {
-            id: scheduleId || "2",
-            title: "Jadwal Audit Operasional Reguler",
-            timeRange: "09:00 – 12:00 WIB",
-            templateName: "Checklist Quality Control & Kitchen Mid-Day",
-            store: {
-              id: "st-1",
-              name: "Mie Gacoan - Malang Ciliwung",
-              address: "Jl. Ciliwung No. 23, Purwantoro, Kec. Blimbing, Kota Malang",
-              city: "Kota Malang",
-              code: "ST-1",
-              latitude: -7.9553,
-              longitude: 112.6412,
-              radius: 100,
-            },
-            totalQuestions: 8,
-            tasks: mockTasks,
-          };
-
-          setScheduleData(fallbackDetail);
-          setQuestions(mockTasks);
-
-          const initialConditions: Record<number, ConditionType> = {};
-          mockTasks.forEach((q) => {
-            initialConditions[q.id] = "standard";
-          });
-          setSelectedConditions(initialConditions);
-          setCurrentQuestionIndex(0);
         }
+
+        throw new Error(`HTTP error ${res?.status || "network"}`);
       } catch (err) {
         console.error("Error fetching schedule detail:", err);
-        toast.info("Memuat checklist audit dalam mode offline.");
+        // Gunakan draf tersimpan hari ini HANYA jika benar-benar valid di localStorage (tanpa mock data palsu)
+        try {
+          const saveKey = `staff_saved_audit_${scheduleId}`;
+          const draftStr = localStorage.getItem(saveKey) || localStorage.getItem("staff_active_audit");
+          if (draftStr) {
+            const draft = JSON.parse(draftStr);
+            if (
+              draft.savedDate === todayStr &&
+              draft.scheduleId === scheduleId &&
+              Array.isArray(draft.questions) &&
+              draft.questions.length > 0
+            ) {
+              setScheduleData({
+                id: draft.scheduleId,
+                title: draft.scheduleTitle || "Jadwal Audit",
+                timeRange: draft.timeRange || "-",
+                templateName: draft.templateName || "Standar SOP",
+                store: {
+                  id: user?.storeId || "",
+                  name: draft.storeName || user?.storeName || "Toko Penugasan",
+                  address: user?.storeAddress || user?.storeLocation || "",
+                  city: user?.storeLocation || "",
+                  code: draft.storeCode || "ST-01",
+                  latitude: draft.storeLat ?? -7.9553,
+                  longitude: draft.storeLng ?? 112.6412,
+                  radius: draft.storeRadius ?? 100,
+                },
+                totalQuestions: draft.questions.length,
+                tasks: draft.questions,
+              });
+              setQuestions(draft.questions);
+              setSelectedConditions(draft.selectedConditions || {});
+              setPhotos(draft.photos || {});
+              setPhotoMetas(draft.photoMetas || {});
+              setNotes(draft.notes || {});
+              setStartedAt(draft.startedAt || new Date().toISOString());
+              setCurrentQuestionIndex(typeof draft.lastSavedIndex === "number" ? draft.lastSavedIndex : 0);
+              toast.info("Koneksi terputus. Memuat draf checklist tersimpan hari ini.");
+              return;
+            }
+          }
+        } catch {}
+
+        setLoadError("Gagal memuat daftar pertanyaan checklist dari database server. Periksa koneksi internet Anda lalu coba muat ulang.");
+        toast.error("Gagal memuat checklist dari server database.");
       } finally {
         setIsLoading(false);
       }
@@ -451,19 +417,21 @@ function PengerjaanContent() {
     updatedPhotos = photos,
     updatedNotes = notes,
     updatedMetas = photoMetas,
-    customIndex?: number
+    customIndex?: number,
+    coordOverride?: { lat: number; lng: number }
   ) => {
     if (!scheduleData || questions.length === 0) return;
     try {
       const now = new Date();
-      const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      const todayStr = getTodayWibDateStr();
       const draft = {
         scheduleId: scheduleData.id,
         scheduleTitle: scheduleData.title,
+        timeRange: scheduleData.timeRange,
         storeName: scheduleData.store?.name || currentUser?.storeName || "Toko Cabang",
         storeCode: scheduleData.store?.code || "ST-01",
-        storeLat,
-        storeLng,
+        storeLat: coordOverride?.lat ?? storeLat,
+        storeLng: coordOverride?.lng ?? storeLng,
         storeRadius,
         templateName: scheduleData.templateName || "Standar SOP",
         savedDate: todayStr,
@@ -652,6 +620,16 @@ function PengerjaanContent() {
 
   // ================= KAMERA LIVE CONTROLS =================
   const startLiveCamera = async () => {
+    if (typeof window === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      setIsCameraLoading(false);
+      setIsCameraActive(false);
+      toast.error(
+        "Kamera langsung tidak tersedia pada browser atau perangkat ini. Pemilihan foto dari galeri diblokir."
+      );
+      return;
+    }
+
+    cameraCancelledRef.current = false;
     setIsCameraActive(true);
     setIsCameraLoading(true);
     setLiveGpsInfo({ status: "locating" });
@@ -687,22 +665,48 @@ function PengerjaanContent() {
       };
 
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      if (cameraCancelledRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        setIsCameraLoading(false);
+        return;
+      }
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
       }
       setIsCameraLoading(false);
-    } catch (err) {
-      console.warn("Kamera WebRTC getUserMedia gagal, beralih ke input kamera native:", err);
+    } catch (err: unknown) {
+      console.warn("Gagal membuka kamera langsung:", err);
       setIsCameraLoading(false);
       setIsCameraActive(false);
-      // Panggil input kamera langsung tanpa lewat galeri
-      fileInputRef.current?.click();
+      const errName = err instanceof Error ? err.name : "";
+      if (
+        errName === "NotAllowedError" ||
+        errName === "PermissionDeniedError" ||
+        errName === "AbortError"
+      ) {
+        toast.error(
+          "Akses kamera ditutup atau ditolak. Harap izinkan akses kamera untuk mengambil foto langsung (galeri diblokir)."
+        );
+      } else if (errName === "NotFoundError" || errName === "DevicesNotFoundError") {
+        toast.error(
+          "Kamera perangkat tidak ditemukan. Pengambilan foto hanya diperbolehkan langsung dari kamera."
+        );
+      } else if (errName === "NotReadableError" || errName === "TrackStartError") {
+        toast.error(
+          "Kamera sedang digunakan aplikasi lain atau tidak dapat diakses. Tutup aplikasi lain lalu coba lagi."
+        );
+      } else {
+        toast.error(
+          "Gagal membuka kamera perangkat. Pastikan izin kamera telah diberikan (pilihan galeri dinonaktifkan)."
+        );
+      }
     }
   };
 
   const stopLiveCamera = () => {
+    cameraCancelledRef.current = true;
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
@@ -828,102 +832,6 @@ function PengerjaanContent() {
     }
   };
 
-  // Fallback Camera File Input (capture="environment")
-  const handleFallbackPhotoCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file && currentQ) {
-      const reader = new FileReader();
-      reader.onload = async () => {
-        const rawPhoto = reader.result as string;
-        try {
-          const gpsPos = await getDevicePosition();
-          const { latitude, longitude, accuracy, isFakeGps } = gpsPos;
-          const distance = calculateDistanceMeters(latitude, longitude, storeLat, storeLng);
-
-          // Cek Fake GPS
-          if (isFakeGps) {
-            setGpsErrorModal({
-              isOpen: true,
-              title: "Foto Ditolak: Terdeteksi Fake GPS",
-              message:
-                "Sistem mendeteksi penggunaan Fake GPS atau anomali lokasi pada perangkat. Foto ditolak!",
-              distance,
-              radius: storeRadius,
-              accuracy,
-              isFakeGps: true,
-              pendingPhotoBlob: rawPhoto,
-              pendingCoords: { lat: latitude, lon: longitude, accuracy },
-            });
-            return;
-          }
-
-          // Cek Radius
-          if (distance > storeRadius) {
-            setGpsErrorModal({
-              isOpen: true,
-              title: "Foto Ditolak: Di Luar Radius Gerai",
-              message: `Posisi pengambilan foto berjarak ${distance} meter dari gerai (Batas radius ${storeRadius} meter). Foto ditolak!`,
-              distance,
-              radius: storeRadius,
-              accuracy,
-              isFakeGps: false,
-              pendingPhotoBlob: rawPhoto,
-              pendingCoords: { lat: latitude, lon: longitude, accuracy },
-            });
-            return;
-          }
-
-          // Stempel Watermark via Gambar
-          const img = new Image();
-          img.onload = async () => {
-            const tempCanvas = document.createElement("canvas");
-            tempCanvas.width = img.width || 1280;
-            tempCanvas.height = img.height || 720;
-            const ctx = tempCanvas.getContext("2d");
-            if (ctx) {
-              ctx.drawImage(img, 0, 0, tempCanvas.width, tempCanvas.height);
-              const watermarked = stampWatermark(tempCanvas, {
-                lat: latitude,
-                lon: longitude,
-                accuracy,
-                distance,
-                storeName: scheduleData?.store?.name || currentUser?.storeName || "Toko Cabang",
-                storeCode: scheduleData?.store?.code || "ST-01",
-                auditorName: currentUser?.fullName || "Staff Lapangan",
-                sopCode: currentQ.sopCode,
-              });
-
-              // Resize optimal (1024px) & enkripsi AES-256-GCM agar hemat database & aman
-              const optimized = await optimizeAndResizeImage(watermarked, 1024, 1024, 0.78);
-              const encrypted = await encryptImageData(optimized);
-
-              const newPhotos = { ...photos, [currentQ.id]: encrypted };
-              const newMetas = {
-                ...photoMetas,
-                [currentQ.id]: {
-                  lat: latitude,
-                  lon: longitude,
-                  accuracy,
-                  distance,
-                  timestamp: new Date().toISOString(),
-                },
-              };
-
-              setPhotos(newPhotos);
-              setPhotoMetas(newMetas);
-              saveDraftToLocalStorage(selectedConditions, newPhotos, notes, newMetas);
-              toast.success(`Foto bukti terverifikasi (${distance}m dari gerai)!`);
-            }
-          };
-          img.src = rawPhoto;
-        } catch (gpsErr) {
-          toast.error("Gagal membaca sinyal GPS kamera perangkat. Pastikan izin lokasi aktif!");
-        }
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
   // Helper Pengujian: Bypass GPS untuk Developer
   const handleBypassGpsTesting = () => {
     if (!gpsErrorModal || !currentQ || !gpsErrorModal.pendingPhotoBlob) {
@@ -992,6 +900,7 @@ function PengerjaanContent() {
           longitude: lon,
         },
       });
+      saveDraftToLocalStorage(selectedConditions, photos, notes, photoMetas, undefined, { lat, lng: lon });
       toast.success(
         `Koordinat gerai disinkronkan ke lokasi saat ini (${lat.toFixed(5)}, ${lon.toFixed(5)})!`
       );
@@ -1066,16 +975,6 @@ function PengerjaanContent() {
   return (
     <div className="fixed inset-0 flex flex-col overflow-hidden bg-slate-900 sm:relative sm:inset-auto sm:min-h-screen sm:bg-slate-900 sm:flex sm:items-center sm:justify-center sm:py-6 sm:px-4 font-sans antialiased">
       <Toaster position="top-center" richColors />
-
-      {/* Hidden Fallback Camera Input (Strict: Hanya Kamera, Tanpa Galeri) */}
-      <input
-        type="file"
-        ref={fileInputRef}
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={handleFallbackPhotoCapture}
-      />
 
       {/* Floating Mode Toggle untuk Layar Laptop / Desktop */}
       <div className="hidden sm:flex items-center gap-2 mb-3 bg-slate-800/80 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-slate-700/60 shadow-lg z-30">
@@ -1169,17 +1068,27 @@ function PengerjaanContent() {
           </div>
         )}
 
-        {/* EMPTY STATE */}
+        {/* EMPTY OR ERROR STATE */}
         {!isLoading && totalQuestions === 0 && (
           <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-4">
-            <div className="w-14 h-14 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-200 shadow-xs">
+            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center border shadow-xs ${
+              loadError
+                ? "bg-rose-50 text-rose-600 border-rose-200"
+                : "bg-amber-50 text-amber-600 border-amber-200"
+            }`}>
               <AlertCircle className="w-7 h-7" />
             </div>
             <div className="space-y-1 max-w-[280px]">
-              <h3 className="text-sm font-bold text-slate-900">Belum Ada Butir Checklist</h3>
+              <h3 className="text-sm font-bold text-slate-900">
+                {loadError ? "Gagal Memuat Checklist" : "Belum Ada Butir Checklist"}
+              </h3>
               <p className="text-xs text-slate-500 leading-relaxed">
-                Template <strong>{scheduleData?.templateName || "ini"}</strong> pada jadwal belum
-                memiliki daftar butir tugas pemeriksaan.
+                {loadError || (
+                  <>
+                    Template <strong>{scheduleData?.templateName || "ini"}</strong> pada jadwal belum
+                    memiliki daftar butir tugas pemeriksaan.
+                  </>
+                )}
               </p>
             </div>
             <button
@@ -1260,7 +1169,7 @@ function PengerjaanContent() {
                         {currentQ.defaultStandard || "Ya, Sesuai Standar"}
                       </h3>
                       <p className="text-xs text-slate-400 leading-none mt-1 truncate">
-                        {currentQ.defaultStandardSub || "Kondisi area kerja bersih & higienis"}
+                        
                       </p>
                     </div>
                   </div>
@@ -1300,8 +1209,7 @@ function PengerjaanContent() {
                         {currentQ.defaultIssue || "Tidak / Bermasalah"}
                       </h3>
                       <p className="text-xs text-slate-400 leading-none mt-1 truncate">
-                        {currentQ.defaultIssueSub ||
-                          "Suhu chiller >4°C atau terdapat ketidaksesuaian"}
+                        
                       </p>
                     </div>
                   </div>
@@ -1494,7 +1402,10 @@ function PengerjaanContent() {
               {/* Button 1: Tinjau Jawaban */}
               <button
                 type="button"
-                onClick={() => router.push(`/jadwal-staff/review?id=${scheduleId}`)}
+                onClick={() => {
+                  saveDraftToLocalStorage();
+                  router.push(`/jadwal-staff/review?id=${scheduleId}`);
+                }}
                 className="w-full py-2.5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-bold text-xs rounded-2xl flex items-center justify-center gap-2 transition-all active:scale-[0.98] cursor-pointer shadow-2xs"
               >
                 <SlidersHorizontal className="w-3.5 h-3.5 stroke-[2.2]" />

@@ -43,17 +43,29 @@ interface QuestionItem {
 interface StoredAudit {
   scheduleId: string;
   scheduleTitle: string;
+  timeRange?: string;
   storeName: string;
   storeCode: string;
   storeLat?: number;
   storeLng?: number;
   storeRadius?: number;
   templateName: string;
+  savedDate?: string;
+  lastSavedIndex?: number;
   questions: QuestionItem[];
   selectedConditions: Record<number, "standard" | "issue" | "na">;
   photos: Record<number, string>;
+  photoMetas?: Record<number, any>;
   notes: Record<number, string>;
   startedAt?: string;
+  lastUpdated?: string;
+}
+
+function getTodayWibDateStr(): string {
+  const wibDate = new Date(Date.now() + 7 * 60 * 60 * 1000);
+  return `${wibDate.getUTCFullYear()}-${String(wibDate.getUTCMonth() + 1).padStart(2, "0")}-${String(
+    wibDate.getUTCDate()
+  ).padStart(2, "0")}`;
 }
 
 interface GpsErrorModalData {
@@ -139,58 +151,245 @@ function KonfirmasiContent() {
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   useEffect(() => {
-    const user = AuthService.getCurrentUser();
+    let user = AuthService.getCurrentUser();
     setCurrentUser(user);
 
-    // Prefill nama dan posisi manual dari data akun realtime
+    // Prefill nama dan posisi manual dari data akun sementara sebelum sinkronisasi /api/auth/me selesai
     if (user?.fullName) {
-      setManualStaffName(user.fullName);
+      setManualStaffName((prev) => prev || user!.fullName);
     }
     if (user?.position) {
-      setManualPosition(user.position);
+      setManualPosition((prev) => prev || user!.position!);
     }
 
-    // Ambil data audit aktif dari local storage
+    const todayStr = getTodayWibDateStr();
     let activeScheduleId = scheduleId;
+    let parsedDraft: StoredAudit | null = null;
+
+    // Ambil data audit aktif hari ini dari localStorage (validasi savedDate WIB & scheduleId)
     try {
-      const stored = localStorage.getItem("staff_active_audit");
-      if (stored) {
-        const parsed: StoredAudit = JSON.parse(stored);
-        if (!scheduleId || parsed.scheduleId === scheduleId) {
-          setAuditData(parsed);
-          if (!activeScheduleId) activeScheduleId = parsed.scheduleId;
+      const specificKey = scheduleId ? `staff_saved_audit_${scheduleId}` : null;
+      const specificStr = specificKey ? localStorage.getItem(specificKey) : null;
+      const activeStr = localStorage.getItem("staff_active_audit");
+
+      const parseValidDraft = (raw: string | null): StoredAudit | null => {
+        if (!raw) return null;
+        const parsed: StoredAudit = JSON.parse(raw);
+        if (parsed.savedDate && parsed.savedDate !== todayStr) {
+          return null;
         }
+        if (scheduleId && parsed.scheduleId && parsed.scheduleId !== scheduleId) {
+          return null;
+        }
+        return parsed;
+      };
+
+      parsedDraft = parseValidDraft(specificStr) || parseValidDraft(activeStr);
+      if (parsedDraft) {
+        setAuditData(parsedDraft);
+        if (!activeScheduleId) activeScheduleId = parsedDraft.scheduleId;
+      }
+
+      if (specificKey && specificStr && !parseValidDraft(specificStr)) {
+        try {
+          const oldSpec = JSON.parse(specificStr);
+          if (oldSpec.savedDate && oldSpec.savedDate !== todayStr) {
+            localStorage.removeItem(specificKey);
+          }
+        } catch {}
+      }
+      if (activeStr) {
+        try {
+          const oldAct = JSON.parse(activeStr);
+          if (oldAct.savedDate && oldAct.savedDate !== todayStr) {
+            localStorage.removeItem("staff_active_audit");
+          }
+        } catch {}
       }
     } catch (e) {
       console.warn("Gagal membaca audit:", e);
     }
 
-    // Ambil detail jadwal realtime langsung dari backend database
-    if (activeScheduleId) {
-      const fetchDetail = async () => {
+    // Sinkronkan profil akun & detail jadwal realtime langsung dari backend database PostgreSQL
+    const syncRealtimeData = async () => {
+      const token = AuthService.getToken();
+      if (token) {
         try {
-          const token = AuthService.getToken();
-          const headers: Record<string, string> = {};
-          if (token) headers["Authorization"] = `Bearer ${token}`;
-          let res = await fetch(`/api/staff/schedules/${activeScheduleId}`, { headers });
-          if (!res.ok) {
-            res = await fetch(`http://127.0.0.1:5000/api/staff/schedules/${activeScheduleId}`, { headers });
+          let meRes: Response | null = await fetch("/api/auth/me", {
+            headers: { Authorization: `Bearer ${token}` },
+            cache: "no-store",
+          });
+          if (!meRes || meRes.status >= 500) {
+            meRes = await fetch("http://127.0.0.1:5000/api/auth/me", {
+              headers: { Authorization: `Bearer ${token}` },
+              cache: "no-store",
+            });
           }
-          if (res.ok) {
-            const json = await res.json();
-            if (json.data) setScheduleDetail(json.data);
+          if (meRes && (meRes.status === 401 || meRes.status === 403)) {
+            const errJson = await meRes.json().catch(() => null);
+            toast.error(errJson?.message || "Akun dinonaktifkan atau sesi Anda telah berakhir.");
+            AuthService.logout();
+            router.replace("/login");
+            return;
+          }
+          if (meRes && meRes.ok) {
+            const meJson = await meRes.json();
+            if (meJson.status === "success" && meJson.data?.user) {
+              const freshUser: AuthUser = meJson.data.user;
+              user = freshUser;
+              setCurrentUser(freshUser);
+              AuthService.setCurrentUser(freshUser);
+              if (freshUser.fullName) setManualStaffName((prev) => prev || freshUser.fullName);
+              if (freshUser.position) setManualPosition((prev) => prev || freshUser.position!);
+            }
           }
         } catch (e) {
-          console.warn("Gagal fetch detail jadwal realtime:", e);
+          console.warn("Gagal menyinkronkan profil user:", e);
         }
-      };
-      fetchDetail();
-    }
+      }
+
+      if (!activeScheduleId) return;
+
+      try {
+        const headers: Record<string, string> = {};
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+        if (user?.email) headers["x-user-email"] = user.email;
+        if (user?.role) headers["x-user-role"] = user.role;
+        const rawId =
+          user?.rawId ||
+          (user?.id
+            ? user.id.replace(/^staff-/, "").replace(/^sa-/, "").replace(/^adm-/, "")
+            : undefined);
+        if (rawId) headers["x-user-id"] = rawId;
+        if (user?.storeId) headers["x-store-id"] = user.storeId.toString();
+
+        let res: Response | null = null;
+        try {
+          res = await fetch(`/api/staff/schedules/${activeScheduleId}`, {
+            headers,
+            cache: "no-store",
+          });
+          if (!res || res.status >= 500) {
+            throw new Error(`HTTP ${res?.status}`);
+          }
+        } catch {
+          res = await fetch(`http://127.0.0.1:5000/api/staff/schedules/${activeScheduleId}`, {
+            headers,
+            cache: "no-store",
+          });
+        }
+
+        if (res && (res.status === 401 || res.status === 403)) {
+          const errJson = await res.json().catch(() => null);
+          toast.error(errJson?.message || "Akses ditolak atau sesi Anda telah berakhir.");
+          if (res.status === 401) {
+            AuthService.logout();
+            router.replace("/login");
+          } else {
+            router.replace("/jadwal-staff");
+          }
+          return;
+        }
+
+        if (res && (res.status === 404 || res.status === 400)) {
+          const errJson = await res.json().catch(() => null);
+          toast.error(errJson?.message || "Jadwal audit tidak ditemukan di database.");
+          router.replace("/jadwal-staff");
+          return;
+        }
+
+        if (res && res.ok) {
+          const json = await res.json();
+          if (json.data) {
+            const live = json.data;
+            if (
+              live.canStart === false ||
+              live.isExpired ||
+              live.isHoliday ||
+              live.isCompleted ||
+              live.isLocked ||
+              live.isNotScheduledToday
+            ) {
+              if (live.isCompleted || live.status === "Selesai") {
+                toast.info("Jadwal audit ini sudah selesai dikerjakan dan dilaporkan.");
+              } else if (live.isHoliday || live.status === "Libur") {
+                toast.info(`Gerai sedang berstatus Libur Operasional (${live.holidayReason || "Libur"}).`);
+              } else if (live.isLocked || live.status === "Terkunci") {
+                toast.info("Jadwal audit ini belum memasuki jam pelaksanaan.");
+              } else if (live.isNotScheduledToday) {
+                toast.error("Jadwal audit ini tidak berlaku untuk hari ini.");
+              } else {
+                toast.error("Audit Kedaluwarsa: Batas toleransi pengerjaan telah berakhir.");
+              }
+              router.replace("/jadwal-staff");
+              return;
+            }
+
+            setScheduleDetail(live);
+
+            // Sinkronkan butir tugas terbaru dari DB dengan jawaban draf lokal
+            const liveTasks: QuestionItem[] = Array.isArray(live.tasks) ? live.tasks : [];
+            const validTaskIds = new Set(liveTasks.map((t) => t.id));
+            const mergedConditions: Record<number, "standard" | "issue" | "na"> = {};
+            const mergedPhotos: Record<number, string> = {};
+            const mergedNotes: Record<number, string> = {};
+
+            if (parsedDraft) {
+              Object.entries(parsedDraft.selectedConditions || {}).forEach(([k, v]) => {
+                const nId = Number(k);
+                if (validTaskIds.has(nId)) mergedConditions[nId] = v;
+              });
+              Object.entries(parsedDraft.photos || {}).forEach(([k, v]) => {
+                const nId = Number(k);
+                if (validTaskIds.has(nId)) mergedPhotos[nId] = v;
+              });
+              Object.entries(parsedDraft.notes || {}).forEach(([k, v]) => {
+                const nId = Number(k);
+                if (validTaskIds.has(nId)) mergedNotes[nId] = v;
+              });
+            }
+            liveTasks.forEach((t) => {
+              if (!mergedConditions[t.id]) mergedConditions[t.id] = "standard";
+            });
+
+            const syncedAudit: StoredAudit = {
+              scheduleId: live.id,
+              scheduleTitle: live.title,
+              timeRange: live.timeRange,
+              storeName: live.store?.name || user?.storeName || "Toko Cabang",
+              storeCode: live.store?.code || "ST-01",
+              storeLat: live.store?.latitude ?? parsedDraft?.storeLat,
+              storeLng: live.store?.longitude ?? parsedDraft?.storeLng,
+              storeRadius: live.store?.radius ?? parsedDraft?.storeRadius,
+              templateName: live.templateName || "Standar SOP",
+              savedDate: todayStr,
+              lastSavedIndex: parsedDraft?.lastSavedIndex ?? 0,
+              questions: liveTasks,
+              selectedConditions: mergedConditions,
+              photos: mergedPhotos,
+              photoMetas: parsedDraft?.photoMetas,
+              notes: mergedNotes,
+              startedAt: parsedDraft?.startedAt || new Date().toISOString(),
+              lastUpdated: new Date().toISOString(),
+            };
+            setAuditData(syncedAudit);
+            try {
+              localStorage.setItem(`staff_saved_audit_${live.id}`, JSON.stringify(syncedAudit));
+              localStorage.setItem("staff_active_audit", JSON.stringify(syncedAudit));
+            } catch {}
+          }
+        }
+      } catch (e) {
+        console.warn("Gagal fetch detail jadwal realtime:", e);
+      }
+    };
+
+    syncRealtimeData();
 
     const updateClock = () => {
-      const now = new Date();
-      const hours = String(now.getHours()).padStart(2, "0");
-      const minutes = String(now.getMinutes()).padStart(2, "0");
+      const nowWib = new Date(Date.now() + 7 * 60 * 60 * 1000);
+      const hours = String(nowWib.getUTCHours()).padStart(2, "0");
+      const minutes = String(nowWib.getUTCMinutes()).padStart(2, "0");
       setCurrentTime(`${hours}:${minutes}`);
 
       const months = [
@@ -208,10 +407,10 @@ function KonfirmasiContent() {
         "Des",
       ];
       setCurrentDateOnly(
-        `${now.getDate()} ${months[now.getMonth()]} ${now.getFullYear()}`
+        `${nowWib.getUTCDate()} ${months[nowWib.getUTCMonth()]} ${nowWib.getUTCFullYear()}`
       );
       setCurrentDateFormatted(
-        `${now.getDate()} ${months[now.getMonth()]} ${now.getFullYear()}, ${hours}:${minutes} WIB`
+        `${nowWib.getUTCDate()} ${months[nowWib.getUTCMonth()]} ${nowWib.getUTCFullYear()}, ${hours}:${minutes} WIB`
       );
     };
     updateClock();
@@ -229,12 +428,12 @@ function KonfirmasiContent() {
         streamRef.current.getTracks().forEach((t) => t.stop());
       }
     };
-  }, [scheduleId]);
+  }, [scheduleId, router]);
 
   // Titik Koordinat & Batas Radius Toko
-  const storeLat = scheduleDetail?.store?.latitude ?? auditData?.storeLat ?? -7.95484;
-  const storeLng = scheduleDetail?.store?.longitude ?? auditData?.storeLng ?? 112.63982;
-  const storeRadius = scheduleDetail?.store?.radius ?? auditData?.storeRadius ?? 50;
+  const storeLat = scheduleDetail?.store?.latitude ?? auditData?.storeLat ?? -7.9553;
+  const storeLng = scheduleDetail?.store?.longitude ?? auditData?.storeLng ?? 112.6412;
+  const storeRadius = scheduleDetail?.store?.radius ?? auditData?.storeRadius ?? 100;
 
   // ================= GPS & ANTI-FAKE GPS HELPERS =================
   const getDevicePosition = (): Promise<{
@@ -331,6 +530,7 @@ function KonfirmasiContent() {
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit",
+      timeZone: "Asia/Jakarta",
     });
 
     ctx.fillStyle = "#38bdf8";
@@ -589,10 +789,22 @@ function KonfirmasiContent() {
           longitude: lon,
         },
       });
-      toast.success(
-        `Koordinat gerai disinkronkan ke lokasi saat ini (${lat.toFixed(5)}, ${lon.toFixed(5)})!`
-      );
     }
+    if (auditData) {
+      const updatedDraft: StoredAudit = {
+        ...auditData,
+        storeLat: lat,
+        storeLng: lon,
+      };
+      setAuditData(updatedDraft);
+      try {
+        localStorage.setItem(`staff_saved_audit_${auditData.scheduleId}`, JSON.stringify(updatedDraft));
+        localStorage.setItem("staff_active_audit", JSON.stringify(updatedDraft));
+      } catch {}
+    }
+    toast.success(
+      `Koordinat gerai disinkronkan ke lokasi saat ini (${lat.toFixed(5)}, ${lon.toFixed(5)})!`
+    );
     setGpsErrorModal(null);
   };
 
@@ -698,6 +910,12 @@ function KonfirmasiContent() {
       return;
     }
 
+    const questions = auditData?.questions || [];
+    if (questions.length === 0) {
+      toast.error("Butir checklist belum dimuat. Silakan kembali ke halaman pengerjaan terlebih dahulu.");
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -717,8 +935,8 @@ function KonfirmasiContent() {
               .replace(/^adm-/, "")
           : undefined);
       if (rawId) headers["x-user-id"] = rawId;
+      if (currentUser?.storeId) headers["x-store-id"] = currentUser.storeId.toString();
 
-      const questions = auditData?.questions || [];
       const answersPayload = questions.map((q) => ({
         taskId: q.id,
         answer: auditData?.selectedConditions?.[q.id] || "standard",
@@ -772,7 +990,7 @@ function KonfirmasiContent() {
         console.warn("Direct rewrite fetch error, attempting direct backend port:", e);
       }
 
-      if (!res || !res.ok) {
+      if (!res || res.status >= 500) {
         try {
           res = await fetch(
             `http://127.0.0.1:5000/api/staff/schedules/${targetScheduleId}/submit`,
@@ -785,6 +1003,14 @@ function KonfirmasiContent() {
         } catch (backendErr) {
           console.warn("Direct backend port fetch error:", backendErr);
         }
+      }
+
+      if (res && res.status === 401) {
+        const errJson = await res.json().catch(() => null);
+        toast.error(errJson?.message || "Sesi Anda telah berakhir. Silakan login kembali.");
+        AuthService.logout();
+        router.replace("/login");
+        return;
       }
 
       let reportId = "";
@@ -817,16 +1043,7 @@ function KonfirmasiContent() {
       }
     } catch (err) {
       console.error("Error submitting final report:", err);
-      // Bersihkan draf lokal jika terjadi kesalahan jaringan
-      if (typeof window !== "undefined") {
-        try {
-          localStorage.removeItem("staff_completed_tasks");
-          localStorage.removeItem(`staff_saved_audit_${targetScheduleId}`);
-          localStorage.removeItem("staff_active_audit");
-        } catch (e) {}
-      }
-      toast.success("Laporan disimpan dan disinkronkan ke server!");
-      router.push(`/jadwal-staff/terkirim?scheduleId=${targetScheduleId}`);
+      toast.error("Gagal terhubung ke server. Draf checklist masih tersimpan, silakan coba kirim ulang.");
     } finally {
       setIsSubmitting(false);
     }
@@ -872,9 +1089,12 @@ function KonfirmasiContent() {
     });
   }
 
-  const totalQuestions = questionsList.length || scheduleDetail?.totalQuestions || 8;
+  const totalQuestions = questionsList.length || scheduleDetail?.totalQuestions || 0;
   const applicableCount = Math.max(1, totalQuestions - naCount);
-  const calculatedScore = Math.round((passedCount / applicableCount) * 100);
+  const calculatedScore =
+    totalQuestions > 0
+      ? Math.round(((applicableCount - issueCount) / applicableCount) * 100)
+      : 0;
   const scorePercent = Math.min(100, Math.max(0, calculatedScore));
 
   return (

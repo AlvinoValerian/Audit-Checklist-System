@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import {
   ArrowLeft,
   FileDown,
@@ -15,10 +15,12 @@ import {
   Calendar,
   AlertCircle,
   User,
+  Loader2,
 } from "lucide-react";
 import { AuditReportItem } from "@/types/report";
 import { toast } from "sonner";
 import DecryptedImage from "@/components/DecryptedImage";
+import { exportSingleReport } from "@/utils/reportExporter";
 
 interface DetailLaporanViewProps {
   report: AuditReportItem;
@@ -26,8 +28,16 @@ interface DetailLaporanViewProps {
 }
 
 export default function DetailLaporanView({ report, onBack }: DetailLaporanViewProps) {
-  const handleDownloadPdf = () => {
-    toast.success(`Mengunduh PDF Laporan ${report.storeName}...`);
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const handleDownloadPdf = async () => {
+    if (isDownloading) return;
+    try {
+      setIsDownloading(true);
+      await exportSingleReport(report);
+    } finally {
+      setIsDownloading(false);
+    }
   };
 
   const isNonCompliant = report.status === "Tidak Mengerjakan";
@@ -84,10 +94,20 @@ export default function DetailLaporanView({ report, onBack }: DetailLaporanViewP
         <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={handleDownloadPdf}
-            className="flex items-center gap-1.5 px-4 py-2 bg-[#193f53] hover:bg-[#143343] text-white rounded-lg text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
+            disabled={isDownloading}
+            className="flex items-center gap-1.5 px-4 py-2 bg-[#193f53] hover:bg-[#143343] disabled:opacity-70 text-white rounded-lg text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
           >
-            <FileDown className="w-3.5 h-3.5" />
-            <span>Unduh Laporan PDF</span>
+            {isDownloading ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Menyiapkan PDF...</span>
+              </>
+            ) : (
+              <>
+                <FileDown className="w-3.5 h-3.5" />
+                <span>Unduh Laporan PDF</span>
+              </>
+            )}
           </button>
         </div>
       </div>

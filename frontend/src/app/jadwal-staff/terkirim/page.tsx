@@ -15,7 +15,7 @@ import {
   Maximize2,
   RotateCcw,
 } from "lucide-react";
-import { Toaster } from "sonner";
+import { toast, Toaster } from "sonner";
 import { AuthService, AuthUser } from "@/lib/auth";
 
 interface ReportDetail {
@@ -23,6 +23,7 @@ interface ReportDetail {
   reportNumber: string;
   status: string;
   isLate: boolean;
+  isNonCompliant?: boolean;
   totalQuestions: number;
   answeredQuestions: number;
   scoreText: string;
@@ -31,7 +32,7 @@ interface ReportDetail {
   storeLocation: string;
   scheduleTitle: string;
   signerName: string;
-  signerRole: string;
+  signerRole: string | null;
   submittedAt: string;
   submittedAtFormatted: string;
 }
@@ -45,6 +46,7 @@ function TerkirimContent() {
   const [isFullscreenMode, setIsFullscreenMode] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [report, setReport] = useState<ReportDetail | null>(null);
 
   useEffect(() => {
@@ -62,38 +64,66 @@ function TerkirimContent() {
     const fetchReport = async () => {
       try {
         setLoading(true);
+        setLoadError(null);
         const token = AuthService.getToken();
         const headers: Record<string, string> = {};
         if (token) headers["Authorization"] = `Bearer ${token}`;
+        if (user?.email) headers["x-user-email"] = user.email;
+        if (user?.role) headers["x-user-role"] = user.role;
+        const rawId =
+          user?.rawId ||
+          (user?.id
+            ? user.id.replace(/^staff-/, "").replace(/^sa-/, "").replace(/^adm-/, "")
+            : undefined);
+        if (rawId) headers["x-user-id"] = rawId;
+        if (user?.storeId) headers["x-store-id"] = user.storeId.toString();
 
         const endpoint = reportIdParam
           ? `/api/staff/reports/${reportIdParam}`
           : `/api/staff/reports/latest`;
 
-        let res = await fetch(endpoint, { headers });
-        if (!res.ok) {
-          res = await fetch(`http://127.0.0.1:5000${endpoint}`, { headers });
+        let res: Response | null = null;
+        try {
+          res = await fetch(endpoint, { headers, cache: "no-store" });
+          if (!res || res.status >= 500) throw new Error(`Fetch status: ${res?.status}`);
+        } catch {
+          res = await fetch(`http://127.0.0.1:5000${endpoint}`, { headers, cache: "no-store" });
         }
 
-        if (res.ok) {
+        if (res && (res.status === 401 || res.status === 403)) {
+          const errJson = await res.json().catch(() => null);
+          toast.error(errJson?.message || "Sesi berakhir atau Anda tidak memiliki akses ke laporan ini.");
+          if (res.status === 401) {
+            AuthService.logout();
+            router.replace("/login");
+          } else {
+            router.replace("/jadwal-staff");
+          }
+          return;
+        }
+
+        if (res && res.ok) {
           const json = await res.json();
           if (json.data) {
             setReport(json.data);
+          } else {
+            setLoadError("Laporan audit tidak ditemukan di database.");
           }
+        } else {
+          const errJson = await res?.json().catch(() => null);
+          setLoadError(errJson?.message || "Laporan audit tidak ditemukan di database.");
         }
       } catch (err) {
         console.error("Gagal memuat detail laporan database:", err);
+        setLoadError("Gagal terhubung ke server database.");
       } finally {
         setLoading(false);
       }
     };
 
     fetchReport();
-  }, [reportIdParam, scheduleIdParam]);
+  }, [reportIdParam, scheduleIdParam, router]);
 
-  const displayReportNumber = report?.reportNumber
-    ? (report.reportNumber.startsWith("#") ? report.reportNumber : `#${report.reportNumber}`)
-    : (reportIdParam ? `#CHK-${reportIdParam.slice(0, 8).toUpperCase()}` : "-");
   const isLate = Boolean(report?.isLate || report?.status === "terlambat");
   const totalItems = report?.totalQuestions ?? 0;
   const answeredItems = report?.answeredQuestions ?? totalItems;
@@ -102,8 +132,8 @@ function TerkirimContent() {
     ? `${report.storeName}${report.storeCode ? ` (${report.storeCode})` : ""}`
     : (currentUser?.storeLocation || "-");
   const displaySchedule = report?.scheduleTitle || "-";
-  const displaySigner = report?.signerName || currentUser?.fullName || "-";
-  const displayRole = report?.signerRole || currentUser?.position || "";
+  const displaySigner = report ? report.signerName : (loading ? "-" : currentUser?.fullName || "-");
+  const displayRole = report ? (report.signerRole || "") : "";
   const displayTime = report?.submittedAtFormatted || "-";
 
   const handleReturnToDashboard = () => {
@@ -169,6 +199,12 @@ function TerkirimContent() {
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 py-3 flex flex-col justify-between">
           <div>
             {/* 3. Hero Success Icon with Glow Ring */}
+            {!loading && loadError && !report ? (
+              <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 mt-4 text-center space-y-1.5">
+                <p className="text-xs font-bold text-rose-700">Laporan Tidak Dapat Dimuat</p>
+                <p className="text-[11px] text-rose-600">{loadError}</p>
+              </div>
+            ) : (
             <div className="text-center mt-2 sm:mt-4">
               <div className="relative inline-flex items-center justify-center">
                 {/* Outer Glow Halo */}
@@ -182,35 +218,31 @@ function TerkirimContent() {
 
               {/* Headline */}
               <h1 className="text-xl sm:text-[22px] font-bold text-slate-900 mt-4 tracking-tight leading-tight">
-                Checklist Berhasil Dikirim
+                {report?.isNonCompliant ? "Audit Ditutup Sistem" : "Checklist Berhasil Dikirim"}
               </h1>
 
               {/* Subtitle */}
               <p className="text-xs text-slate-500 max-w-[270px] mx-auto text-center mt-2 leading-relaxed">
-                Laporan audit operasional Anda telah tersimpan dan terverifikasi secara aman di sistem pusat.
+                {report?.isNonCompliant
+                  ? "Jadwal audit ini tercatat melewati batas waktu sehingga ditutup otomatis oleh sistem."
+                  : "Laporan audit operasional Anda telah tersimpan dan terverifikasi secara aman di sistem pusat."}
               </p>
             </div>
+            )}
 
             {/* 4. Receipt / Verification Summary Card */}
             <div className="bg-white rounded-3xl p-5 border border-slate-100/90 shadow-[0_4px_24px_rgba(0,0,0,0.04)] mt-6 space-y-4">
-              {/* Header: Audit Code & Verified Badges */}
-              <div className="flex items-center justify-between pb-1 flex-wrap gap-2">
-                <div className="flex items-center gap-1.5 text-xs font-mono font-bold text-slate-800">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-blue-600" />
-                  <span>{loading ? "Memuat..." : displayReportNumber}</span>
-                </div>
-
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {isLate && (
-                    <span className="px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-bold rounded-md flex items-center gap-1">
-                      <Clock className="w-3 h-3 text-amber-600" />
-                      <span>Terlambat</span>
-                    </span>
-                  )}
-                  <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-semibold rounded-md">
-                    Terverifikasi GPS & E-Sign
+              {/* Header: Verified Badges */}
+              <div className="flex items-center pb-1 flex-wrap gap-1.5">
+                {isLate && (
+                  <span className="px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-bold rounded-md flex items-center gap-1">
+                    <Clock className="w-3 h-3 text-amber-600" />
+                    <span>Terlambat</span>
                   </span>
-                </div>
+                )}
+                <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-semibold rounded-md">
+                  Terverifikasi GPS & E-Sign
+                </span>
               </div>
 
               {/* Evaluation Score Box */}

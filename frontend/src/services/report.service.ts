@@ -50,6 +50,8 @@ const getAuthHeaders = (): Record<string, string> => {
 };
 
 const REPORT_CACHE_KEY = "audit_pro_report_items_cache";
+const inFlightReportFetches = new Map<string, Promise<AuditReportItem[]>>();
+const inFlightMetaFetches = new Map<string, Promise<ReportMetaOptions>>();
 
 export const ReportService = {
   getAll(): AuditReportItem[] {
@@ -70,38 +72,51 @@ export const ReportService = {
   },
 
   async fetchAll(params?: ReportFilterParams): Promise<AuditReportItem[]> {
-    try {
-      const query = new URLSearchParams();
-      if (params?.workspaceId) query.set("workspaceId", params.workspaceId);
-      if (params?.storeName && params.storeName !== "Semua Toko") query.set("storeName", params.storeName);
-      if (params?.scheduleName && params.scheduleName !== "Semua Jadwal") query.set("scheduleName", params.scheduleName);
-      if (params?.month && params.month !== "Semua Bulan" && params.month !== "Bulan Ini") query.set("month", params.month);
-      if (params?.status && params.status !== "Semua Status") query.set("status", params.status);
-      if (params?.search) query.set("search", params.search);
+    const query = new URLSearchParams();
+    if (params?.workspaceId) query.set("workspaceId", params.workspaceId);
+    if (params?.storeName && params.storeName !== "Semua Toko") query.set("storeName", params.storeName);
+    if (params?.scheduleName && params.scheduleName !== "Semua Jadwal") query.set("scheduleName", params.scheduleName);
+    if (params?.month && params.month !== "Semua Bulan" && params.month !== "Bulan Ini") query.set("month", params.month);
+    if (params?.status && params.status !== "Semua Status") query.set("status", params.status);
+    if (params?.search) query.set("search", params.search);
 
-      const qs = query.toString() ? `?${query.toString()}` : "";
-      const url = `${BACKEND_URL}/api/reports${qs}`;
-      const res = await fetch(url, {
-        headers: getAuthHeaders(),
-      });
+    const qs = query.toString() ? `?${query.toString()}` : "";
+    const cacheKey = qs || "all";
 
-      if (!res.ok) {
-        throw new Error(`HTTP error ${res.status}`);
-      }
-
-      const json = await res.json();
-      if (json && (json.status === "success" || json.success) && Array.isArray(json.data)) {
-        if (typeof window !== "undefined") {
-          try {
-            localStorage.setItem(REPORT_CACHE_KEY, JSON.stringify(json.data));
-          } catch (e) {}
-        }
-        return json.data;
-      }
-    } catch (err) {
-      console.warn("ReportService.fetchAll failed, falling back to cache:", err);
+    if (inFlightReportFetches.has(cacheKey)) {
+      return inFlightReportFetches.get(cacheKey)!;
     }
-    return this.getAll();
+
+    const fetchPromise = (async () => {
+      try {
+        const url = `${BACKEND_URL}/api/reports${qs}`;
+        const res = await fetch(url, {
+          headers: getAuthHeaders(),
+        });
+
+        if (!res.ok) {
+          throw new Error(`HTTP error ${res.status}`);
+        }
+
+        const json = await res.json();
+        if (json && (json.status === "success" || json.success) && Array.isArray(json.data)) {
+          if (typeof window !== "undefined") {
+            try {
+              localStorage.setItem(REPORT_CACHE_KEY, JSON.stringify(json.data));
+            } catch (e) {}
+          }
+          return json.data;
+        }
+      } catch (err) {
+        console.warn("ReportService.fetchAll failed, falling back to cache:", err);
+      } finally {
+        inFlightReportFetches.delete(cacheKey);
+      }
+      return this.getAll();
+    })();
+
+    inFlightReportFetches.set(cacheKey, fetchPromise);
+    return fetchPromise;
   },
 
   async fetchById(id: string): Promise<AuditReportItem | null> {
@@ -125,33 +140,46 @@ export const ReportService = {
   },
 
   async fetchMeta(workspaceId?: string): Promise<ReportMetaOptions> {
-    try {
-      const query = new URLSearchParams();
-      if (workspaceId) query.set("workspaceId", workspaceId);
-      const qs = query.toString() ? `?${query.toString()}` : "";
-      const url = `${BACKEND_URL}/api/reports/meta${qs}`;
-      const res = await fetch(url, {
-        headers: getAuthHeaders(),
-      });
+    const query = new URLSearchParams();
+    if (workspaceId) query.set("workspaceId", workspaceId);
+    const qs = query.toString() ? `?${query.toString()}` : "";
+    const cacheKey = qs || "all";
 
-      if (res.ok) {
-        const json = await res.json();
-        if (json && (json.status === "success" || json.success) && json.data) {
-          return {
-            stores: json.data.stores || [],
-            schedules: json.data.schedules || [],
-            months: json.data.months || [],
-          };
-        }
-      }
-    } catch (err) {
-      console.warn("ReportService.fetchMeta failed:", err);
+    if (inFlightMetaFetches.has(cacheKey)) {
+      return inFlightMetaFetches.get(cacheKey)!;
     }
-    return {
-      stores: this.getStores(),
-      schedules: this.getSchedules(),
-      months: this.getMonths(),
-    };
+
+    const fetchPromise = (async () => {
+      try {
+        const url = `${BACKEND_URL}/api/reports/meta${qs}`;
+        const res = await fetch(url, {
+          headers: getAuthHeaders(),
+        });
+
+        if (res.ok) {
+          const json = await res.json();
+          if (json && (json.status === "success" || json.success) && json.data) {
+            return {
+              stores: json.data.stores || [],
+              schedules: json.data.schedules || [],
+              months: json.data.months || [],
+            };
+          }
+        }
+      } catch (err) {
+        console.warn("ReportService.fetchMeta failed:", err);
+      } finally {
+        inFlightMetaFetches.delete(cacheKey);
+      }
+      return {
+        stores: this.getStores(),
+        schedules: this.getSchedules(),
+        months: this.getMonths(),
+      };
+    })();
+
+    inFlightMetaFetches.set(cacheKey, fetchPromise);
+    return fetchPromise;
   },
 
   getStores(): string[] {
