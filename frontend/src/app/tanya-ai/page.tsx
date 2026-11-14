@@ -17,6 +17,20 @@ import { AIService, QUICK_PROMPT_SUGGESTIONS } from "@/services/ai.service";
 import { AuthService } from "@/lib/auth";
 import { ChatMessage } from "@/types/ai";
 import { toast } from "sonner";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
+
+// Helper untuk membersihkan tanda pagar berulang di dalam judul heading
+const stripLeadingHashes = (content: React.ReactNode): React.ReactNode => {
+  if (typeof content === "string") return content.replace(/^#+\s*/, "");
+  if (Array.isArray(content)) {
+    return content.map((item, idx) =>
+      idx === 0 && typeof item === "string" ? item.replace(/^#+\s*/, "") : item
+    );
+  }
+  return content;
+};
 
 export default function TanyaAIPage() {
   // Saat awal-awal default kosongan (tidak ada datanya)
@@ -341,9 +355,50 @@ export default function TanyaAIPage() {
 
                           <div className="flex-1 min-w-0">
                             <div className="bg-white border border-slate-200 rounded-xl rounded-tl-xs p-3.5 shadow-2xs text-xs text-slate-800 leading-relaxed relative group">
-                              {/* Message Content Rendered */}
-                              <div className="whitespace-pre-line space-y-1.5">
-                                {msg.content}
+                              {/* Message Content Rendered dengan Dukungan Markdown & Tabel Rapi */}
+                              <div className="text-xs text-slate-800 leading-relaxed overflow-x-auto">
+                                <ReactMarkdown
+                                  remarkPlugins={[remarkGfm]}
+                                  components={{
+                                    // Judul Utama (### LAPORAN...)
+                                    h3: ({ node, ...props }) => (
+                                      <h3 className="text-sm font-bold text-slate-900 mt-3 mb-1.5 pb-1 border-b border-slate-100 flex items-center gap-1.5" {...props} />
+                                    ),
+                                    // Sub-judul (#### 1. Deskripsi...)
+                                    h4: ({ node, ...props }) => (
+                                      <h4 className="text-xs font-bold text-slate-800 mt-2.5 mb-1 text-[#193f53]" {...props} />
+                                    ),
+                                    // Paragraf
+                                    p: ({ node, ...props }) => <p className="mb-2 leading-relaxed" {...props} />,
+                                    // Garis Pembatas (---)
+                                    hr: () => <hr className="my-2.5 border-slate-200" />,
+                                    // Bullet list
+                                    ul: ({ node, ...props }) => <ul className="list-disc list-inside space-y-1 my-1.5 pl-1" {...props} />,
+                                    ol: ({ node, ...props }) => <ol className="list-decimal list-inside space-y-1 my-1.5 pl-1" {...props} />,
+                                    li: ({ node, ...props }) => <li className="text-slate-700" {...props} />,
+                                    // Tabel Otomatis Menjadi Card Rapi (seperti tabel Atribut Temuan)
+                                    table: ({ node, ...props }) => (
+                                      <div className="my-2.5 overflow-x-auto rounded-lg border border-slate-200 shadow-2xs">
+                                        <table className="w-full text-left text-[11px] border-collapse bg-white" {...props} />
+                                      </div>
+                                    ),
+                                    thead: ({ node, ...props }) => (
+                                      <thead className="bg-slate-50 border-b border-slate-200 text-slate-700 font-semibold" {...props} />
+                                    ),
+                                    th: ({ node, ...props }) => (
+                                      <th className="px-3 py-2 border-r border-slate-100 last:border-r-0 font-semibold text-slate-800" {...props} />
+                                    ),
+                                    td: ({ node, ...props }) => (
+                                      <td className="px-3 py-1.5 border-b border-r border-slate-100 last:border-r-0 text-slate-600 align-top" {...props} />
+                                    ),
+                                    strong: ({ node, ...props }) => <strong className="font-semibold text-slate-900" {...props} />,
+                                    code: ({ node, ...props }) => (
+                                      <code className="px-1 py-0.5 rounded bg-slate-100 text-slate-800 text-[10.5px] font-mono" {...props} />
+                                    ),
+                                  }}
+                                >
+                                  {msg.content.replace(/^([#]{1,6})\s*(?:[#]{1,6}\s*)+/gm, '$1 ').replace(/([^\n])\n(#{1,6}\s+)/g, '$1\n\n$2')}
+                                </ReactMarkdown>
                               </div>
 
                               {/* Message Action Footer */}
@@ -433,34 +488,6 @@ export default function TanyaAIPage() {
               <div ref={messagesEndRef} className="h-px shrink-0" />
             </div>
           </div>
-
-          {/* Quick Prompts Carousel Bar (Hanya tampil saat percakapan aktif) */}
-          {messages.length > 0 && (
-            <div
-              className={`px-4 py-1.5 border-t border-slate-100 bg-slate-50/50 shrink-0 transition-all duration-500 ${renderStage !== "input-only"
-                ? "opacity-100 translate-y-0"
-                : "opacity-0 translate-y-2 pointer-events-none"
-                }`}
-            >
-              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
-                <span className="text-[9.5px] font-bold text-slate-400 uppercase tracking-wider shrink-0 flex items-center gap-1">
-                  <HelpCircle className="w-3 h-3" />
-                  Rekomendasi:
-                </span>
-                {QUICK_PROMPT_SUGGESTIONS.map((sug, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => handleSend(sug)}
-                    disabled={isGenerating}
-                    className="shrink-0 text-[10.5px] font-medium text-slate-600 bg-white hover:bg-slate-100 border border-slate-200 rounded-full px-2.5 py-0.5 transition-colors cursor-pointer disabled:opacity-50"
-                  >
-                    {sug}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
 
           {/* TAHAP 1: Field Ketikan (Tampil Langsung di Awal dan Siap Digunakan) */}
           <div
