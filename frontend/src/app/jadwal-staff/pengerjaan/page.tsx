@@ -138,6 +138,7 @@ function PengerjaanContent() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const cameraCancelledRef = useRef<boolean>(false);
+  const contentScrollRef = useRef<HTMLDivElement | null>(null);
 
   const [isFullscreenMode, setIsFullscreenMode] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
@@ -148,6 +149,14 @@ function PengerjaanContent() {
   const [scheduleData, setScheduleData] = useState<ScheduleDetail | null>(null);
   const [questions, setQuestions] = useState<QuestionItem[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(0);
+
+  // Otomatis scroll ke bagian paling atas pertanyaan setiap berpindah soal
+  useEffect(() => {
+    if (contentScrollRef.current) {
+      contentScrollRef.current.scrollTo({ top: 0, behavior: "smooth" });
+    }
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [currentQuestionIndex]);
 
   // User responses
   const [selectedConditions, setSelectedConditions] = useState<Record<number, ConditionType>>({});
@@ -916,6 +925,7 @@ function PengerjaanContent() {
       saveDraftToLocalStorage();
       const prevIndex = currentQuestionIndex - 1;
       setCurrentQuestionIndex(prevIndex);
+      contentScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
   };
@@ -951,6 +961,7 @@ function PengerjaanContent() {
     if (currentQuestionIndex < totalQuestions - 1) {
       const nextIndex = currentQuestionIndex + 1;
       setCurrentQuestionIndex(nextIndex);
+      contentScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
       window.scrollTo({ top: 0, behavior: "smooth" });
     } else {
       toast.success("Semua butir checklist selesai diisi. Menuju Tinjau Jawaban...");
@@ -1116,7 +1127,10 @@ function PengerjaanContent() {
             </div>
 
             {/* Scrollable Form Body */}
-            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-4 space-y-3.5">
+            <div
+              ref={contentScrollRef}
+              className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-4 space-y-3.5"
+            >
               {/* 3. Question Card (Judul Bernomor, Tanpa ITEM SOP #02, Tanpa Kotak Panduan) */}
               <div className="bg-white rounded-3xl p-5 border border-slate-100 shadow-[0_2px_12px_rgba(0,0,0,0.03)]">
                 <h2 className="text-base sm:text-[18px] font-bold text-slate-900 leading-snug">
@@ -1468,11 +1482,6 @@ function PengerjaanContent() {
               <div className="flex justify-between items-start">
                 <div className="w-6 h-6 border-t-2 border-l-2 border-white/90 rounded-tl-lg shadow-sm" />
                 <div className="w-6 h-6 border-t-2 border-r-2 border-white/90 rounded-tr-lg shadow-sm" />
-              </div>
-              <div className="text-center">
-                <span className="text-[11px] font-semibold text-white/80 bg-black/50 backdrop-blur-md px-3 py-1 rounded-full border border-white/20 shadow-md">
-                  Posisikan Bukti Butir #{questionNumber} di Bingkai
-                </span>
               </div>
               <div className="flex justify-between items-end">
                 <div className="w-6 h-6 border-b-2 border-l-2 border-white/90 rounded-bl-lg shadow-sm" />
