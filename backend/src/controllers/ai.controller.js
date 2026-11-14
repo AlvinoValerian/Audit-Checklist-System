@@ -1,5 +1,6 @@
 const prisma = require('../config/prisma');
 const AIService = require('../services/ai.service');
+const AuditContextService = require('../services/audit-context.service');
 const { extractUser } = require('../middlewares/auth.middleware');
 
 /**
@@ -280,7 +281,7 @@ const AIController = {
       ].filter(Boolean).join('\n');
 
       // 1. Dapatkan jawaban cerdas dari AI Service (Gemini / Ollama / Fallback)
-      const answer = await AIService.askAI(question.trim(), userContext);
+      const answer = await AIService.askAI(question.trim(), userContext, user);
 
       const now = new Date();
       const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(

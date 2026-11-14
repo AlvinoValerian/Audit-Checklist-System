@@ -1,5 +1,6 @@
 const { SYSTEM_PROMPT } = require('../ai/rules');
 const { getFormattedKnowledgeContext } = require('../ai/knowledge/audit-knowledge');
+const AuditContextService = require('./audit-context.service');
 
 /**
  * Service untuk memproses pertanyaan user ke LLM
@@ -7,18 +8,24 @@ const { getFormattedKnowledgeContext } = require('../ai/knowledge/audit-knowledg
 const AIService = {
   /**
    * Menjawab pertanyaan user menggunakan LLM (Gemini / Ollama / Mock)
+   * Dilengkapi live context dari database PostgreSQL (schedule, template, report, answer, store, store_holiday)
    * @param {string} userQuestion
-   * @param {string} customContext - Konteks opsional tambahan dari DB (misal data temuan toko tertentu)
+   * @param {string} customContext - Konteks opsional tambahan dari DB / identitas user
+   * @param {Object} user - Objek identitas user (role, workspaceId, dll)
    */
-  async askAI(userQuestion, customContext = '') {
+  async askAI(userQuestion, customContext = '', user = null) {
     const knowledgeContext = getFormattedKnowledgeContext();
+    const liveDbContext = await AuditContextService.getLiveAuditDatabaseContext(user, userQuestion);
+
     const systemInstructionText = `
 ${SYSTEM_PROMPT}
 
-Basis Data Pengetahuan Audit Retail:
+Basis Data Pengetahuan Standar Audit Retail:
 ${knowledgeContext}
 
-${customContext ? `Konteks Tambahan Toko/Audit Terkini:\n${customContext}\n` : ''}
+${liveDbContext}
+
+${customContext ? `Konteks Tambahan Pengguna & Sesi:\n${customContext}\n` : ''}
     `.trim();
 
     const provider = (process.env.AI_PROVIDER || 'gemini').toLowerCase();
@@ -160,7 +167,7 @@ ${customContext ? `Konteks Tambahan Toko/Audit Terkini:\n${customContext}\n` : '
         let answer = validTextParts.length > 0 ? validTextParts.join('\n') : (parts[0]?.text || '');
 
         if (answer) {
-          // Bersihkan teks jika model masih mengeluarkan catatan draf/scratchpad
+          // Bersihkan teks dari format draft internal
           answer = this._sanitizeOutput(answer);
 
           console.log(`✅ [AI Service] Berhasil menerima jawaban dari model: ${formattedModel}!`);
@@ -176,7 +183,7 @@ ${customContext ? `Konteks Tambahan Toko/Audit Terkini:\n${customContext}\n` : '
   },
 
   /**
-   * Membersihkan output agar rapi dan tanpa karakter bintang (*) sama sekali
+   * Membersihkan output agar rapi dan ramah markdown
    */
   _sanitizeOutput(text) {
     if (!text) return '';
@@ -194,17 +201,13 @@ ${customContext ? `Konteks Tambahan Toko/Audit Terkini:\n${customContext}\n` : '
       result = parts[parts.length - 1] || result;
     }
 
-    // 3. Ubah bullet bertanda bintang (* item) menjadi bullet bulat rapi (• item)
-    result = result.replace(/^([ \t]*)\*+[ \t]+/gm, '$1• ');
+    // 3. Bersihkan duplikasi simbol heading (misal: '### ### Judul' -> '### Judul')
+    result = result.replace(/^([#]{1,6})\s*(?:[#]{1,6}\s*)+/gm, '$1 ');
 
-    // 4. Hapus format bold/italic bertanda bintang (**teks** -> teks, *teks* -> teks)
-    result = result.replace(/\*\*([^*]+)\*\*/g, '$1');
-    result = result.replace(/\*([^*]+)\*/g, '$1');
+    // 4. Pastikan ada baris baru sebelum heading jika model menempelkannya langsung
+    result = result.replace(/([^\n])\n(#{1,6}\s+)/g, '$1\n\n$2');
 
-    // 5. Hapus semua sisa karakter bintang (*) yang masih tersisa
-    result = result.replace(/\*/g, '');
-
-    // 6. Bersihkan sisa tanda petik ganda pembungkus jika ada
+    // 5. Bersihkan sisa tanda petik ganda pembungkus jika ada
     result = result.replace(/^"|"$/g, '').replace(/\n"([^"]+)"/g, '\n$1');
 
     return result.trim();
