@@ -57,6 +57,12 @@ export default function LoginPage() {
         } else if (user && (user.role === "Divisi Teknis" || user.role === "Teknis")) {
           window.location.href = "/divisi-teknis";
         } else {
+          // Super Admin: Jika belum lunas, aktifkan modal pembayaran saat mendarat di workspace
+          try {
+            if (localStorage.getItem("superadmin_paid") !== "true") {
+              localStorage.setItem("show_payment_modal_on_workspace", "true");
+            }
+          } catch {}
           window.location.href = "/workspace";
         }
       }, 500);

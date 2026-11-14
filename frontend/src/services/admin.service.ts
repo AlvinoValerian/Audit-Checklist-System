@@ -108,7 +108,6 @@ export const AdminService = {
         body: JSON.stringify({
           ...adminData,
           superAdminId: saId,
-          email: user?.email,
         }),
       });
     } catch (networkErr: unknown) {

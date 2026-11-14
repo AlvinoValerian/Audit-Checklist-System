@@ -235,6 +235,7 @@ export default function KelolaAdminPage() {
 
       <AdminTable
         admins={admins}
+        workspaces={workspaces}
         isLoading={isLoading}
         onAdd={handleOpenCreateModal}
         onEdit={handleOpenEditModal}

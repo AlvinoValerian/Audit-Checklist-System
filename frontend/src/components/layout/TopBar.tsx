@@ -41,6 +41,7 @@ export default function TopBar({
   const [currentAdminEmail, setCurrentAdminEmail] = useState("");
   const [currentWorkspaceName, setCurrentWorkspaceName] = useState("");
   const [avatar, setAvatar] = useState<string | null>(null);
+  const [purchasedPlan, setPurchasedPlan] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Sync logged in user data, active workspace, and profile avatar
@@ -133,6 +134,43 @@ export default function TopBar({
     } else {
       setAvatar(null);
     }
+
+    // Sync paket langganan yang dibeli (Hanya untuk Super Admin karena hanya Super Admin yang membeli paket)
+    try {
+      const isSuperAdmin =
+        resolvedRole === "Super Admin" || currentUser?.role === "Super Admin";
+
+      if (!isSuperAdmin) {
+        setPurchasedPlan(null);
+      } else {
+        const plan =
+          localStorage.getItem("active_subscription_plan") ||
+          localStorage.getItem("selected_checkout_plan");
+        const isPaid = localStorage.getItem("superadmin_paid") === "true";
+        const billingCycle = localStorage.getItem("selected_billing_cycle");
+        const isYearly =
+          billingCycle === "yearly" ||
+          billingCycle === "annual" ||
+          billingCycle === "tahunan";
+        const cycleLabel = isYearly ? " (Tahunan)" : "";
+
+        if (plan) {
+          const formatted =
+            plan.toLowerCase() === "lite"
+              ? "Lite Plan"
+              : plan.toLowerCase() === "pro"
+              ? "Pro Plan"
+              : "Standard Plan";
+          setPurchasedPlan(formatted + cycleLabel);
+        } else if (isPaid) {
+          setPurchasedPlan("Standard Plan" + cycleLabel);
+        } else {
+          setPurchasedPlan(null);
+        }
+      }
+    } catch {
+      setPurchasedPlan(null);
+    }
   }, [propAdminName, propAdminRole, propAdminEmail, propWorkspaceName]);
 
   useEffect(() => {
@@ -197,7 +235,17 @@ export default function TopBar({
         )}
 
         {/* Right Admin Profile & Settings */}
-        <div className="flex items-center gap-3.5 ml-auto">
+        <div className="flex items-center gap-3 ml-auto">
+          {/* Label Paket yang Dibeli di samping Pengaturan (Eksklusif Khusus Super Admin) */}
+          {currentAdminRole === "Super Admin" && purchasedPlan && (
+            <div
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200/90 text-emerald-800 text-xs font-bold shadow-2xs"
+              title={`Paket Langganan Aktif: ${purchasedPlan}`}
+            >
+              <span>Paket: {purchasedPlan}</span>
+            </div>
+          )}
+
           {/* Settings Button & Dropdown */}
           <div className="relative" ref={dropdownRef}>
             <button

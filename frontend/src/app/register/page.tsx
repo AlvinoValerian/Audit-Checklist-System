@@ -32,6 +32,37 @@ export default function RegisterPage() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [agreeTerms, setAgreeTerms] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [selectedPlan, setSelectedPlan] = useState<string>("standard");
+  const [isYearlyBilling, setIsYearlyBilling] = useState<boolean>(false);
+
+  // Deteksi paket langganan dan siklus penagihan (Bulanan vs Tahunan) dari URL
+  React.useEffect(() => {
+    try {
+      if (typeof window !== "undefined") {
+        const params = new URLSearchParams(window.location.search);
+        const planParam = params.get("plan");
+        const billingParam = params.get("billing")?.toLowerCase();
+        const isYear =
+          billingParam === "yearly" ||
+          billingParam === "annual" ||
+          billingParam === "tahunan";
+
+        setIsYearlyBilling(isYear);
+        localStorage.setItem("selected_billing_cycle", isYear ? "yearly" : "monthly");
+
+        if (planParam && ["lite", "standard", "pro"].includes(planParam.toLowerCase())) {
+          const planNorm = planParam.toLowerCase();
+          setSelectedPlan(planNorm);
+          localStorage.setItem("selected_checkout_plan", planNorm);
+          localStorage.setItem("show_payment_modal_on_workspace", "true");
+          localStorage.setItem("pending_superadmin_payment", "true");
+        } else {
+          const saved = localStorage.getItem("selected_checkout_plan");
+          if (saved) setSelectedPlan(saved);
+        }
+      }
+    } catch {}
+  }, []);
 
   // 1. Handler Nama Lengkap: Hanya huruf dan spasi (angka & simbol langsung diblokir)
   const handleFullNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -168,6 +199,18 @@ export default function RegisterPage() {
         result.message || "Pendaftaran berhasil! Akun Super Admin Anda siap digunakan."
       );
 
+      // Simpan preferensi paket langganan dan picu modal pembayaran di workspace
+      try {
+        localStorage.setItem("selected_checkout_plan", selectedPlan);
+        localStorage.setItem("selected_billing_cycle", isYearlyBilling ? "yearly" : "monthly");
+        localStorage.setItem("show_payment_modal_on_workspace", "true");
+        localStorage.setItem("pending_superadmin_payment", "true");
+        localStorage.removeItem("superadmin_paid");
+        if (cleanEmail) {
+          localStorage.removeItem(`superadmin_paid_${cleanEmail}`);
+        }
+      } catch {}
+
       setTimeout(() => {
         router.push("/workspace");
       }, 1000);
@@ -249,6 +292,40 @@ export default function RegisterPage() {
               Lengkapi formulir untuk membuat akun Super Admin dan workspace perusahaan Anda.
             </p>
           </div>
+
+          {/* Badge Paket yang Dipilih dari Landing Page */}
+          {selectedPlan && (
+            <div className="mb-4 p-3 rounded-xl bg-gradient-to-r from-sky-50 via-blue-50 to-indigo-50 border border-sky-200/80 flex items-center justify-between text-xs animate-in fade-in">
+              <div className="flex items-center gap-2.5">
+                <div className="w-7 h-7 rounded-lg bg-sky-600 text-white flex items-center justify-center font-black text-xs shadow-xs">
+                  ⚡
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-slate-500 block">
+                    Paket Langganan Dipilih ({isYearlyBilling ? "Tahunan — Hemat 20%" : "Bulanan"})
+                  </span>
+                  <span className="font-extrabold text-[#193f53] text-xs sm:text-sm">
+                    {isYearlyBilling ? (
+                      selectedPlan === "lite"
+                        ? "Lite Plan (Rp 480.000 / tahun)"
+                        : selectedPlan === "pro"
+                        ? "Pro Plan (Rp 3.480.000 / tahun)"
+                        : "Standard Plan (Rp 1.440.000 / tahun)"
+                    ) : (
+                      selectedPlan === "lite"
+                        ? "Lite Plan (Rp 50.000 / bulan)"
+                        : selectedPlan === "pro"
+                        ? "Pro Plan (Rp 360.000 / bulan)"
+                        : "Standard Plan (Rp 150.000 / bulan)"
+                    )}
+                  </span>
+                </div>
+              </div>
+              <span className="text-[10px] font-bold text-sky-700 bg-white/90 border border-sky-200 px-2 py-1 rounded-full shadow-2xs">
+                SparkPay Gateway
+              </span>
+            </div>
+          )}
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-3.5">
