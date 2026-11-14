@@ -36,14 +36,29 @@ interface QuestionItem {
 interface StoredAudit {
   scheduleId: string;
   scheduleTitle: string;
+  timeRange?: string;
   storeName: string;
   storeCode: string;
+  storeLat?: number;
+  storeLng?: number;
+  storeRadius?: number;
   templateName: string;
+  savedDate?: string;
+  lastSavedIndex?: number;
   questions: QuestionItem[];
   selectedConditions: Record<number, "standard" | "issue" | "na">;
   photos: Record<number, string>;
+  photoMetas?: Record<number, any>;
   notes: Record<number, string>;
   startedAt?: string;
+  lastUpdated?: string;
+}
+
+function getTodayWibDateStr(): string {
+  const wibDate = new Date(Date.now() + 7 * 60 * 60 * 1000);
+  return `${wibDate.getUTCFullYear()}-${String(wibDate.getUTCMonth() + 1).padStart(2, "0")}-${String(
+    wibDate.getUTCDate()
+  ).padStart(2, "0")}`;
 }
 
 function ReviewContent() {
@@ -64,63 +79,229 @@ function ReviewContent() {
     setCurrentUser(user);
 
     const updateClock = () => {
-      const now = new Date();
-      const hours = String(now.getHours()).padStart(2, "0");
-      const minutes = String(now.getMinutes()).padStart(2, "0");
+      const nowWib = new Date(Date.now() + 7 * 60 * 60 * 1000);
+      const hours = String(nowWib.getUTCHours()).padStart(2, "0");
+      const minutes = String(nowWib.getUTCMinutes()).padStart(2, "0");
       setCurrentTime(`${hours}:${minutes}`);
     };
     updateClock();
     const timer = setInterval(updateClock, 30000);
 
-    // Ambil data audit aktif dari localStorage
+    const todayStr = getTodayWibDateStr();
+    let localDraft: StoredAudit | null = null;
+    let targetScheduleId = scheduleId;
+
+    // Baca draf hari ini dari localStorage untuk menggabungkan jawaban staf dengan data butir terbaru dari PostgreSQL
     try {
-      const stored = localStorage.getItem("staff_active_audit");
-      if (stored) {
-        const parsed: StoredAudit = JSON.parse(stored);
-        if (!scheduleId || parsed.scheduleId === scheduleId) {
-          setAuditData(parsed);
-          setIsLoading(false);
-          return;
+      const specificKey = scheduleId ? `staff_saved_audit_${scheduleId}` : null;
+      const specificStr = specificKey ? localStorage.getItem(specificKey) : null;
+      const activeStr = localStorage.getItem("staff_active_audit");
+
+      const parseValidDraft = (raw: string | null): StoredAudit | null => {
+        if (!raw) return null;
+        const parsed: StoredAudit = JSON.parse(raw);
+        if (parsed.savedDate && parsed.savedDate !== todayStr) {
+          return null;
         }
+        if (scheduleId && parsed.scheduleId && parsed.scheduleId !== scheduleId) {
+          return null;
+        }
+        return parsed;
+      };
+
+      localDraft = parseValidDraft(specificStr) || parseValidDraft(activeStr);
+      if (!targetScheduleId && localDraft?.scheduleId) {
+        targetScheduleId = localDraft.scheduleId;
+      }
+
+      // Bersihkan draf hari sebelumnya yang sudah kedaluwarsa
+      if (specificKey && specificStr && !parseValidDraft(specificStr)) {
+        try {
+          const parsedOld = JSON.parse(specificStr);
+          if (parsedOld.savedDate && parsedOld.savedDate !== todayStr) {
+            localStorage.removeItem(specificKey);
+          }
+        } catch {}
+      }
+      if (activeStr) {
+        try {
+          const parsedActive = JSON.parse(activeStr);
+          if (parsedActive.savedDate && parsedActive.savedDate !== todayStr) {
+            localStorage.removeItem("staff_active_audit");
+          }
+        } catch {}
       }
     } catch (e) {
       console.warn("Gagal membaca audit dari localStorage:", e);
     }
 
-    // Jika belum ada di localStorage, fetch langsung dari API
-    if (scheduleId) {
-      fetch(`/api/staff/schedules/${scheduleId}`)
-        .then((r) => r.json())
-        .then((res) => {
-          if (res.status === "success" && res.data) {
-            const initialConditions: Record<number, "standard" | "issue" | "na"> = {};
-            (res.data.tasks || []).forEach((t: QuestionItem) => {
-              initialConditions[t.id] = "standard";
-            });
-            const data: StoredAudit = {
-              scheduleId: res.data.id,
-              scheduleTitle: res.data.title,
-              storeName: res.data.store?.name || user?.storeName || "Toko Cabang",
-              storeCode: res.data.store?.code || "ST-01",
-              templateName: res.data.templateName || "Standar SOP",
-              questions: res.data.tasks || [],
-              selectedConditions: initialConditions,
-              photos: {},
-              notes: {},
-              startedAt: new Date().toISOString(),
-            };
-            setAuditData(data);
-            localStorage.setItem("staff_active_audit", JSON.stringify(data));
-          }
-        })
-        .catch(console.error)
-        .finally(() => setIsLoading(false));
-    } else {
+    if (!targetScheduleId) {
+      toast.error("ID Jadwal tidak ditemukan");
       setIsLoading(false);
+      router.replace("/jadwal-staff");
+      return () => clearInterval(timer);
     }
 
+    // Selalu sinkronkan dengan data jadwal & butir checklist live dari PostgreSQL
+    const fetchLiveAndMerge = async () => {
+      try {
+        const token = AuthService.getToken();
+        const headers: Record<string, string> = {};
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+        if (user?.email) headers["x-user-email"] = user.email;
+        if (user?.role) headers["x-user-role"] = user.role;
+        const rawId =
+          user?.rawId ||
+          (user?.id
+            ? user.id.replace(/^staff-/, "").replace(/^sa-/, "").replace(/^adm-/, "")
+            : undefined);
+        if (rawId) headers["x-user-id"] = rawId;
+        if (user?.storeId) headers["x-store-id"] = user.storeId.toString();
+
+        let res: Response | null = null;
+        try {
+          res = await fetch(`/api/staff/schedules/${targetScheduleId}`, {
+            headers,
+            cache: "no-store",
+          });
+          if (!res || res.status >= 500) {
+            throw new Error(`HTTP ${res?.status}`);
+          }
+        } catch {
+          res = await fetch(`http://127.0.0.1:5000/api/staff/schedules/${targetScheduleId}`, {
+            headers,
+            cache: "no-store",
+          });
+        }
+
+        if (res && (res.status === 401 || res.status === 403)) {
+          const errJson = await res.json().catch(() => null);
+          toast.error(errJson?.message || "Akses ditolak atau sesi Anda telah berakhir.");
+          if (res.status === 401) {
+            AuthService.logout();
+            router.replace("/login");
+          } else {
+            router.replace("/jadwal-staff");
+          }
+          return;
+        }
+
+        if (res && (res.status === 404 || res.status === 400)) {
+          const errJson = await res.json().catch(() => null);
+          toast.error(errJson?.message || "Jadwal audit tidak ditemukan di database.");
+          router.replace("/jadwal-staff");
+          return;
+        }
+
+        if (res && res.ok) {
+          const json = await res.json();
+          if (json.status === "success" && json.data) {
+            const live = json.data;
+
+            if (
+              live.canStart === false ||
+              live.isExpired ||
+              live.isHoliday ||
+              live.isCompleted ||
+              live.isLocked ||
+              live.isNotScheduledToday
+            ) {
+              if (live.isCompleted || live.status === "Selesai") {
+                toast.info("Jadwal audit ini sudah selesai dikerjakan dan dilaporkan.");
+              } else if (live.isHoliday || live.status === "Libur") {
+                toast.info(`Gerai sedang berstatus Libur Operasional (${live.holidayReason || "Libur"}).`);
+              } else if (live.isLocked || live.status === "Terkunci") {
+                toast.info("Jadwal audit ini belum memasuki jam pelaksanaan.");
+              } else if (live.isNotScheduledToday) {
+                toast.error("Jadwal audit ini tidak berlaku untuk hari ini.");
+              } else {
+                toast.error("Audit Kedaluwarsa: Batas toleransi pengerjaan telah berakhir.");
+              }
+              router.replace("/jadwal-staff");
+              return;
+            }
+
+            const taskList: QuestionItem[] = Array.isArray(live.tasks) ? live.tasks : [];
+            const validTaskIds = new Set(taskList.map((t) => t.id));
+
+            const mergedConditions: Record<number, "standard" | "issue" | "na"> = {};
+            const mergedPhotos: Record<number, string> = {};
+            const mergedNotes: Record<number, string> = {};
+            const mergedMetas: Record<number, any> = {};
+
+            if (localDraft) {
+              Object.entries(localDraft.selectedConditions || {}).forEach(([k, v]) => {
+                const numId = Number(k);
+                if (validTaskIds.has(numId)) mergedConditions[numId] = v;
+              });
+              Object.entries(localDraft.photos || {}).forEach(([k, v]) => {
+                const numId = Number(k);
+                if (validTaskIds.has(numId)) mergedPhotos[numId] = v;
+              });
+              Object.entries(localDraft.notes || {}).forEach(([k, v]) => {
+                const numId = Number(k);
+                if (validTaskIds.has(numId)) mergedNotes[numId] = v;
+              });
+              Object.entries(localDraft.photoMetas || {}).forEach(([k, v]) => {
+                const numId = Number(k);
+                if (validTaskIds.has(numId)) mergedMetas[numId] = v;
+              });
+            }
+
+            taskList.forEach((t) => {
+              if (!mergedConditions[t.id]) {
+                mergedConditions[t.id] = "standard";
+              }
+            });
+
+            const mergedAudit: StoredAudit = {
+              scheduleId: live.id,
+              scheduleTitle: live.title,
+              timeRange: live.timeRange,
+              storeName: live.store?.name || user?.storeName || "Toko Cabang",
+              storeCode: live.store?.code || "ST-01",
+              storeLat: live.store?.latitude ?? localDraft?.storeLat,
+              storeLng: live.store?.longitude ?? localDraft?.storeLng,
+              storeRadius: live.store?.radius ?? localDraft?.storeRadius,
+              templateName: live.templateName || "Standar SOP",
+              savedDate: todayStr,
+              lastSavedIndex: localDraft?.lastSavedIndex ?? 0,
+              questions: taskList,
+              selectedConditions: mergedConditions,
+              photos: mergedPhotos,
+              photoMetas: mergedMetas,
+              notes: mergedNotes,
+              startedAt: localDraft?.startedAt || new Date().toISOString(),
+              lastUpdated: new Date().toISOString(),
+            };
+
+            setAuditData(mergedAudit);
+            try {
+              localStorage.setItem(`staff_saved_audit_${live.id}`, JSON.stringify(mergedAudit));
+              localStorage.setItem("staff_active_audit", JSON.stringify(mergedAudit));
+            } catch {}
+            return;
+          }
+        }
+
+        throw new Error(`HTTP ${res?.status || "network"}`);
+      } catch (err) {
+        console.warn("Gagal sinkronisasi jadwal live di review:", err);
+        if (localDraft && Array.isArray(localDraft.questions) && localDraft.questions.length > 0) {
+          setAuditData(localDraft);
+          toast.info("Koneksi terganggu. Menampilkan jawaban draf tersimpan hari ini.");
+        } else {
+          toast.error("Gagal memuat data checklist dari server database.");
+        }
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchLiveAndMerge();
+
     return () => clearInterval(timer);
-  }, [scheduleId]);
+  }, [scheduleId, router]);
 
   const questions = auditData?.questions || [];
   const selectedConditions = auditData?.selectedConditions || {};
@@ -148,7 +329,11 @@ function ReviewContent() {
 
   // Lanjut ke Halaman Konfirmasi & Serahkan
   const handleProceedToConfirmation = () => {
-    if (!isAllComplete && totalCount > 0) {
+    if (totalCount === 0) {
+      toast.error("Tidak ada butir checklist yang dimuat dari server.");
+      return;
+    }
+    if (!isAllComplete) {
       toast.error("Masih ada butir checklist yang membutuhkan foto bukti kamera atau catatan temuan wajib!");
       return;
     }

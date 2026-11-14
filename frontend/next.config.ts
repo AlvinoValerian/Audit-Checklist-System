@@ -41,6 +41,36 @@ const nextConfig: NextConfig = {
         destination: "/kelola-admin",
         permanent: false,
       },
+      {
+        source: "/riwayat",
+        destination: "/jadwal-staff/riwayat",
+        permanent: false,
+      },
+      {
+        source: "/profile",
+        destination: "/jadwal-staff/profile",
+        permanent: false,
+      },
+      {
+        source: "/profil",
+        destination: "/jadwal-staff/profile",
+        permanent: false,
+      },
+      {
+        source: "/staff/riwayat",
+        destination: "/jadwal-staff/riwayat",
+        permanent: false,
+      },
+      {
+        source: "/staff/profile",
+        destination: "/jadwal-staff/profile",
+        permanent: false,
+      },
+      {
+        source: "/staff/profil",
+        destination: "/jadwal-staff/profile",
+        permanent: false,
+      },
     ];
   },
 };

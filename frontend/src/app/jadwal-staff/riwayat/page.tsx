@@ -29,18 +29,24 @@ interface HistoryItem {
   time: string;
   title: string;
   auditor: string;
-  auditorRole?: string;
+  auditorRole?: string | null;
   itemCount: string;
   scoreText: string;
   statusType: "selesai" | "terlambat" | "temuan" | "tidak_patuh";
   statusBadge: string;
   rightBadge?: string;
+  isLate?: boolean;
   isGpsValid?: boolean;
   storeName?: string;
   notes?: string;
+  completedAt?: string;
+  totalQuestions?: number;
+  answeredQuestions?: number;
+  durationMinute?: number;
 }
 
 interface HistoryGroup {
+  dateKey?: string;
   dateHeader: string;
   itemCountLabel: string;
   items: HistoryItem[];
@@ -116,8 +122,40 @@ function RiwayatContent() {
     try {
       if (!silent) setIsRefreshing(true);
       const token = AuthService.getToken();
-      const user = AuthService.getCurrentUser();
+      let user = AuthService.getCurrentUser();
       const activeWs = AuthService.getActiveWorkspace();
+
+      // Sinkronkan terlebih dahulu data user terbaru dari database (/api/auth/me)
+      if (token) {
+        try {
+          let meRes: Response | null = await fetch("/api/auth/me", {
+            headers: { Authorization: `Bearer ${token}` },
+            cache: "no-store",
+          });
+          if (!meRes || meRes.status >= 500) {
+            meRes = await fetch("http://127.0.0.1:5000/api/auth/me", {
+              headers: { Authorization: `Bearer ${token}` },
+              cache: "no-store",
+            });
+          }
+          if (meRes && (meRes.status === 401 || meRes.status === 403)) {
+            const errJson = await meRes.json().catch(() => null);
+            toast.error(errJson?.message || "Akun dinonaktifkan atau sesi telah berakhir.");
+            AuthService.logout();
+            router.replace("/login");
+            return;
+          }
+          if (meRes && meRes.ok) {
+            const meJson = await meRes.json();
+            if (meJson.status === "success" && meJson.data?.user) {
+              const freshUser: AuthUser = meJson.data.user;
+              user = freshUser;
+              setCurrentUser(freshUser);
+              AuthService.setCurrentUser(freshUser);
+            }
+          }
+        } catch {}
+      }
 
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
@@ -135,9 +173,17 @@ function RiwayatContent() {
       let res: Response | null = null;
       try {
         res = await fetch(`/api/staff/history${storeParam}`, { headers, cache: "no-store" });
-        if (!res || !res.ok) throw new Error(`Fetch status: ${res?.status}`);
+        if (!res || res.status >= 500) throw new Error(`Fetch status: ${res?.status}`);
       } catch {
         res = await fetch(`http://127.0.0.1:5000/api/staff/history${storeParam}`, { headers, cache: "no-store" });
+      }
+
+      if (res && (res.status === 401 || res.status === 403)) {
+        const errJson = await res.json().catch(() => null);
+        toast.error(errJson?.message || "Akun dinonaktifkan atau sesi Anda telah berakhir.");
+        AuthService.logout();
+        router.replace("/login");
+        return;
       }
 
       if (res && res.ok) {
@@ -146,11 +192,20 @@ function RiwayatContent() {
           setHistoryGroups(json.data);
           if (json.store) {
             setSelectedStore({
-              name: json.store.name || user?.storeName || "",
-              location: json.store.location || user?.storeLocation || "",
-              code: json.store.code || user?.storeCode || "",
-              address: json.store.address || user?.storeAddress || "",
+              name: json.store.name ?? user?.storeName ?? "",
+              location: json.store.location ?? user?.storeLocation ?? "",
+              code: json.store.code ?? user?.storeCode ?? "",
+              address: json.store.address ?? user?.storeAddress ?? "",
             });
+          } else if (user?.storeName) {
+            setSelectedStore({
+              name: user.storeName,
+              location: user.storeLocation || "",
+              code: user.storeCode || "",
+              address: user.storeAddress || "",
+            });
+          } else {
+            setSelectedStore({ name: "", location: "", code: "", address: "" });
           }
           if (!silent) {
             toast.success("Riwayat checklist berhasil disinkronkan.");
@@ -170,11 +225,29 @@ function RiwayatContent() {
 
   useEffect(() => {
     fetchHistoryData(true);
+
+    const handleFocus = () => {
+      fetchHistoryData(true);
+    };
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
   }, []);
 
   const handleRefresh = () => {
     fetchHistoryData(false);
   };
+
+  // Tahun-bulan saat ini dalam zona WIB (Asia/Jakarta) untuk filter "Bulan Ini"
+  const currentWibYm = (() => {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Jakarta",
+      year: "numeric",
+      month: "2-digit",
+    }).formatToParts(new Date());
+    const y = parts.find((p) => p.type === "year")?.value || "";
+    const m = parts.find((p) => p.type === "month")?.value || "";
+    return y && m ? `${y}-${m}` : "";
+  })();
 
   // Filter items sesuai tab aktif (Semua, Bulan Ini, Terlambat, Issue) dan pencarian
   const filteredGroups = historyGroups
@@ -183,8 +256,10 @@ function RiwayatContent() {
         // Filter by tab
         if (activeFilter === "terlambat") {
           const isLate =
+            Boolean(item.isLate) ||
             item.statusType === "terlambat" ||
-            item.statusBadge.toLowerCase().includes("terlambat");
+            item.statusBadge.toLowerCase().includes("terlambat") ||
+            item.rightBadge?.toLowerCase().includes("terlambat");
           if (!isLate) return false;
         }
 
@@ -210,7 +285,23 @@ function RiwayatContent() {
         }
 
         if (activeFilter === "bulan-ini") {
-          return true;
+          let itemYm = "";
+          if (group.dateKey && /^\d{4}-\d{2}/.test(group.dateKey)) {
+            itemYm = group.dateKey.slice(0, 7);
+          } else if (item.completedAt) {
+            const d = new Date(item.completedAt);
+            if (!isNaN(d.getTime())) {
+              const p = new Intl.DateTimeFormat("en-CA", {
+                timeZone: "Asia/Jakarta",
+                year: "numeric",
+                month: "2-digit",
+              }).formatToParts(d);
+              const iy = p.find((x) => x.type === "year")?.value || "";
+              const im = p.find((x) => x.type === "month")?.value || "";
+              if (iy && im) itemYm = `${iy}-${im}`;
+            }
+          }
+          if (!itemYm || itemYm !== currentWibYm) return false;
         }
 
         // Filter by search
@@ -322,7 +413,9 @@ function RiwayatContent() {
                     Outlet Aktif
                   </p>
                   <p className="text-xs sm:text-[13px] font-bold text-slate-900 leading-tight mt-1">
-                    {selectedStore.location ? `${selectedStore.name} — ${selectedStore.location}` : selectedStore.name}
+                    {selectedStore.name
+                      ? (selectedStore.location ? `${selectedStore.name} — ${selectedStore.location}` : selectedStore.name)
+                      : "Outlet Penugasan"}
                   </p>
                 </div>
               </div>
@@ -349,7 +442,7 @@ function RiwayatContent() {
                       Alamat Gerai
                     </p>
                     <p className="text-[11px] font-medium text-slate-700 leading-relaxed mt-1">
-                      {selectedStore.address}
+                      {selectedStore.address || "Alamat gerai belum diatur di database"}
                     </p>
                   </div>
                 </div>
@@ -517,21 +610,28 @@ function RiwayatContent() {
                         </h3>
 
                         {/* Auditor Name + Role */}
-                        <p className="text-xs text-slate-400 mt-1 flex items-center gap-1.5">
-                          <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                          <span>
-                            Oleh{" "}
-                            <span className="font-semibold text-slate-800">
-                              {item.auditor}
-                            </span>
-                            {item.auditorRole && (
-                              <span className="text-slate-400 font-normal">
-                                {" "}
-                                ({item.auditorRole})
+                        {item.statusType === "tidak_patuh" ? (
+                          <p className="text-xs text-rose-600 font-medium mt-1 flex items-center gap-1.5">
+                            <AlertCircle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                            <span>Tidak Dikerjakan (Ditutup Sistem)</span>
+                          </p>
+                        ) : (
+                          <p className="text-xs text-slate-400 mt-1 flex items-center gap-1.5">
+                            <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span>
+                              Oleh{" "}
+                              <span className="font-semibold text-slate-800">
+                                {item.auditor}
                               </span>
-                            )}
-                          </span>
-                        </p>
+                              {item.auditorRole && (
+                                <span className="text-slate-400 font-normal">
+                                  {" "}
+                                  ({item.auditorRole})
+                                </span>
+                              )}
+                            </span>
+                          </p>
+                        )}
 
                         {/* Separator Line */}
                         <div className="border-t border-slate-100/90 my-2.5" />
@@ -658,9 +758,10 @@ function RiwayatContent() {
                   <div className="flex justify-between items-center text-xs">
                     <span className="text-slate-400 text-[11px]">Auditor Pelaksana:</span>
                     <span className="font-semibold text-slate-800 text-xs">
-                      {selectedItem.auditor}{" "}
-                      {selectedItem.auditorRole && (
+                      {selectedItem.statusType === "tidak_patuh" ? "-" : selectedItem.auditor}
+                      {selectedItem.statusType !== "tidak_patuh" && selectedItem.auditorRole && (
                         <span className="text-slate-400 font-normal">
+                          {" "}
                           ({selectedItem.auditorRole})
                         </span>
                       )}
@@ -670,7 +771,7 @@ function RiwayatContent() {
                     <span className="text-slate-400 text-[11px]">Kesesuaian SOP:</span>
                     <span
                       className={`font-bold text-xs ${
-                        selectedItem.statusType === "temuan"
+                        selectedItem.statusType === "temuan" || selectedItem.statusType === "tidak_patuh"
                           ? "text-rose-600"
                           : selectedItem.statusType === "terlambat"
                           ? "text-amber-600"

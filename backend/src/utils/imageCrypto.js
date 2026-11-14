@@ -8,7 +8,7 @@ const key = crypto.createHash('sha256').update(SECRET_KEY_PASSPHRASE).digest();
  */
 function encryptImageData(plainBase64) {
   if (!plainBase64 || typeof plainBase64 !== 'string') return '';
-  if (plainBase64.startsWith('ENC:v1:')) return plainBase64;
+  if (plainBase64.startsWith('ENC:v1:') || plainBase64.startsWith('enc:v1:')) return plainBase64;
 
   try {
     const iv = crypto.randomBytes(12);
@@ -25,10 +25,18 @@ function encryptImageData(plainBase64) {
 }
 
 /**
- * Dekripsi payload terenkripsi ENC:v1:... kembali ke Base64 gambar
+ * Dekripsi payload terenkripsi ENC:v1:... atau enc:v1:... kembali ke Base64 gambar
  */
 function decryptImageData(encryptedData) {
   if (!encryptedData || typeof encryptedData !== 'string') return '';
+  if (encryptedData.startsWith('enc:v1:')) {
+    try {
+      const { decryptImage } = require('./crypto.utils');
+      return decryptImage(encryptedData);
+    } catch (e) {
+      return encryptedData;
+    }
+  }
   if (!encryptedData.startsWith('ENC:v1:')) return encryptedData;
 
   try {

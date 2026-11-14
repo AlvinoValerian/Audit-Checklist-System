@@ -7,6 +7,7 @@ import ProfileModal from "./ProfileModal";
 import { AuthService } from "@/lib/auth";
 import { CryptoService } from "@/lib/crypto";
 import { WorkspaceService } from "@/services/workspace.service";
+import DecryptedImage from "@/components/DecryptedImage";
 
 interface TopBarProps {
   workspaceName?: string;
@@ -252,7 +253,7 @@ export default function TopBar({
           >
             <div className="w-8 h-8 rounded-full bg-[#e0e7ff] text-[#1d4ed8] group-hover:bg-[#dbeafe] flex items-center justify-center font-bold text-xs shrink-0 border border-[#c7d2fe] transition-colors shadow-2xs overflow-hidden">
               {avatar ? (
-                <img
+                <DecryptedImage
                   src={avatar}
                   alt={currentAdminName || "Avatar"}
                   className="w-full h-full object-cover"

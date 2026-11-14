@@ -43,16 +43,153 @@ const to24HourString = (str) => {
 };
 
 /**
- * Format string tanggal atau Date object menjadi "YYYY-MM-DD"
+ * Format string tanggal atau Date object menjadi "YYYY-MM-DD" dalam zona waktu WIB (UTC+7)
  */
 const formatDateString = (date) => {
   if (!date) return '';
-  const d = date instanceof Date ? date : new Date(date);
-  if (isNaN(d.getTime())) return '';
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+  if (typeof date === 'string') {
+    if (date.includes('T')) {
+      const d = new Date(date);
+      if (!isNaN(d.getTime())) {
+        const wib = new Date(d.getTime() + 7 * 60 * 60 * 1000);
+        const y = wib.getUTCFullYear();
+        const m = String(wib.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(wib.getUTCDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+      }
+    }
+    return date.split('T')[0].substring(0, 10);
+  }
+  if (date instanceof Date) {
+    const wib = new Date(date.getTime() + 7 * 60 * 60 * 1000);
+    const y = wib.getUTCFullYear();
+    const m = String(wib.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(wib.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  return '';
+};
+
+const getWibDateParts = (date = new Date()) => {
+  const safeDate = date instanceof Date && !isNaN(date.getTime()) ? date : new Date();
+  const wibDate = new Date(safeDate.getTime() + 7 * 60 * 60 * 1000);
+  const y = wibDate.getUTCFullYear();
+  const m = String(wibDate.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(wibDate.getUTCDate()).padStart(2, '0');
+  const hours = wibDate.getUTCHours();
+  const minutes = wibDate.getUTCMinutes();
+  const dayOfWeekShort = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'][wibDate.getUTCDay()];
+  return {
+    dateStr: `${y}-${m}-${d}`,
+    dayOfWeekShort,
+    currentMinutes: hours * 60 + minutes,
+  };
+};
+
+const DAY_NAME_SHORT_MAP = {
+  senin: 'Sen',
+  sen: 'Sen',
+  selasa: 'Sel',
+  sel: 'Sel',
+  rabu: 'Rab',
+  rab: 'Rab',
+  kamis: 'Kam',
+  kam: 'Kam',
+  jumat: 'Jum',
+  "jum'at": 'Jum',
+  jum: 'Jum',
+  sabtu: 'Sab',
+  sab: 'Sab',
+  minggu: 'Min',
+  min: 'Min',
+};
+
+const normalizeDayToken = (day) => {
+  const key = String(day || '').trim().toLowerCase();
+  return DAY_NAME_SHORT_MAP[key] || String(day || '').trim();
+};
+
+const parseSelectedDays = (selectedDaysRaw) => {
+  if (!selectedDaysRaw) return [];
+  if (Array.isArray(selectedDaysRaw)) {
+    return selectedDaysRaw.map(normalizeDayToken).filter(Boolean);
+  }
+  if (typeof selectedDaysRaw === 'string') {
+    try {
+      const parsed = JSON.parse(selectedDaysRaw);
+      if (Array.isArray(parsed)) {
+        return parsed.map(normalizeDayToken).filter(Boolean);
+      }
+    } catch {}
+    return selectedDaysRaw.split(',').map(normalizeDayToken).filter(Boolean);
+  }
+  return [];
+};
+
+const normalizeRecurrenceLabel = (repeatTime) => {
+  const val = (repeatTime || '').toString().trim().toLowerCase();
+  if (val === 'daily' || val === 'setiap hari' || val === 'harian') return 'Setiap Hari';
+  if (val === 'custom' || val === 'weekly' || val === 'hari tertentu' || val === 'mingguan') return 'Hari Tertentu';
+  return 'Sekali';
+};
+
+const getActiveHolidaysOnDate = async (targetDateStr) => {
+  try {
+    return await prisma.$queryRawUnsafe(
+      `
+      SELECT * FROM store_holiday
+      WHERE deleted_at IS NULL
+        AND status != 'Dibatalkan'
+        AND start_date <= $1::date
+        AND end_date >= $1::date
+      `,
+      targetDateStr
+    );
+  } catch (e) {
+    return [];
+  }
+};
+
+const evaluateHolidayForSchedule = (schedule, targetDateStr, storeHolidays = []) => {
+  if (!schedule) return { isHoliday: false, reason: null };
+  const sIdStr = schedule.schedule_id ? schedule.schedule_id.toString() : '';
+  const sStoreId = schedule.store_id ? schedule.store_id.toString() : '';
+  const sStoreName = (schedule.store?.store_name || '').trim().toLowerCase();
+
+  const matchedException = (schedule.schedule_exception || []).find((e) => {
+    if (e.is_skip === false) return false;
+    const eStart = formatDateString(e.start_date);
+    const eEnd = formatDateString(e.end_date || e.start_date);
+    if (!eStart || !eEnd) return false;
+    return targetDateStr >= eStart && targetDateStr <= eEnd;
+  });
+
+  const matchedStoreHoliday = (storeHolidays || []).find((h) => {
+    const hStoreId = h.store_id ? h.store_id.toString() : '';
+    const hStoreName = (h.store_name || '').trim().toLowerCase();
+    const storeMatches = (hStoreId && hStoreId === sStoreId) || (hStoreName && hStoreName === sStoreName);
+    if (!storeMatches) return false;
+
+    const lType = h.libur_type || 'full';
+    if (lType === 'full') return true;
+
+    let hSchedules = [];
+    if (Array.isArray(h.schedules)) hSchedules = h.schedules.map((id) => String(id).replace(/^sch-/, ''));
+    else if (typeof h.schedules === 'string') {
+      try {
+        hSchedules = JSON.parse(h.schedules).map((id) => String(id).replace(/^sch-/, ''));
+      } catch {
+        hSchedules = [];
+      }
+    }
+    return hSchedules.includes(sIdStr);
+  });
+
+  const isStatusHoliday = schedule.status === 'Libur' || Boolean(schedule.notes?.toLowerCase().includes('libur'));
+  const isHoliday = Boolean(matchedException) || Boolean(matchedStoreHoliday) || isStatusHoliday;
+  const reason = matchedStoreHoliday?.reason || matchedException?.note || (isStatusHoliday ? schedule.notes : null) || 'Toko Sedang Libur';
+
+  return { isHoliday, reason: isHoliday ? reason : null };
 };
 
 /**
@@ -62,27 +199,41 @@ const formatDateString = (date) => {
  * Helper: Cek apakah jadwal sedang berlangsung saat ini
  * (berlaku pada hari ini dan sedang berada di dalam rentang waktu start_time s/d end_time)
  */
-const isScheduleRunningNow = (scheduleRecord) => {
+const isScheduleRunningNow = (scheduleRecord, todayStoreHolidays = []) => {
   if (!scheduleRecord) return false;
-  if (scheduleRecord.status === 'inactive' || scheduleRecord.deleted_at) {
+  if (
+    scheduleRecord.deleted_at ||
+    ['inactive', 'cancelled', 'Dibatalkan', 'Nonaktif'].includes(scheduleRecord.status)
+  ) {
     return false;
   }
 
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  const todayStr = `${y}-${m}-${d}`;
-  const dayOfWeekShort = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'][now.getDay()];
+  const { dateStr: todayStr, dayOfWeekShort, currentMinutes } = getWibDateParts(new Date());
+  if (evaluateHolidayForSchedule(scheduleRecord, todayStr, todayStoreHolidays).isHoliday) {
+    return false;
+  }
 
   const scheduleDateStr = formatDateString(scheduleRecord.start_date);
-  const recurrence = scheduleRecord.repeat_time === 'daily' ? 'Setiap Hari' : 'Hari Tertentu';
-  const selectedDays = scheduleRecord.selected_days ? scheduleRecord.selected_days.split(',') : [];
+  if (scheduleDateStr && scheduleDateStr > todayStr) return false;
 
+  const recurrence = normalizeRecurrenceLabel(scheduleRecord.repeat_time);
+  const isRecurring = recurrence === 'Setiap Hari' || recurrence === 'Hari Tertentu';
+
+  if (scheduleRecord.end_date) {
+    const endDateStr = formatDateString(scheduleRecord.end_date);
+    if (endDateStr && (!isRecurring || endDateStr > scheduleDateStr) && endDateStr < todayStr) {
+      return false;
+    }
+  }
+
+  const selectedDays = parseSelectedDays(scheduleRecord.selected_days);
   const runsToday =
-    scheduleDateStr === todayStr ||
-    recurrence === 'Setiap Hari' ||
-    (recurrence === 'Hari Tertentu' && selectedDays.includes(dayOfWeekShort));
+    recurrence === 'Setiap Hari'
+      ? !scheduleDateStr || scheduleDateStr <= todayStr
+      : recurrence === 'Hari Tertentu'
+        ? (!scheduleDateStr || scheduleDateStr <= todayStr) &&
+          (selectedDays.length === 0 || selectedDays.includes(dayOfWeekShort))
+        : scheduleDateStr === todayStr;
 
   if (!runsToday) return false;
 
@@ -94,11 +245,13 @@ const isScheduleRunningNow = (scheduleRecord) => {
 
   if (isNaN(sH) || isNaN(eH)) return false;
 
-  const currentMinutes = now.getHours() * 60 + now.getMinutes();
   const startMinutes = sH * 60 + (isNaN(sM) ? 0 : sM);
   const endMinutes = eH * 60 + (isNaN(eM) ? 0 : eM);
 
-  return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
+  if (endMinutes >= startMinutes) {
+    return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
+  }
+  return currentMinutes >= startMinutes || currentMinutes <= endMinutes;
 };
 
 const calculateDuration = (startTimeStr, endTimeStr) => {
@@ -119,8 +272,25 @@ const calculateDuration = (startTimeStr, endTimeStr) => {
   return `${hours} Jam ${minutes} Menit`;
 };
 
-const computeRealtimeStatus = (rawStatus, scheduleDateStr, startTimeStr, endTimeStr, recurrence, selectedDays, hasCompletedReport = false) => {
-  if (rawStatus === 'cancelled' || rawStatus === 'Dibatalkan' || rawStatus === 'inactive') {
+const computeRealtimeStatus = (
+  rawStatus,
+  scheduleDateStr,
+  endDateStr,
+  startTimeStr,
+  endTimeStr,
+  recurrence,
+  selectedDays,
+  hasCompletedReport = false,
+  deletedAt = null,
+  isHolidayToday = false
+) => {
+  if (
+    deletedAt ||
+    rawStatus === 'cancelled' ||
+    rawStatus === 'Dibatalkan' ||
+    rawStatus === 'inactive' ||
+    rawStatus === 'Nonaktif'
+  ) {
     return 'Dibatalkan';
   }
 
@@ -129,30 +299,45 @@ const computeRealtimeStatus = (rawStatus, scheduleDateStr, startTimeStr, endTime
     return 'Selesai';
   }
 
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  const todayStr = `${y}-${m}-${d}`;
-  const dayOfWeekShort = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'][now.getDay()];
+  const { dateStr: todayStr, dayOfWeekShort, currentMinutes } = getWibDateParts(new Date());
+  const isRecurring = recurrence === 'Setiap Hari' || recurrence === 'Hari Tertentu';
 
-  // Jika tanggal jadwal masa lalu (< today) dan bukan pengulangan berulang, maka sudah selesai:
-  if (scheduleDateStr && scheduleDateStr < todayStr && recurrence !== 'Setiap Hari' && recurrence !== 'Hari Tertentu') {
+  // Jika start_date di masa depan, jadwal belum dimulai
+  if (scheduleDateStr && scheduleDateStr > todayStr) {
+    return 'Terjadwal';
+  }
+
+  // Jika end_date sudah berlalu (dan bukan penanda single-day end_date === start_date pada jadwal berulang)
+  if (endDateStr && (!isRecurring || endDateStr > scheduleDateStr) && endDateStr < todayStr) {
     return 'Selesai';
   }
 
+  // Jika tanggal jadwal masa lalu (< today) dan bukan pengulangan berulang, maka sudah selesai:
+  if (scheduleDateStr && scheduleDateStr < todayStr && !isRecurring) {
+    return 'Selesai';
+  }
+
+  // Jika toko atau jadwal sedang libur hari ini, tidak berstatus Sedang Berjalan
+  if (isHolidayToday) {
+    return 'Terjadwal';
+  }
+
+  const normalizedDays = Array.isArray(selectedDays) ? selectedDays.map(normalizeDayToken) : [];
+
   // Cek apakah jadwal ini aktif/berlaku pada hari ini (today):
   const runsToday =
-    scheduleDateStr === todayStr ||
-    recurrence === 'Setiap Hari' ||
-    (recurrence === 'Hari Tertentu' && Array.isArray(selectedDays) && selectedDays.includes(dayOfWeekShort));
+    recurrence === 'Setiap Hari'
+      ? !scheduleDateStr || scheduleDateStr <= todayStr
+      : recurrence === 'Hari Tertentu'
+        ? (!scheduleDateStr || scheduleDateStr <= todayStr) &&
+          (normalizedDays.length === 0 || normalizedDays.includes(dayOfWeekShort))
+        : scheduleDateStr === todayStr;
 
   if (runsToday) {
     if (startTimeStr && endTimeStr) {
       const [sH, sM] = startTimeStr.split(':').map((v) => parseInt(v, 10));
       const [eH, eM] = endTimeStr.split(':').map((v) => parseInt(v, 10));
       if (!isNaN(sH) && !isNaN(eH)) {
-        const currentMinutes = now.getHours() * 60 + now.getMinutes();
         const startMinutes = sH * 60 + (isNaN(sM) ? 0 : sM);
         const endMinutes = eH * 60 + (isNaN(eM) ? 0 : eM);
 
@@ -178,7 +363,6 @@ const computeRealtimeStatus = (rawStatus, scheduleDateStr, startTimeStr, endTime
     } else if (startTimeStr) {
       const [sH, sM] = startTimeStr.split(':').map((v) => parseInt(v, 10));
       if (!isNaN(sH)) {
-        const currentMinutes = now.getHours() * 60 + now.getMinutes();
         const startMinutes = sH * 60 + (isNaN(sM) ? 0 : sM);
         if (currentMinutes < startMinutes) {
           return 'Terjadwal';
@@ -190,33 +374,24 @@ const computeRealtimeStatus = (rawStatus, scheduleDateStr, startTimeStr, endTime
     return 'Terjadwal';
   }
 
-  // Jika tanggal lampau (< today):
-  if (scheduleDateStr && scheduleDateStr < todayStr) {
-    return 'Selesai';
-  }
-
+  // Jadwal berulang yang masih aktif namun tidak jatuh pada hari ini tetap berstatus Terjadwal
   return 'Terjadwal';
 };
 
 /**
  * Format entitas Schedule dari DB PostgreSQL ke antarmuka Frontend
  */
-const formatSchedule = (s) => {
+const formatSchedule = (s, todayStoreHolidays = []) => {
   const startTime = formatTimeString(s.start_time);
   const endTime = formatTimeString(s.end_time);
   const date = formatDateString(s.start_date);
+  const endDate = s.end_date ? formatDateString(s.end_date) : undefined;
   const createdAt = formatDateString(s.created_at);
   const deletedAt = s.deleted_at ? formatDateString(s.deleted_at) : undefined;
 
-  const recurrence =
-    s.repeat_time === 'daily' || s.repeat_time === 'Setiap Hari'
-      ? 'Setiap Hari'
-      : 'Hari Tertentu';
+  const recurrence = normalizeRecurrenceLabel(s.repeat_time) === 'Setiap Hari' ? 'Setiap Hari' : 'Hari Tertentu';
 
-  let selectedDays = [];
-  if (s.selected_days) {
-    selectedDays = s.selected_days.split(',').map((d) => d.trim()).filter(Boolean);
-  }
+  const selectedDays = parseSelectedDays(s.selected_days);
 
   // Auditor name: ambil dari schedule_staff pertama atau nama admin
   let auditorName = 'Hendra Wijaya';
@@ -226,22 +401,31 @@ const formatSchedule = (s) => {
     auditorName = s.admin.name;
   }
 
-  const hasCompletedReport = Array.isArray(s.checklist_report) && s.checklist_report.some(r => r.status === 'completed' || r.status === 'submitted' || r.status === 'terlambat');
-  const now = new Date();
-  const todayY = now.getFullYear();
-  const todayM = String(now.getMonth() + 1).padStart(2, '0');
-  const todayD = String(now.getDate()).padStart(2, '0');
-  const todayDateStr = `${todayY}-${todayM}-${todayD}`;
+  const finishedStatuses = ['completed', 'submitted', 'terlambat', 'late', 'submitted_late'];
+  const hasCompletedReport = Array.isArray(s.checklist_report) && s.checklist_report.some((r) => finishedStatuses.includes(r.status));
+  const { dateStr: todayDateStr } = getWibDateParts(new Date());
 
-  const isCompletedToday = Array.isArray(s.checklist_report) && s.checklist_report.some(r => {
-    if (r.status !== 'completed' && r.status !== 'submitted' && r.status !== 'terlambat') return false;
+  const isCompletedToday = Array.isArray(s.checklist_report) && s.checklist_report.some((r) => {
+    if (!finishedStatuses.includes(r.status)) return false;
     const rDateStr = r.completed_at ? formatDateString(r.completed_at) : (r.created_at ? formatDateString(r.created_at) : null);
     return rDateStr === todayDateStr;
   });
 
+  const holidayEval = evaluateHolidayForSchedule(s, todayDateStr, todayStoreHolidays);
   const isRecurring = recurrence === 'Setiap Hari' || recurrence === 'Hari Tertentu';
   const reportDoneForSchedule = isRecurring ? isCompletedToday : hasCompletedReport;
-  const status = computeRealtimeStatus(s.status, date, startTime, endTime, recurrence, selectedDays, reportDoneForSchedule);
+  const status = computeRealtimeStatus(
+    s.status,
+    date,
+    endDate,
+    startTime,
+    endTime,
+    recurrence,
+    selectedDays,
+    reportDoneForSchedule,
+    s.deleted_at,
+    holidayEval.isHoliday
+  );
   const duration = calculateDuration(startTime, endTime);
 
   const storeName = s.store?.store_name || 'Cabang Toko';
@@ -268,9 +452,12 @@ const formatSchedule = (s) => {
     endTime,
     duration,
     date,
+    endDate,
     recurrence,
     selectedDays,
     status,
+    isHolidayToday: holidayEval.isHoliday,
+    holidayReason: holidayEval.reason || undefined,
     isCompletedToday,
     isCompletedByStaff: hasCompletedReport,
     notes: s.notes || '',
@@ -319,6 +506,7 @@ exports.getAllSchedules = async (req, res) => {
         schedule_staff: {
           include: { staff: true },
         },
+        schedule_exception: true,
         checklist_report: {
           select: {
             report_id: true,
@@ -334,7 +522,9 @@ exports.getAllSchedules = async (req, res) => {
       ],
     });
 
-    const formatted = schedules.map(formatSchedule);
+    const { dateStr: todayWibStr } = getWibDateParts(new Date());
+    const todayStoreHolidays = await getActiveHolidaysOnDate(todayWibStr);
+    const formatted = schedules.map((s) => formatSchedule(s, todayStoreHolidays));
 
     return res.status(200).json({
       status: 'success',
@@ -369,6 +559,7 @@ exports.getScheduleById = async (req, res) => {
         schedule_staff: {
           include: { staff: true },
         },
+        schedule_exception: true,
         checklist_report: {
           select: {
             report_id: true,
@@ -387,9 +578,12 @@ exports.getScheduleById = async (req, res) => {
       });
     }
 
+    const { dateStr: todayWibStr } = getWibDateParts(new Date());
+    const todayStoreHolidays = await getActiveHolidaysOnDate(todayWibStr);
+
     return res.status(200).json({
       status: 'success',
-      data: formatSchedule(s),
+      data: formatSchedule(s, todayStoreHolidays),
     });
   } catch (error) {
     console.error('❌ Error in getScheduleById:', error);
@@ -446,6 +640,8 @@ exports.createSchedule = async (req, res) => {
     }
 
     const createdResults = [];
+    const { dateStr: wibTodayStr } = getWibDateParts(new Date());
+    const todayStoreHolidays = await getActiveHolidaysOnDate(wibTodayStr);
 
     for (const item of rawItems) {
       // 1. Resolusi Toko: bisa via storeId atau storeName atau selectedStores
@@ -549,7 +745,7 @@ exports.createSchedule = async (req, res) => {
       }
       startTimeStr = to24HourString(startTimeStr);
       endTimeStr = to24HourString(endTimeStr);
-      const dateStr = item.date || new Date().toISOString().split('T')[0];
+      const dateStr = item.date || wibTodayStr;
 
       const startDateTime = new Date(`1970-01-01T${startTimeStr.padStart(5, '0')}:00.000Z`);
       const endDateTime = new Date(`1970-01-01T${endTimeStr.padStart(5, '0')}:00.000Z`);
@@ -582,6 +778,7 @@ exports.createSchedule = async (req, res) => {
           checklist_template: true,
           admin: true,
           schedule_staff: { include: { staff: true } },
+          schedule_exception: true,
         },
       });
 
@@ -601,7 +798,7 @@ exports.createSchedule = async (req, res) => {
         }
       }
 
-      createdResults.push(formatSchedule(scheduleCreated));
+      createdResults.push(formatSchedule(scheduleCreated, todayStoreHolidays));
     }
 
     return res.status(201).json({
@@ -631,6 +828,10 @@ exports.updateSchedule = async (req, res) => {
 
     const existing = await prisma.schedule.findUnique({
       where: { schedule_id: cleanId },
+      include: {
+        store: true,
+        schedule_exception: true,
+      },
     });
 
     if (!existing) {
@@ -640,9 +841,12 @@ exports.updateSchedule = async (req, res) => {
       });
     }
 
+    const { dateStr: todayWibStr } = getWibDateParts(new Date());
+    const todayStoreHolidays = await getActiveHolidaysOnDate(todayWibStr);
+
     // Pengecekan jika jadwal sedang berlangsung saat ini (di jam dan hari pelaksanaan)
     // Jadwal yang sedang berjalan tidak dapat diedit atau dibatalkan/soft-delete
-    if (isScheduleRunningNow(existing)) {
+    if (isScheduleRunningNow(existing, todayStoreHolidays)) {
       const isDeactivating = body.status === 'inactive' || body.status === 'Dibatalkan' || body.deletedAt;
       if (isDeactivating) {
         return res.status(400).json({
@@ -698,6 +902,8 @@ exports.updateSchedule = async (req, res) => {
 
     if (body.deletedAt !== undefined) {
       updateData.deleted_at = body.deletedAt ? new Date(body.deletedAt) : null;
+    } else if (updateData.status === 'active' && existing.deleted_at) {
+      updateData.deleted_at = null;
     }
 
     // Resolusi & Update Template Checklist saat edit
@@ -759,13 +965,22 @@ exports.updateSchedule = async (req, res) => {
         checklist_template: true,
         admin: true,
         schedule_staff: { include: { staff: true } },
+        schedule_exception: true,
+        checklist_report: {
+          select: {
+            report_id: true,
+            status: true,
+            completed_at: true,
+            created_at: true,
+          },
+        },
       },
     });
 
     return res.status(200).json({
       status: 'success',
       message: 'Jadwal audit berhasil diperbarui.',
-      data: formatSchedule(updated),
+      data: formatSchedule(updated, todayStoreHolidays),
     });
   } catch (error) {
     console.error('❌ Error in updateSchedule:', error);

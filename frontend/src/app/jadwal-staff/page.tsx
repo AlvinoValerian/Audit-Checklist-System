@@ -57,6 +57,13 @@ interface StaffScheduleItem {
   storeName?: string;
   storeId?: string;
   tasks?: Array<{ id: string; name: string; description?: string }>;
+  report?: {
+    reportId: string;
+    status: string;
+    submittedAt?: string;
+    submittedBy?: string | null;
+    notes?: string | null;
+  } | null;
 }
 
 interface StaffScheduleData {
@@ -67,6 +74,7 @@ interface StaffScheduleData {
     photo?: string | null;
   };
   store: {
+    id?: string | null;
     name: string;
     location: string;
     code: string;
@@ -88,6 +96,7 @@ export default function JadwalStaffPage() {
   const [loading, setLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [isOfflineMode, setIsOfflineMode] = useState<boolean>(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string>("");
   const [showProfileMenu, setShowProfileMenu] = useState<boolean>(false);
   const [isFullscreenMode, setIsFullscreenMode] = useState<boolean>(false);
 
@@ -155,6 +164,18 @@ export default function JadwalStaffPage() {
   const [isModalAnimating, setIsModalAnimating] = useState<boolean>(false);
 
   const handleOpenStartModal = (item: StaffScheduleItem) => {
+    if (item.isCompleted || item.status === "Selesai") {
+      toast.info("Jadwal audit ini sudah selesai dikerjakan.");
+      return;
+    }
+    if (item.isHoliday || item.status === "Libur") {
+      toast.info(item.exemptionText || "Gerai sedang berstatus Libur Operasional.");
+      return;
+    }
+    if (item.isLocked || item.status === "Terkunci") {
+      toast.info(item.unlockText || "Jadwal audit belum memasuki jam pengerjaan.");
+      return;
+    }
     if (item.status === "Kedaluwarsa" || item.status === "Tidak Dikerjakan" || item.isExpired || item.canStart === false) {
       toast.error("Audit Kedaluwarsa: Batas toleransi pengerjaan 1 jam telah habis. Jadwal ditutup otomatis sebagai Tidak Patuh.");
       return;
@@ -200,15 +221,30 @@ export default function JadwalStaffPage() {
       let res: Response | null = null;
       try {
         res = await fetch(`/api/staff/my-schedules${storeParam}`, { headers, cache: "no-store" });
-        if (!res || !res.ok) throw new Error(`Fetch status: ${res?.status}`);
+        if (!res || (!res.ok && res.status >= 500)) throw new Error(`Fetch status: ${res?.status}`);
       } catch {
         res = await fetch(`http://127.0.0.1:5000/api/staff/my-schedules${storeParam}`, { headers, cache: "no-store" });
+      }
+
+      if (res && (res.status === 401 || res.status === 403)) {
+        const errJson = await res.json().catch(() => null);
+        toast.error(errJson?.message || "Sesi berakhir atau akun dinonaktifkan.");
+        AuthService.logout();
+        router.replace("/login");
+        return;
       }
 
       if (res && res.ok) {
         const json = await res.json();
         if (json.status === "success" && json.data) {
           setIsOfflineMode(false);
+          setLastSyncedAt(
+            new Date().toLocaleTimeString("id-ID", {
+              hour: "2-digit",
+              minute: "2-digit",
+              timeZone: "Asia/Jakarta",
+            }) + " WIB"
+          );
           let backendSchedules: StaffScheduleItem[] = Array.isArray(json.data.schedules) ? json.data.schedules : [];
 
           // Isolasi Ketat: Hanya jadwalkan tugas untuk store_id yang dinaungi staf ini
@@ -238,17 +274,19 @@ export default function JadwalStaffPage() {
 
           setScheduleData({
             staff: {
-              name: user?.fullName || json.data.staff?.name || "Staf Lapangan",
-              shift: json.data.staff?.shift || "Shift Pagi",
+              name: json.data.staff?.name || user?.fullName || "Staf Lapangan",
+              shift: json.data.staff?.shift || user?.position || "Auditor Lapangan",
               dateFormatted: json.data.staff?.dateFormatted || new Date().toLocaleDateString("id-ID", {
                 weekday: "long",
                 day: "numeric",
                 month: "long",
                 year: "numeric",
+                timeZone: "Asia/Jakarta",
               }),
               photo: json.data.staff?.photo || null,
             },
             store: {
+              id: json.data.store?.id || user?.storeId || null,
               name: json.data.store?.name || user?.storeName || "Toko Cabang",
               location: json.data.store?.location || user?.storeLocation || "Kota Malang",
               code: json.data.store?.code || user?.storeCode || "ST-01",
@@ -256,21 +294,30 @@ export default function JadwalStaffPage() {
             progress: {
               completed: compCount,
               total: totCount,
+              expired: json.data.progress?.expired ?? mappedSchedules.filter((s) => s.status === "Kedaluwarsa" || s.isExpired).length,
+              late: json.data.progress?.late ?? mappedSchedules.filter((s) => s.status === "Terlambat" || s.isLate).length,
               percentage: totCount > 0 ? Math.round((compCount / totCount) * 100) : 0,
-              label: `${compCount} dari ${totCount} Tugas Selesai`,
+              label: json.data.progress?.label || `${compCount} dari ${totCount} Tugas Selesai`,
             },
             schedules: mappedSchedules,
           });
 
-          // Sinkronkan foto profil staf jika dikembalikan oleh database
-          if (json.data.staff?.photo) {
-            setCurrentUser((prev) => {
-              if (!prev) return prev;
-              const updated = { ...prev, profilePicture: json.data.staff.photo };
-              AuthService.setCurrentUser(updated);
-              return updated;
-            });
-          }
+          // Sinkronkan data user & toko terkini dari database ke sesi lokal
+          setCurrentUser((prev) => {
+            if (!prev) return prev;
+            const updated: AuthUser = {
+              ...prev,
+              fullName: json.data.staff?.name || prev.fullName,
+              position: json.data.staff?.shift || prev.position,
+              storeId: json.data.store?.id || prev.storeId,
+              storeName: json.data.store?.name || prev.storeName,
+              storeLocation: json.data.store?.location || prev.storeLocation,
+              storeCode: json.data.store?.code || prev.storeCode,
+              profilePicture: json.data.staff?.photo ?? prev.profilePicture,
+            };
+            AuthService.setCurrentUser(updated);
+            return updated;
+          });
 
           if (!silent) {
             triggerSuccessToast(
@@ -325,22 +372,44 @@ export default function JadwalStaffPage() {
     const refreshProfile = async () => {
       try {
         const token = AuthService.getToken();
-        const headers: Record<string, string> = {};
-        if (token) headers["Authorization"] = `Bearer ${token}`;
-        let res = await fetch("/api/auth/me", { headers });
-        if (!res.ok) {
-          res = await fetch("http://127.0.0.1:5000/api/auth/me", { headers });
+        if (!token) return;
+        const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+        let res = await fetch("/api/auth/me", { headers, cache: "no-store" });
+        if (!res.ok && res.status >= 500) {
+          res = await fetch("http://127.0.0.1:5000/api/auth/me", { headers, cache: "no-store" });
+        }
+        if (res.status === 401 || res.status === 403) {
+          const errJson = await res.json().catch(() => null);
+          toast.error(errJson?.message || "Akun Anda dinonaktifkan atau sesi berakhir.");
+          AuthService.logout();
+          router.replace("/login");
+          return;
         }
         if (res.ok) {
           const json = await res.json();
           if (json.status === "success" && json.data?.user) {
-            setCurrentUser(json.data.user);
-            AuthService.setCurrentUser(json.data.user);
+            const latestUser = json.data.user;
+            const prevUser = AuthService.getCurrentUser();
+            const storeChanged = (prevUser?.storeId?.toString() || "") !== (latestUser.storeId?.toString() || "");
+            setCurrentUser(latestUser);
+            AuthService.setCurrentUser(latestUser);
+            if (storeChanged) {
+              fetchScheduleData(true);
+            }
           }
         }
       } catch (e) {}
     };
     refreshProfile();
+
+    // Auto re-sync saat pengguna kembali ke halaman/tab ini
+    const handleFocusSync = () => {
+      refreshProfile();
+      fetchScheduleData(true);
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener("focus", handleFocusSync);
+    }
 
     // Cek jika baru saja menyerahkan checklist (redirect dari terkirim atau pengerjaan)
     if (typeof window !== "undefined") {
@@ -355,6 +424,12 @@ export default function JadwalStaffPage() {
         }
       } catch (e) {}
     }
+
+    return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener("focus", handleFocusSync);
+      }
+    };
   }, []);
 
   const handleLogout = () => {
@@ -373,10 +448,18 @@ export default function JadwalStaffPage() {
     }, 1100);
   };
 
-  const displayName = currentUser?.fullName || scheduleData.staff.name || "Staf Lapangan";
-  const displayStore = currentUser?.storeName || scheduleData.store.name || "Toko Penugasan";
-  const displayLocation = currentUser?.storeLocation || scheduleData.store.location || "Cabang Gerai";
-  const displayStoreCode = currentUser?.storeCode || scheduleData.store.code || "ST-01";
+  const displayName =
+    scheduleData.staff.name && scheduleData.staff.name !== "Staf Lapangan"
+      ? scheduleData.staff.name
+      : currentUser?.fullName || "Staf Lapangan";
+  const displayStore =
+    scheduleData.store.name && scheduleData.store.name !== "Memuat Gerai..."
+      ? scheduleData.store.name
+      : currentUser?.storeName || "Toko Penugasan";
+  const displayLocation =
+    scheduleData.store.location && scheduleData.store.location !== "Memuat Lokasi..."
+      ? scheduleData.store.location
+      : currentUser?.storeLocation || "Cabang Gerai";
 
   const getInitials = (name: string) => {
     if (!name) return "SR";
@@ -463,7 +546,7 @@ export default function JadwalStaffPage() {
                   {displayStore}
                 </h1>
                 <p className="text-[11px] font-medium text-slate-500 leading-snug mt-1">
-                  {displayLocation}{displayStoreCode ? ` • ${displayStoreCode}` : ""}
+                  {displayLocation}
                 </p>
               </div>
             </div>
@@ -541,21 +624,35 @@ export default function JadwalStaffPage() {
             </div>
           </div>
 
-          {/* 3. Offline / Pull Down Banner Pill matching the image */}
-          <div className="bg-[#fef9c3] border border-amber-200/70 text-amber-900 rounded-full px-3.5 py-1.5 flex items-center justify-between text-xs shadow-2xs">
+          {/* 3. Connection / Sync Status Banner Pill */}
+          <div
+            className={`rounded-full px-3.5 py-1.5 flex items-center justify-between text-xs shadow-2xs border ${
+              isOfflineMode
+                ? "bg-[#fef9c3] border-amber-200/70 text-amber-900"
+                : "bg-emerald-50/90 border-emerald-200/80 text-emerald-900"
+            }`}
+          >
             <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-amber-600 inline-block" />
+              <span
+                className={`w-2 h-2 rounded-full inline-block ${
+                  isOfflineMode ? "bg-amber-600" : "bg-emerald-500 animate-pulse"
+                }`}
+              />
               <span className="font-medium text-[11px]">
                 {isOfflineMode
-                  ? "Mode Offline • Tarik ke bawah untuk refresh"
-                  : "Mode Offline • Tarik ke bawah untuk refresh"}
+                  ? "Mode Offline • Ketuk refresh untuk sinkron ulang"
+                  : `Terhubung Database${lastSyncedAt ? ` • ${lastSyncedAt}` : ""}`}
               </span>
             </div>
             <button
               type="button"
               onClick={() => fetchScheduleData(false)}
               disabled={isRefreshing}
-              className="text-amber-900 hover:text-amber-950 transition-transform active:rotate-180 cursor-pointer"
+              className={`${
+                isOfflineMode
+                  ? "text-amber-900 hover:text-amber-950"
+                  : "text-emerald-800 hover:text-emerald-950"
+              } transition-transform active:rotate-180 cursor-pointer`}
               title="Refresh Data"
             >
               <RotateCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
@@ -618,7 +715,15 @@ export default function JadwalStaffPage() {
 
           {/* 6. Schedule Cards List */}
           <div className="space-y-3">
-            {scheduleData.schedules.length === 0 ? (
+            {loading && scheduleData.schedules.length === 0 ? (
+              <div className="bg-white rounded-3xl p-6 text-center border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] space-y-2">
+                <RotateCw className="w-8 h-8 text-[#193f53] animate-spin mx-auto" />
+                <h4 className="text-sm font-bold text-slate-700">Memuat Jadwal Tugas...</h4>
+                <p className="text-xs text-slate-400">
+                  Menyinkronkan jadwal audit hari ini dari database server.
+                </p>
+              </div>
+            ) : scheduleData.schedules.length === 0 ? (
               <div className="bg-white rounded-3xl p-6 text-center border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)]">
                 <Calendar className="w-10 h-10 text-slate-300 mx-auto mb-2" />
                 <h4 className="text-sm font-bold text-slate-700">Tidak Ada Jadwal Hari Ini</h4>
@@ -640,9 +745,15 @@ export default function JadwalStaffPage() {
                           <Clock className="w-3.5 h-3.5 text-slate-400" />
                           <span>{item.timeRange}</span>
                         </div>
-                        <div className="px-2.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-100/80 text-[11px] font-semibold rounded-full flex items-center gap-1">
+                        <div
+                          className={`px-2.5 py-0.5 text-[11px] font-semibold rounded-full flex items-center gap-1 border ${
+                            item.statusBadge?.includes("Terlambat")
+                              ? "bg-amber-50 text-amber-700 border-amber-200/80"
+                              : "bg-emerald-50 text-emerald-700 border-emerald-100/80"
+                          }`}
+                        >
                           <Check className="w-3 h-3 stroke-[2.5]" />
-                          <span>Selesai</span>
+                          <span>{item.statusBadge || "Selesai"}</span>
                         </div>
                       </div>
 
@@ -919,11 +1030,17 @@ export default function JadwalStaffPage() {
           {/* 7. Footer System Info matching image */}
           <div className="pt-2 text-center select-none pb-2">
             <div className="flex items-center justify-center gap-1.5 text-xs font-medium text-slate-500">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-              <span>Terakhir disinkronkan: Baru saja</span>
+              <span className={`w-1.5 h-1.5 rounded-full ${isOfflineMode ? "bg-amber-500" : "bg-emerald-500"}`} />
+              <span>
+                {lastSyncedAt
+                  ? `Terakhir disinkronkan: ${lastSyncedAt}`
+                  : isOfflineMode
+                  ? "Koneksi terputus dari server"
+                  : "Menyinkronkan data..."}
+              </span>
             </div>
             <p className="text-[10px] text-slate-400 font-mono tracking-wider mt-1 uppercase">
-              OPS FIELD SYSTEM V3.3 • STORE #{displayStoreCode}
+              OPS FIELD SYSTEM V3.3
             </p>
           </div>
         </div>
@@ -953,9 +1070,19 @@ export default function JadwalStaffPage() {
               {/* 2. Header */}
               <div className="px-4 pt-1.5 pb-2 border-b border-slate-100 flex items-start justify-between">
                 <div className="pr-2">
-                  <div className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/80 px-2 py-0.5 rounded-full uppercase">
+                  <div
+                    className={`inline-flex items-center gap-1 text-[10px] font-bold border px-2 py-0.5 rounded-full uppercase ${
+                      showDetailModal.statusBadge?.includes("Terlambat")
+                        ? "text-amber-700 bg-amber-50 border-amber-200/80"
+                        : "text-emerald-700 bg-emerald-50 border-emerald-200/80"
+                    }`}
+                  >
                     <Check className="w-3 h-3 stroke-[2.5]" />
-                    <span>Hasil Audit Terverifikasi</span>
+                    <span>
+                      {showDetailModal.statusBadge?.includes("Terlambat")
+                        ? "Hasil Audit Terlambat (Terverifikasi)"
+                        : "Hasil Audit Terverifikasi"}
+                    </span>
                   </div>
                   <h3 className="text-sm font-bold text-slate-900 mt-1 truncate max-w-[260px] leading-snug">
                     {showDetailModal.title}
@@ -976,13 +1103,15 @@ export default function JadwalStaffPage() {
                 <div className="bg-[#f8fafc] p-3 rounded-xl border border-slate-100 space-y-2">
                   <div className="flex justify-between items-center text-xs">
                     <span className="text-slate-400 text-[11px]">Waktu Penyerahan:</span>
-                    <span className="font-semibold text-slate-800 text-xs">
+                    <span className="font-semibold text-slate-800 text-xs text-right max-w-[190px]">
                       {showDetailModal.submittedInfo || showDetailModal.timeRange}
                     </span>
                   </div>
                   <div className="flex justify-between items-center text-xs">
                     <span className="text-slate-400 text-[11px]">Auditor / Staff:</span>
-                    <span className="font-semibold text-slate-800 text-xs">{displayName}</span>
+                    <span className="font-semibold text-slate-800 text-xs">
+                      {showDetailModal.report?.submittedBy || displayName}
+                    </span>
                   </div>
                   {showDetailModal.checklistInfo && (
                     <div className="flex justify-between items-center text-xs">
@@ -994,9 +1123,15 @@ export default function JadwalStaffPage() {
                   )}
                   <div className="flex justify-between items-center text-xs">
                     <span className="text-slate-400 text-[11px]">Status:</span>
-                    <span className="font-bold text-emerald-600 text-xs flex items-center gap-1">
+                    <span
+                      className={`font-bold text-xs flex items-center gap-1 ${
+                        showDetailModal.statusBadge?.includes("Terlambat")
+                          ? "text-amber-600"
+                          : "text-emerald-600"
+                      }`}
+                    >
                       <CheckCircle2 className="w-3.5 h-3.5" />
-                      Selesai Diverifikasi
+                      {showDetailModal.statusBadge || "Selesai Diverifikasi"}
                     </span>
                   </div>
                 </div>
@@ -1080,9 +1215,9 @@ export default function JadwalStaffPage() {
                 <div className="px-3 py-1 bg-[#eff6ff] text-[#2563eb] border border-[#bfdbfe]/80 rounded-full text-xs font-semibold flex items-center gap-1.5 shadow-2xs">
                   <FileText className="w-3.5 h-3.5 text-[#2563eb]" />
                   <span>
-                    {activeStartModal.tasks?.length ||
-                      activeStartModal.checklistInfo?.match(/(\d+)\s*(Butir|Item)/i)?.[1] ||
-                      "18"}{" "}
+                    {activeStartModal.tasks?.length ??
+                      (activeStartModal.checklistInfo?.match(/(\d+)\s*(Butir|Item)/i)?.[1] ||
+                      "0")}{" "}
                     Butir Item
                   </span>
                 </div>
@@ -1157,9 +1292,9 @@ export default function JadwalStaffPage() {
                         "Checklist Operasional Harian"}
                     </p>
                     <p className="text-[10px] text-slate-400 mt-0.5 leading-none">
-                      {activeStartModal.tasks?.length ||
-                        activeStartModal.checklistInfo?.match(/(\d+)\s*(Butir|Item)/i)?.[1] ||
-                        "18"}{" "}
+                      {activeStartModal.tasks?.length ??
+                        (activeStartModal.checklistInfo?.match(/(\d+)\s*(Butir|Item)/i)?.[1] ||
+                        "0")}{" "}
                       butir pertanyaan SOP wajib diisi
                     </p>
                   </div>

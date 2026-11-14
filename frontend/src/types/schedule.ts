@@ -19,12 +19,15 @@ export interface AuditSchedule {
   isCompletedByStaff?: boolean;
   isCompletedToday?: boolean;
   date: string; // YYYY-MM-DD
+  endDate?: string; // YYYY-MM-DD opsional
   recurrence: RecurrenceType;
   selectedDays?: string[];
   status: ScheduleStatus;
+  isHolidayToday?: boolean;
+  holidayReason?: string;
   notes?: string;
   createdAt: string;
-  deletedAt?: string; // YYYY-MM-DD saat di-soft delete
+  deletedAt?: string | null; // YYYY-MM-DD saat di-soft delete
 }
 
 export interface ScheduleStats {

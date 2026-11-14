@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import Header from "@/components/layout/Header";
 import {
@@ -16,18 +16,73 @@ import {
   Loader2,
   Building2,
   AlertCircle,
+  Check,
 } from "lucide-react";
 import { ReportService } from "@/services/report.service";
+import { TokoService } from "@/services/toko.service";
+import { StoreItem } from "@/types/toko";
+import DecryptedImage from "@/components/DecryptedImage";
 import { AuditReportItem } from "@/types/report";
 import DetailLaporanView from "./components/DetailLaporanView";
 import { toast } from "sonner";
 import { AuthService } from "@/lib/auth";
 import { WorkspaceService } from "@/services/workspace.service";
 import { Workspace } from "@/types/workspace";
+import {
+  exportReportsToCsv,
+  exportSingleReport,
+  exportAllFilteredReportsToZip,
+} from "@/utils/reportExporter";
+
+const INDONESIAN_MONTHS = [
+  "Januari",
+  "Februari",
+  "Maret",
+  "April",
+  "Mei",
+  "Juni",
+  "Juli",
+  "Agustus",
+  "September",
+  "Oktober",
+  "November",
+  "Desember",
+];
+
+const getCurrentMonthLabel = (): string => {
+  const d = new Date();
+  return `${INDONESIAN_MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+};
+
+const AUDIT_STATUS_OPTIONS = [
+  {
+    id: "Tidak Mengerjakan",
+    label: "Tidak Mengerjakan",
+    desc: "Lewat batas toleransi tanpa submit",
+    badgeClass: "bg-rose-100 border-rose-300 text-rose-800",
+    dotClass: "bg-rose-600",
+  },
+  {
+    id: "Masalah",
+    label: "Ada Masalah",
+    desc: "Ditemukan butir tidak sesuai",
+    badgeClass: "bg-amber-100 border-amber-300 text-amber-800",
+    dotClass: "bg-amber-500",
+  },
+  {
+    id: "Sesuai",
+    label: "Sesuai SOP",
+    desc: "Seluruh aspek audit memenuhi standar",
+    badgeClass: "bg-emerald-100 border-emerald-300 text-emerald-800",
+    dotClass: "bg-emerald-500",
+  },
+] as const;
 
 export default function LaporanPage() {
   const [reports, setReports] = useState<AuditReportItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [downloadingRowId, setDownloadingRowId] = useState<string | null>(null);
+  const [isExportingAll, setIsExportingAll] = useState(false);
 
   // Workspace Switcher States
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -39,13 +94,21 @@ export default function LaporanPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedStore, setSelectedStore] = useState<string>("Semua Toko");
   const [selectedSchedule, setSelectedSchedule] = useState<string>("Semua Jadwal");
-  const [selectedMonth, setSelectedMonth] = useState<string>("Semua Bulan");
-  const [selectedStatus, setSelectedStatus] = useState<string>("Semua Status");
+  const [selectedMonth, setSelectedMonth] = useState<string>("Bulan Ini");
+  const [selectedStatuses, setSelectedStatuses] = useState<string[]>([
+    "Tidak Mengerjakan",
+    "Masalah",
+  ]);
+  const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false);
+  const statusDropdownRef = useRef<HTMLDivElement>(null);
 
   // Dynamic filter dropdown options
   const [storeOptions, setStoreOptions] = useState<string[]>(["Semua Toko"]);
   const [scheduleOptions, setScheduleOptions] = useState<string[]>(["Semua Jadwal"]);
-  const [monthOptions, setMonthOptions] = useState<string[]>(["Semua Bulan"]);
+  const [monthOptions, setMonthOptions] = useState<string[]>(["Bulan Ini", "Semua Bulan"]);
+
+  // Stores cache for resolving store picture in Toko column
+  const [stores, setStores] = useState<StoreItem[]>([]);
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
@@ -54,7 +117,30 @@ export default function LaporanPage() {
   // Selected Report for Full Detail View
   const [selectedReportToView, setSelectedReportToView] = useState<AuditReportItem | null>(null);
 
-  const statusOptions = ["Semua Status", "Masalah", "Sesuai", "Tidak Mengerjakan"];
+  // Close Status Dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        statusDropdownRef.current &&
+        !statusDropdownRef.current.contains(e.target as Node)
+      ) {
+        setIsStatusDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Store photo lookup map based on storeName
+  const storePhotoMap = useMemo(() => {
+    const map = new Map<string, string>();
+    stores.forEach((s) => {
+      if (s.name && s.storePicture) {
+        map.set(s.name.trim().toLowerCase(), s.storePicture);
+      }
+    });
+    return map;
+  }, [stores]);
 
   // Load Data from Backend
   const loadReportsData = useCallback(async (showLoading = true, customWsId?: string) => {
@@ -74,12 +160,17 @@ export default function LaporanPage() {
 
         const dynamicStores = Array.from(new Set(["Semua Toko", ...(meta.stores || []), ...liveReports.map((r) => r.storeName)]));
         const dynamicSchedules = Array.from(new Set(["Semua Jadwal", ...(meta.schedules || []), ...liveReports.map((r) => r.scheduleName)]));
-        const dynamicMonths = Array.from(new Set(["Semua Bulan", ...(meta.months || []), ...liveReports.map((r) => r.month)]));
+
+        const rawMonths = Array.from(new Set([...(meta.months || []), ...liveReports.map((r) => r.month)].filter(Boolean)));
+        const cleanedMonths = rawMonths.filter((m) => m !== "Semua Bulan" && m !== "Bulan Ini");
+        setMonthOptions(["Bulan Ini", "Semua Bulan", ...cleanedMonths]);
 
         setStoreOptions(dynamicStores);
         setScheduleOptions(dynamicSchedules);
-        setMonthOptions(dynamicMonths);
       }
+
+      // Load store data for store thumbnail in table
+      TokoService.fetchAll(wsId).then(setStores).catch(() => {});
     } catch (err) {
       console.warn("Gagal memuat laporan audit dari backend:", err);
       const fallback = ReportService.getAll();
@@ -87,6 +178,16 @@ export default function LaporanPage() {
     } finally {
       setIsLoading(false);
     }
+  }, [selectedWorkspaceId]);
+
+  const loadReportsDataRef = useRef(loadReportsData);
+  useEffect(() => {
+    loadReportsDataRef.current = loadReportsData;
+  }, [loadReportsData]);
+
+  const selectedWsIdRef = useRef(selectedWorkspaceId);
+  useEffect(() => {
+    selectedWsIdRef.current = selectedWorkspaceId;
   }, [selectedWorkspaceId]);
 
   useEffect(() => {
@@ -126,23 +227,23 @@ export default function LaporanPage() {
 
       setSelectedWorkspaceId(targetWsId);
       setCurrentWorkspaceName(targetWsName);
-      loadReportsData(true, targetWsId);
+      loadReportsDataRef.current(true, targetWsId);
     };
 
     init();
 
     const handleWsChange = () => {
       const activeWs = AuthService.getActiveWorkspace();
-      if (activeWs?.id) {
+      if (activeWs?.id && activeWs.id !== selectedWsIdRef.current) {
         setSelectedWorkspaceId(activeWs.id);
         setCurrentWorkspaceName(activeWs.name);
         setSelectedStore("Semua Toko");
         setSelectedSchedule("Semua Jadwal");
-        setSelectedMonth("Semua Bulan");
-        setSelectedStatus("Semua Status");
+        setSelectedMonth("Bulan Ini");
+        setSelectedStatuses(["Tidak Mengerjakan", "Masalah"]);
         setSearchTerm("");
         setCurrentPage(1);
-        loadReportsData(true, activeWs.id);
+        loadReportsDataRef.current(true, activeWs.id);
       }
     };
 
@@ -150,7 +251,17 @@ export default function LaporanPage() {
     return () => {
       window.removeEventListener("workspace-changed", handleWsChange);
     };
-  }, [loadReportsData]);
+  }, []);
+
+  const toggleStatus = (statusId: string) => {
+    setSelectedStatuses((prev) => {
+      const next = prev.includes(statusId)
+        ? prev.filter((s) => s !== statusId)
+        : [...prev, statusId];
+      return next;
+    });
+    setCurrentPage(1);
+  };
 
   const handleWorkspaceChange = async (newWsId: string) => {
     const chosen = workspaces.find((w) => w.id === newWsId);
@@ -162,8 +273,8 @@ export default function LaporanPage() {
     setSelectedWorkspaceId(newWsId);
     setSelectedStore("Semua Toko");
     setSelectedSchedule("Semua Jadwal");
-    setSelectedMonth("Semua Bulan");
-    setSelectedStatus("Semua Status");
+    setSelectedMonth("Bulan Ini");
+    setSelectedStatuses(["Tidak Mengerjakan", "Masalah"]);
     setSearchTerm("");
     setCurrentPage(1);
 
@@ -178,6 +289,8 @@ export default function LaporanPage() {
 
   // Filtered Reports
   const filteredReports = useMemo(() => {
+    const currentMonthLabel = getCurrentMonthLabel().toLowerCase();
+
     return reports.filter((item) => {
       // 1. Search Query
       if (searchTerm) {
@@ -200,25 +313,27 @@ export default function LaporanPage() {
         return false;
       }
 
-      // 4. Month Filter
-      if (selectedMonth !== "Semua Bulan" && item.month.toLowerCase() !== selectedMonth.toLowerCase()) {
+      // 4. Month Filter (Default: "Bulan Ini")
+      if (selectedMonth === "Bulan Ini") {
+        if (item.month.toLowerCase() !== currentMonthLabel) {
+          return false;
+        }
+      } else if (selectedMonth !== "Semua Bulan" && item.month.toLowerCase() !== selectedMonth.toLowerCase()) {
         return false;
       }
 
-      // 5. Status Filter
-      if (selectedStatus === "Masalah" && item.status !== "Masalah") {
-        return false;
-      }
-      if (selectedStatus === "Sesuai" && item.status !== "Sesuai") {
-        return false;
-      }
-      if (selectedStatus === "Tidak Mengerjakan" && item.status !== "Tidak Mengerjakan") {
+      // 5. Status Filter (Multi-select Checkbox, Default: ["Tidak Mengerjakan", "Masalah"])
+      if (selectedStatuses.length > 0 && selectedStatuses.length < AUDIT_STATUS_OPTIONS.length) {
+        if (!selectedStatuses.includes(item.status)) {
+          return false;
+        }
+      } else if (selectedStatuses.length === 0) {
         return false;
       }
 
       return true;
     });
-  }, [reports, searchTerm, selectedStore, selectedSchedule, selectedMonth, selectedStatus]);
+  }, [reports, searchTerm, selectedStore, selectedSchedule, selectedMonth, selectedStatuses]);
 
   // Pagination calculation
   const totalPages = Math.ceil(filteredReports.length / itemsPerPage) || 1;
@@ -236,25 +351,42 @@ export default function LaporanPage() {
     setSearchTerm("");
     setSelectedStore("Semua Toko");
     setSelectedSchedule("Semua Jadwal");
-    setSelectedMonth("Semua Bulan");
-    setSelectedStatus("Semua Status");
+    setSelectedMonth("Bulan Ini");
+    setSelectedStatuses(["Tidak Mengerjakan", "Masalah"]);
     setCurrentPage(1);
-    toast.info("Semua filter telah direset.");
+    toast.info("Filter telah direset ke default (Bulan Ini, Tidak Mengerjakan & Masalah).");
   };
 
   // Export handlers
-  const handleExportAll = () => {
-    toast.success(`Mengekspor ${filteredReports.length} data laporan audit (Excel / PDF)...`);
+  const handleExportAll = async () => {
+    if (isExportingAll || filteredReports.length === 0) return;
+    try {
+      setIsExportingAll(true);
+      await exportAllFilteredReportsToZip(filteredReports, currentWorkspaceName);
+    } finally {
+      setIsExportingAll(false);
+    }
   };
 
-  const handleExportSingle = (item: AuditReportItem) => {
-    toast.success(`Mengunduh laporan audit ${item.storeName} (${item.submitDate})...`);
+  const handleExportCsv = () => {
+    exportReportsToCsv(filteredReports, currentWorkspaceName);
+  };
+
+  const handleExportSingle = async (item: AuditReportItem) => {
+    if (downloadingRowId) return;
+    try {
+      setDownloadingRowId(item.id);
+      await exportSingleReport(item);
+    } finally {
+      setDownloadingRowId(null);
+    }
   };
 
   // Active filter pills determination
   const hasActiveFilters =
-    selectedStatus !== "Semua Status" ||
     selectedMonth !== "Semua Bulan" ||
+    (selectedStatuses.length > 0 && selectedStatuses.length < AUDIT_STATUS_OPTIONS.length) ||
+    selectedStatuses.length === 0 ||
     selectedStore !== "Semua Toko" ||
     selectedSchedule !== "Semua Jadwal" ||
     searchTerm !== "";
@@ -377,7 +509,7 @@ export default function LaporanPage() {
                   </div>
                 </div>
 
-                {/* 4. Rentang Bulan */}
+                {/* 4. Rentang Bulan (Default: Bulan Ini) */}
                 <div>
                   <label className="text-[11px] font-bold text-slate-600 block mb-1.5">
                     Rentang Bulan
@@ -393,7 +525,7 @@ export default function LaporanPage() {
                     >
                       {monthOptions.map((m) => (
                         <option key={m} value={m}>
-                          {m}
+                          {m === "Bulan Ini" ? `Bulan Ini (${getCurrentMonthLabel()})` : m}
                         </option>
                       ))}
                     </select>
@@ -401,28 +533,122 @@ export default function LaporanPage() {
                   </div>
                 </div>
 
-                {/* 5. Status Audit */}
-                <div>
+                {/* 5. Status Audit (Multi-Select Checkbox) */}
+                <div className="relative" ref={statusDropdownRef}>
                   <label className="text-[11px] font-bold text-slate-600 block mb-1.5">
                     Status Audit
                   </label>
-                  <div className="relative">
-                    <select
-                      value={selectedStatus}
-                      onChange={(e) => {
-                        setSelectedStatus(e.target.value);
-                        setCurrentPage(1);
-                      }}
-                      className="w-full pl-3 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#193f53]/20 focus:border-[#193f53] appearance-none cursor-pointer"
-                    >
-                      {statusOptions.map((st) => (
-                        <option key={st} value={st}>
-                          {st}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsStatusDropdownOpen((prev) => !prev)}
+                    className="w-full flex items-center justify-between px-3 py-2 bg-slate-50 hover:bg-slate-100/70 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#193f53]/20 focus:border-[#193f53] transition-colors cursor-pointer text-left"
+                  >
+                    <div className="truncate pr-2">
+                      {selectedStatuses.length === AUDIT_STATUS_OPTIONS.length ? (
+                        <span className="text-slate-700 font-semibold">Semua Status (3)</span>
+                      ) : selectedStatuses.length === 0 ? (
+                        <span className="text-rose-500 font-semibold italic">0 Status Dipilih</span>
+                      ) : (
+                        <div className="flex items-center gap-1.5 truncate">
+                          <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-[#193f53] text-[10px] font-bold text-white shrink-0">
+                            {selectedStatuses.length}
+                          </span>
+                          <span className="font-semibold text-slate-800 truncate">
+                            {selectedStatuses.join(", ")}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <ChevronDown
+                      className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform duration-200 ${
+                        isStatusDropdownOpen ? "rotate-180 text-[#193f53]" : ""
+                      }`}
+                    />
+                  </button>
+
+                  {/* Dropdown Popover (Geser otomatis ke kiri agar tidak terpotong layar/wadah) */}
+                  {isStatusDropdownOpen && (
+                    <div className="absolute right-0 mt-1.5 w-64 sm:w-72 max-w-[calc(100vw-2.5rem)] bg-white rounded-xl shadow-xl border border-slate-200 p-2.5 z-50 animate-in fade-in zoom-in-95 duration-100">
+                      <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100 px-1">
+                        <span className="text-[11px] font-bold text-slate-700">Filter Status Audit</span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedStatuses(["Tidak Mengerjakan", "Masalah", "Sesuai"]);
+                              setCurrentPage(1);
+                            }}
+                            className="text-[10px] font-semibold text-[#193f53] hover:underline cursor-pointer"
+                          >
+                            Pilih Semua
+                          </button>
+                          <span className="text-slate-300">•</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedStatuses([]);
+                              setCurrentPage(1);
+                            }}
+                            className="text-[10px] font-semibold text-slate-400 hover:text-slate-700 cursor-pointer"
+                          >
+                            Kosongkan
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        {AUDIT_STATUS_OPTIONS.map((st) => {
+                          const isChecked = selectedStatuses.includes(st.id);
+                          return (
+                            <div
+                              key={st.id}
+                              onClick={() => toggleStatus(st.id)}
+                              className={`flex items-start gap-2.5 p-2 rounded-lg cursor-pointer transition-colors ${
+                                isChecked
+                                  ? "bg-slate-50 hover:bg-slate-100/70"
+                                  : "hover:bg-slate-50/50 opacity-60 hover:opacity-100"
+                              }`}
+                            >
+                              <div
+                                className={`w-4 h-4 mt-0.5 rounded border flex items-center justify-center transition-colors shrink-0 ${
+                                  isChecked
+                                    ? "bg-[#193f53] border-[#193f53] text-white"
+                                    : "border-slate-300 bg-white"
+                                }`}
+                              >
+                                {isChecked && <Check className="w-3 h-3 stroke-[3]" />}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center justify-between gap-1.5">
+                                  <span className="text-xs font-semibold text-slate-800 leading-tight">
+                                    {st.label}
+                                  </span>
+                                  <span
+                                    className={`inline-block w-2 h-2 rounded-full shrink-0 ${st.dotClass}`}
+                                    title={st.label}
+                                  />
+                                </div>
+                                <p className="text-[10px] text-slate-400 mt-0.5 leading-snug">
+                                  {st.desc}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div className="mt-2 pt-2 border-t border-slate-100 px-1 flex items-center justify-between text-[11px] text-slate-500">
+                        <span className="text-[10px] italic">Bisa pilih lebih dari 1</span>
+                        <button
+                          type="button"
+                          onClick={() => setIsStatusDropdownOpen(false)}
+                          className="text-[10px] font-bold text-[#193f53] hover:underline cursor-pointer"
+                        >
+                          Tutup
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -431,57 +657,69 @@ export default function LaporanPage() {
                 {/* Active Pills */}
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-xs text-slate-500 font-medium">Filter Aktif:</span>
-                  {selectedStatus !== "Semua Status" && (
-                    <span
-                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold ${
-                        selectedStatus === "Sesuai"
-                          ? "bg-emerald-50 border border-emerald-200 text-emerald-700"
-                          : selectedStatus === "Tidak Mengerjakan"
-                          ? "bg-rose-100 border border-rose-300 text-rose-800"
-                          : "bg-rose-50 border border-rose-200 text-rose-600"
-                      }`}
-                    >
-                      <span
-                        className={`w-1.5 h-1.5 rounded-full ${
-                          selectedStatus === "Sesuai"
-                            ? "bg-emerald-500"
-                            : selectedStatus === "Tidak Mengerjakan"
-                            ? "bg-rose-700"
-                            : "bg-rose-500"
-                        }`}
-                      />
-                      Status: {selectedStatus === "Masalah" ? "Ada Masalah" : selectedStatus}
+
+                  {/* Multi-Status Pills */}
+                  {selectedStatuses.length > 0 && selectedStatuses.length < AUDIT_STATUS_OPTIONS.length && (
+                    selectedStatuses.map((st) => {
+                      const cfg = AUDIT_STATUS_OPTIONS.find((c) => c.id === st);
+                      return (
+                        <span
+                          key={st}
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border ${cfg?.badgeClass || "bg-slate-100 border-slate-200 text-slate-700"}`}
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full ${cfg?.dotClass || "bg-slate-400"}`} />
+                          Status: {st === "Masalah" ? "Ada Masalah" : st}
+                          <button
+                            type="button"
+                            onClick={() => toggleStatus(st)}
+                            className="ml-0.5 hover:opacity-75 cursor-pointer"
+                            title={`Hapus filter status ${st}`}
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      );
+                    })
+                  )}
+
+                  {selectedStatuses.length === 0 && (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-50 border border-rose-200 text-rose-700">
+                      <AlertCircle className="w-3 h-3 text-rose-600" />
+                      Status: 0 status dipilih
                       <button
-                        onClick={() => setSelectedStatus("Semua Status")}
-                        className={`ml-0.5 cursor-pointer ${
-                          selectedStatus === "Sesuai"
-                            ? "hover:text-emerald-900"
-                            : selectedStatus === "Tidak Mengerjakan"
-                            ? "hover:text-rose-950"
-                            : "hover:text-rose-800"
-                        }`}
+                        type="button"
+                        onClick={() => {
+                          setSelectedStatuses(["Tidak Mengerjakan", "Masalah", "Sesuai"]);
+                          setCurrentPage(1);
+                        }}
+                        className="underline hover:text-rose-900 ml-1 cursor-pointer font-bold"
                       >
-                        <X className="w-3 h-3" />
+                        Pilih Semua
                       </button>
                     </span>
                   )}
 
+                  {/* Month Pill */}
                   {selectedMonth !== "Semua Bulan" && (
                     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-slate-100 border border-slate-200 text-slate-700">
-                      Rentang: {selectedMonth}
+                      Rentang: {selectedMonth === "Bulan Ini" ? `Bulan Ini (${getCurrentMonthLabel()})` : selectedMonth}
                       <button
+                        type="button"
                         onClick={() => setSelectedMonth("Semua Bulan")}
                         className="hover:text-slate-900 ml-0.5 cursor-pointer"
+                        title="Tampilkan Semua Bulan"
                       >
                         <X className="w-3 h-3" />
                       </button>
                     </span>
                   )}
 
+                  {/* Store Pill */}
                   {selectedStore !== "Semua Toko" && (
                     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-slate-100 border border-slate-200 text-slate-700">
                       Toko: {selectedStore}
                       <button
+                        type="button"
                         onClick={() => setSelectedStore("Semua Toko")}
                         className="hover:text-slate-900 ml-0.5 cursor-pointer"
                       >
@@ -490,10 +728,12 @@ export default function LaporanPage() {
                     </span>
                   )}
 
+                  {/* Schedule Pill */}
                   {selectedSchedule !== "Semua Jadwal" && (
                     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-slate-100 border border-slate-200 text-slate-700">
                       Jadwal: {selectedSchedule}
                       <button
+                        type="button"
                         onClick={() => setSelectedSchedule("Semua Jadwal")}
                         className="hover:text-slate-900 ml-0.5 cursor-pointer"
                       >
@@ -503,7 +743,7 @@ export default function LaporanPage() {
                   )}
 
                   {!hasActiveFilters && (
-                    <span className="text-[11px] text-slate-400 italic">Tidak ada filter aktif</span>
+                    <span className="text-[11px] text-slate-400 italic">Tidak ada filter aktif (menampilkan seluruh data)</span>
                   )}
                 </div>
 
@@ -520,14 +760,36 @@ export default function LaporanPage() {
                   )}
 
                   {filteredReports.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={handleExportAll}
-                      className="flex items-center gap-1.5 px-4 py-2 bg-[#193f53] hover:bg-[#143343] text-white rounded-lg text-xs font-semibold transition-colors shadow-2xs cursor-pointer"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                      Ekspor Laporan
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={handleExportAll}
+                        disabled={isExportingAll}
+                        className="flex items-center gap-1.5 px-4 py-2 bg-[#193f53] hover:bg-[#143343] disabled:opacity-70 text-white rounded-lg text-xs font-semibold transition-colors shadow-2xs cursor-pointer"
+                        title="Unduh arsip ZIP berisi file-file PDF individual per gerai dan rekapitulasi CSV standar korporat"
+                      >
+                        {isExportingAll ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Mengemas {filteredReports.length} PDF (ZIP)...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Download className="w-3.5 h-3.5" />
+                            <span>Ekspor ZIP ({filteredReports.length} PDF)</span>
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleExportCsv}
+                        className="px-2.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition-colors shadow-2xs cursor-pointer border border-slate-200"
+                        title="Ekspor rekapitulasi seluruh data laporan ke file CSV standar korporat (Microsoft Excel & Google Sheets)"
+                      >
+                        CSV Korporat
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
@@ -580,8 +842,16 @@ export default function LaporanPage() {
                           {/* Toko */}
                           <td className="px-5 py-3.5">
                             <div className="flex items-center gap-3 max-w-[220px]">
-                              <div className="w-8 h-8 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 shrink-0">
-                                <Store className="w-3.5 h-3.5" />
+                              <div className="w-8 h-8 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 shrink-0 overflow-hidden shadow-2xs relative">
+                                {storePhotoMap.get(row.storeName.trim().toLowerCase()) ? (
+                                  <DecryptedImage
+                                    src={storePhotoMap.get(row.storeName.trim().toLowerCase())!}
+                                    alt={row.storeName}
+                                    className="w-full h-full object-cover"
+                                  />
+                                ) : (
+                                  <Store className="w-3.5 h-3.5" />
+                                )}
                               </div>
                               <div className="min-w-0">
                                 <p className="text-xs font-bold text-slate-900 leading-tight">
@@ -601,12 +871,18 @@ export default function LaporanPage() {
 
                           {/* Staff Pelaksana */}
                           <td className="px-5 py-3.5 whitespace-nowrap">
-                            <p className="text-xs font-bold text-slate-900 leading-tight">
-                              {row.auditorName}
-                            </p>
-                            <p className="text-[11px] text-slate-500 mt-0.5">
-                              {row.auditorRole}
-                            </p>
+                            {row.status === "Tidak Mengerjakan" || !row.auditorName || row.auditorName === "-" ? (
+                              <span className="text-xs font-semibold text-slate-400 italic">-</span>
+                            ) : (
+                              <>
+                                <p className="text-xs font-bold text-slate-900 leading-tight">
+                                  {row.auditorName}
+                                </p>
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                  {row.auditorRole && row.auditorRole !== "-" ? row.auditorRole : ""}
+                                </p>
+                              </>
+                            )}
                           </td>
 
                           {/* Waktu Submit */}
@@ -668,10 +944,15 @@ export default function LaporanPage() {
                               <button
                                 type="button"
                                 onClick={() => handleExportSingle(row)}
-                                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
-                                title="Unduh Laporan"
+                                disabled={downloadingRowId === row.id}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 disabled:opacity-50 transition-colors cursor-pointer"
+                                title="Unduh Laporan PDF"
                               >
-                                <Download className="w-4 h-4" />
+                                {downloadingRowId === row.id ? (
+                                  <Loader2 className="w-4 h-4 animate-spin text-[#193f53]" />
+                                ) : (
+                                  <Download className="w-4 h-4" />
+                                )}
                               </button>
                             </div>
                           </td>
