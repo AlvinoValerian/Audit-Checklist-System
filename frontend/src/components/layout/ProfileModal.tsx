@@ -11,6 +11,9 @@ import {
   CheckCircle2,
   Lock,
   ShieldCheck,
+  Calendar,
+  Clock,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { AuthService } from "@/lib/auth";
@@ -39,6 +42,18 @@ function getInitials(name: string): string {
   return name.slice(0, 2).toUpperCase();
 }
 
+function formatDateIndo(date: Date): string {
+  try {
+    return new Intl.DateTimeFormat("id-ID", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    }).format(date);
+  } catch {
+    return date.toLocaleDateString();
+  }
+}
+
 export default function ProfileModal({
   isOpen,
   onClose,
@@ -57,6 +72,16 @@ export default function ProfileModal({
   const [nameInput, setNameInput] = useState(propName);
   const [isEncryptedAvatar, setIsEncryptedAvatar] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // State Periode Paket Langganan
+  const [purchasedPlan, setPurchasedPlan] = useState("Standard Plan");
+  const [subscriptionStartDate, setSubscriptionStartDate] = useState<Date>(new Date());
+  const [subscriptionEndDate, setSubscriptionEndDate] = useState<Date>(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 30);
+    return d;
+  });
+  const [daysRemaining, setDaysRemaining] = useState<number>(30);
 
   // Sync state from storage / auth on mount and modal open
   useEffect(() => {
@@ -100,6 +125,63 @@ export default function ProfileModal({
       } else {
         setAvatar(null);
         setIsEncryptedAvatar(false);
+      }
+
+      // Sinkronisasi data paket langganan (Eksklusif Super Admin - Teknis & role lain tidak memiliki paket)
+      if (resolvedRole === "Super Admin") {
+        try {
+          const plan =
+            localStorage.getItem("active_subscription_plan") ||
+            localStorage.getItem("selected_checkout_plan");
+          const billingCycle = localStorage.getItem("selected_billing_cycle");
+          const durationDaysStored = localStorage.getItem("subscription_duration_days");
+          const isYearly =
+            billingCycle === "yearly" ||
+            billingCycle === "annual" ||
+            billingCycle === "tahunan" ||
+            durationDaysStored === "365";
+          const durationDays = durationDaysStored ? parseInt(durationDaysStored, 10) : isYearly ? 365 : 30;
+
+          const basePlanName = plan
+            ? plan.toLowerCase() === "lite"
+              ? "Lite Plan"
+              : plan.toLowerCase() === "pro"
+              ? "Pro Plan"
+              : "Standard Plan"
+            : "Standard Plan";
+
+          setPurchasedPlan(`${basePlanName} (${isYearly ? "Tahunan" : "Bulanan"})`);
+
+          // Tanggal mulai langganan (default ke waktu akun terdaftar / pembayaran)
+          let start = new Date();
+          const storedStart =
+            localStorage.getItem("subscription_start_date") ||
+            (currentUser?.email ? localStorage.getItem(`subscription_start_date_${currentUser.email}`) : null);
+
+          if (storedStart) {
+            const parsed = new Date(storedStart);
+            if (!isNaN(parsed.getTime())) start = parsed;
+          } else {
+            localStorage.setItem("subscription_start_date", start.toISOString());
+            if (currentUser?.email) {
+              localStorage.setItem(`subscription_start_date_${currentUser.email}`, start.toISOString());
+            }
+          }
+          setSubscriptionStartDate(start);
+
+          // Tanggal berakhir (periode 30 hari untuk bulanan, 365 hari untuk tahunan)
+          const end = new Date(start);
+          end.setDate(end.getDate() + durationDays);
+          setSubscriptionEndDate(end);
+
+          // Sisa hari aktif
+          const now = new Date();
+          const diffMs = end.getTime() - now.getTime();
+          const days = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+          setDaysRemaining(days);
+        } catch {}
+      } else {
+        setPurchasedPlan("");
       }
 
       setIsEditingName(false);
@@ -373,6 +455,69 @@ export default function ProfileModal({
               </div>
             </div>
           </div>
+
+          {/* Masa Periode Paket Langganan (Eksklusif Khusus Super Admin - Tidak Ditampilkan ke Teknis/Staff/Admin) */}
+          {role === "Super Admin" && purchasedPlan && (
+            <div className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-br from-slate-50 via-sky-50/50 to-blue-50/30 border border-sky-200/90 shadow-2xs space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-sky-600 text-white flex items-center justify-center font-black text-xs shadow-xs">
+                    ⚡
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                      Paket Langganan Super Admin
+                    </span>
+                    <span className="text-xs sm:text-sm font-extrabold text-[#193f53]">
+                      {purchasedPlan}
+                    </span>
+                  </div>
+                </div>
+
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-extrabold tracking-wide">
+                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                  Aktif &amp; Terverifikasi
+                </span>
+              </div>
+
+              {/* Masa Periode Paket: Dari Kapan sampai Kapan */}
+              <div className="p-2.5 sm:p-3 rounded-xl bg-white border border-slate-200/80 grid grid-cols-2 gap-3 text-xs">
+                <div>
+                  <div className="flex items-center gap-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                    <Calendar className="w-3 h-3 text-sky-600" />
+                    <span>Masa Mulai</span>
+                  </div>
+                  <p className="font-bold text-slate-800 text-xs sm:text-[13px]">
+                    {formatDateIndo(subscriptionStartDate)}
+                  </p>
+                </div>
+
+                <div>
+                  <div className="flex items-center gap-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                    <Calendar className="w-3 h-3 text-amber-600" />
+                    <span>Masa Berakhir</span>
+                  </div>
+                  <p className="font-bold text-slate-800 text-xs sm:text-[13px]">
+                    {formatDateIndo(subscriptionEndDate)}
+                  </p>
+                </div>
+              </div>
+
+              {/* Sisa Masa Aktif */}
+              <div className="flex items-center justify-between text-[11px] text-slate-500 pt-0.5 px-1">
+                <span className="flex items-center gap-1.5 text-slate-600 font-medium">
+                  <Clock className="w-3.5 h-3.5 text-sky-600" />
+                  <span>Sisa Waktu Aktif:</span>
+                  <strong className="text-emerald-700 font-extrabold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                    {daysRemaining} Hari
+                  </strong>
+                </span>
+                <span className="text-[10px] font-semibold text-slate-400">
+                  SparkPay Gateway
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* Baris Bawah */}
           <div className="grid grid-cols-1 sm:grid-cols-12 gap-3.5 items-center pt-2">

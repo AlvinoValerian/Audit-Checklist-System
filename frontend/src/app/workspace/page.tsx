@@ -9,6 +9,7 @@ import WorkspaceTable from "./components/WorkspaceTable";
 import CreateWorkspaceModal from "./components/CreateWorkspaceModal";
 import EditWorkspaceModal from "./components/EditWorkspaceModal";
 import DeleteWorkspaceModal from "./components/DeleteWorkspaceModal";
+import WorkspaceSubscriptionModal from "./components/WorkspaceSubscriptionModal";
 import Modal from "@/components/ui/Modal";
 import { WorkspaceService } from "@/services/workspace.service";
 import { Workspace, WorkspaceStatsData } from "@/types/workspace";
@@ -28,6 +29,7 @@ import {
   Info,
   X,
   ArrowRight,
+  CreditCard,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -55,13 +57,32 @@ export default function WorkspacePage() {
   const [selectedDetailWorkspace, setSelectedDetailWorkspace] =
     useState<Workspace | null>(null);
 
+  // SparkPay Snap.js Subscription Modal State
+  const [isSubscriptionModalOpen, setIsSubscriptionModalOpen] = useState(false);
+  const [subscriptionTargetWorkspace, setSubscriptionTargetWorkspace] =
+    useState<Workspace | null>(null);
+  const [isPaidUser, setIsPaidUser] = useState<boolean>(true);
+
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   // State Banner Panduan Masuk Workspace
   const [showGuideBanner, setShowGuideBanner] = useState(true);
 
+  // Periksa status pembayaran & picu modal otomatis saat masuk dari registrasi/login (Eksklusif Super Admin)
   useEffect(() => {
     try {
+      const currentUser = AuthService.getCurrentUser();
+      const isSuperAdmin = !currentUser?.role || currentUser?.role === "Super Admin";
+      const isPaid = localStorage.getItem("superadmin_paid") === "true";
+      const requireModal = localStorage.getItem("show_payment_modal_on_workspace") === "true";
+      const pendingPayment = localStorage.getItem("pending_superadmin_payment") === "true";
+      setIsPaidUser(isPaid);
+
+      // Munculkan modal otomatis HANYA untuk Super Admin jika belum bayar
+      if (isSuperAdmin && (requireModal || pendingPayment || !isPaid)) {
+        setIsSubscriptionModalOpen(true);
+      }
+
       const dismissed = localStorage.getItem("dismissed_workspace_guide_v1");
       if (dismissed === "true") {
         setShowGuideBanner(false);
@@ -95,6 +116,9 @@ export default function WorkspacePage() {
       const list = await WorkspaceService.fetchAll();
       setWorkspaces(list);
       setStats(WorkspaceService.getStats(list));
+      if (!subscriptionTargetWorkspace && list.length > 0) {
+        setSubscriptionTargetWorkspace(list[0]);
+      }
     } catch (err: unknown) {
       const errorMessage =
         err instanceof Error
@@ -134,6 +158,15 @@ export default function WorkspacePage() {
     setIsDeleteModalOpen(true);
   };
 
+  const handleOpenSubscriptionModal = (ws: Workspace) => {
+    setSubscriptionTargetWorkspace(ws);
+    setIsSubscriptionModalOpen(true);
+  };
+
+  /**
+   * Saat Super Admin masuk ke Workspace:
+   * Menampilkan dialog aktivasi paket SparkPay Snap.js sesuai dokumen .md
+   */
   const handleEnterWorkspace = (ws: Workspace) => {
     if (ws.status === "Nonaktif") {
       toast.error(`Workspace "${ws.name}" sedang dinonaktifkan. Seluruh sistem untuk workspace ini diberhentikan.`);
@@ -145,7 +178,7 @@ export default function WorkspacePage() {
       companyName: ws.companyName || ws.name,
     });
     setSelectedDetailWorkspace(null);
-    toast.success(`Memasuki workspace "${ws.name}"...`);
+    toast.success(`Berhasil beralih ke ruang kerja "${ws.name}"`);
     router.push(`/dashboard-monitoring?workspaceId=${ws.id}`);
   };
 
@@ -299,7 +332,7 @@ export default function WorkspacePage() {
             <button
               type="button"
               onClick={handleDismissGuide}
-              className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors shrink-0 cursor-pointer"
+              className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-white/60 transition-colors shrink-0"
               title="Tutup panduan ini"
             >
               <X className="w-4 h-4" />
@@ -352,7 +385,7 @@ export default function WorkspacePage() {
         onSubmit={handleEditSubmit}
       />
 
-      {/* 3. Modal Delete (Soft Delete) */}
+      {/* 3. Modal Konfirmasi Hapus/Nonaktifkan Workspace (Soft Delete) */}
       <DeleteWorkspaceModal
         isOpen={isDeleteModalOpen}
         isSubmitting={isSubmitting}
@@ -366,105 +399,56 @@ export default function WorkspacePage() {
         onConfirm={handleConfirmDelete}
       />
 
-      {/* 4. Modal Detail Workspace (Tanpa data dummy/mock) */}
+      {/* 4. Modal Detail Workspace */}
       {selectedDetailWorkspace && (() => {
-        const initials =
-          selectedDetailWorkspace.name
-            .split(" ")
-            .map((w) => w[0])
-            .join("")
-            .slice(0, 2)
-            .toUpperCase() || "WS";
-
-        const adminEmail = selectedDetailWorkspace.adminEmail || "-";
         const picName = selectedDetailWorkspace.picName || "-";
         const picPhone = selectedDetailWorkspace.picPhone || "-";
         const address = selectedDetailWorkspace.headquartersAddress || "-";
-        const storeList: string[] = selectedDetailWorkspace.stores || [];
+
+        const storeList: string[] = Array.isArray(selectedDetailWorkspace.stores)
+          ? selectedDetailWorkspace.stores
+              .map((s: { name?: string; store_name?: string } | string) =>
+                typeof s === "string" ? s : s.name || s.store_name || ""
+              )
+              .filter(Boolean)
+          : [];
 
         return (
           <Modal
-            isOpen={Boolean(selectedDetailWorkspace)}
+            isOpen={!!selectedDetailWorkspace}
             onClose={() => setSelectedDetailWorkspace(null)}
-            title="Detail Workspace"
-            subtitle="Informasi lengkap dan konfigurasi entitas workspace"
-            icon={<Building2 className="w-5 h-5 text-sky-600" />}
+            title="Detail Informasi Workspace"
             maxWidth="max-w-2xl"
           >
             <div className="space-y-4">
-              {/* Workspace Identity Card */}
-              <div className="p-3.5 sm:p-4 rounded-xl border border-slate-200/80 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-3.5">
-                  <div className="w-11 h-11 rounded-xl bg-[#193f53] text-white font-bold text-sm flex items-center justify-center shrink-0 shadow-2xs">
-                    {initials}
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleEnterWorkspace(selectedDetailWorkspace)}
-                        className="font-bold text-slate-900 text-base leading-tight hover:text-blue-600 hover:underline flex items-center gap-1.5 text-left group/name cursor-pointer transition-colors"
-                        title="Masuk ke Dashboard Monitoring"
-                      >
-                        <span>{selectedDetailWorkspace.name}</span>
-                        <ExternalLink className="w-3.5 h-3.5 text-slate-400 group-hover/name:text-blue-600 transition-colors" />
-                      </button>
-                      {selectedDetailWorkspace.status === "Nonaktif" && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-600 border border-rose-200">
-                          Nonaktif
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-xs text-slate-500 font-medium mt-0.5">
-                      {selectedDetailWorkspace.companyName || selectedDetailWorkspace.name}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="text-left sm:text-right text-xs text-slate-500 space-y-0.5">
-                  <div className="text-slate-400">
-                    Dibuat:{" "}
-                    <span className="text-slate-700 font-medium">
-                      {selectedDetailWorkspace.createdAt}
-                    </span>
-                  </div>
-                  <div className="text-slate-500">
-                    Admin:{" "}
-                    <span className="text-slate-700 font-medium">
-                      {adminEmail}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Soft Delete Notice if Inactive */}
-              {selectedDetailWorkspace.status === "Nonaktif" && (
-                <div className="p-3 bg-amber-50/80 border border-amber-200/80 rounded-xl flex items-center gap-2.5 text-xs text-amber-800">
-                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-                  <span>
-                    Workspace ini berstatus <strong>Nonaktif (Soft Delete)</strong>. Mode hanya detail dan tidak dapat diedit sebelum diaktifkan kembali.
-                  </span>
-                </div>
-              )}
-
-              {/* Total Toko Terdaftar Card */}
-              <div className="p-3.5 sm:p-4 rounded-xl border border-slate-200/80 bg-white flex items-center justify-between">
+              {/* Header Profile Workspace */}
+              <div className="flex items-center justify-between p-3.5 rounded-2xl bg-gradient-to-r from-sky-50 via-slate-50 to-white border border-slate-200/90">
                 <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center shrink-0">
-                    <Store className="w-4 h-4" />
+                  <div className="w-11 h-11 rounded-xl bg-[#193f53] text-white flex items-center justify-center font-bold text-base shadow-xs shrink-0">
+                    <Building2 className="w-5 h-5 text-sky-200" />
                   </div>
                   <div>
-                    <div className="text-[10px] sm:text-[11px] font-bold tracking-wider text-slate-500 uppercase">
-                      TOTAL TOKO TERDAFTAR
-                    </div>
-                    <div className="text-xs text-slate-400 mt-0.5">
-                      Jumlah toko dan outlet ritel yang terhubung dalam workspace ini
+                    <h4 className="font-bold text-slate-900 text-sm sm:text-base leading-tight">
+                      {selectedDetailWorkspace.name}
+                    </h4>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-xs text-slate-500 font-medium">
+                        {selectedDetailWorkspace.companyName ||
+                          selectedDetailWorkspace.name}
+                      </span>
+                      <span className="text-slate-300">•</span>
+                      <span className="text-xs text-sky-700 font-semibold">
+                        {selectedDetailWorkspace.category ||
+                          selectedDetailWorkspace.companyCategory ||
+                          "Ritel Modern"}
+                      </span>
                     </div>
                   </div>
                 </div>
 
-                <div className="flex items-baseline gap-1.5">
-                  <span className="text-2xl font-bold text-slate-900">
+                <div className="flex items-center gap-1.5 px-3 py-1 bg-white rounded-xl border border-slate-200 shadow-2xs">
+                  <Store className="w-4 h-4 text-[#193f53]" />
+                  <span className="font-bold text-xs text-slate-800">
                     {selectedDetailWorkspace.storeCount}
                   </span>
                   <span className="text-xs text-slate-500 font-medium">
@@ -549,16 +533,18 @@ export default function WorkspacePage() {
 
               {/* Action Buttons */}
               <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => handleEnterWorkspace(selectedDetailWorkspace)}
-                  className="px-4 py-2 text-xs sm:text-sm font-semibold text-white bg-gradient-to-r from-sky-600 to-[#193f53] hover:from-sky-700 hover:to-[#143343] rounded-lg transition-all shadow-xs flex items-center gap-2 cursor-pointer"
-                  title="Masuk ke Dashboard Monitoring Workspace ini"
-                >
-                  <LayoutGrid className="w-3.5 h-3.5 text-sky-200" />
-                  <span>Masuk Workspace</span>
-                  <ArrowRight className="w-3.5 h-3.5 text-sky-200 ml-0.5" />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleEnterWorkspace(selectedDetailWorkspace)}
+                    className="px-4 py-2 text-xs sm:text-sm font-semibold text-white bg-gradient-to-r from-sky-600 to-[#193f53] hover:from-sky-700 hover:to-[#143343] rounded-lg transition-all shadow-xs flex items-center gap-2 cursor-pointer"
+                    title="Masuk ke Dashboard Monitoring Workspace ini"
+                  >
+                    <LayoutGrid className="w-3.5 h-3.5 text-sky-200" />
+                    <span>Masuk Workspace</span>
+                    <ArrowRight className="w-3.5 h-3.5 text-sky-200 ml-0.5" />
+                  </button>
+                </div>
 
                 <div className="flex items-center gap-2.5">
                   <button
@@ -588,6 +574,17 @@ export default function WorkspacePage() {
           </Modal>
         );
       })()}
+
+      {/* 5. Modal Aktivasi & Pembayaran Paket Workspace via SparkPay (Snap.js Sesuai .md) */}
+      <WorkspaceSubscriptionModal
+        isOpen={isSubscriptionModalOpen}
+        onClose={() => setIsSubscriptionModalOpen(false)}
+        workspace={subscriptionTargetWorkspace}
+        onSuccess={() => {
+          setIsPaidUser(true);
+          refreshData({ silent: true });
+        }}
+      />
     </DashboardLayout>
   );
 }

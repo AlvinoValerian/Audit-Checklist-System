@@ -13,6 +13,11 @@ const resolveSuperAdminId = async (req, user) => {
     } catch (e) {}
   }
 
+  // 1.5. Jika user teridentifikasi sebagai Divisi Teknis
+  if (user && (user.role === 'Divisi Teknis' || user.role === 'Teknis')) {
+    return BigInt(3);
+  }
+
   // 2. Jika user teridentifikasi sebagai Admin, ambil super_admin_id dari workspacenya
   if (user && (user.role === 'Admin' || user.id?.toString().startsWith('adm-') || user.workspaceId)) {
     if (user.workspaceId) {
@@ -156,9 +161,6 @@ exports.getAllAdmins = async (req, res) => {
         where: {
           workspace: {
             super_admin_id: cleanSaId,
-          },
-          NOT: {
-            role: 'Divisi Teknis',
           },
         },
         include: {
