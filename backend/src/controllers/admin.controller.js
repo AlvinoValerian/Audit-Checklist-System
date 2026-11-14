@@ -1,6 +1,21 @@
 const prisma = require('../config/prisma');
 const bcrypt = require('bcrypt');
 const { extractUser } = require('../middlewares/auth.middleware');
+const {
+  TEKNIS_INTERNAL_EMAIL,
+  MAX_TEKNIS_MANUAL_SUPER_ADMINS,
+  isTeknisUser,
+  toBigIntSafe,
+  ensureSuperAdminTeknisColumn,
+  getOrCreateTeknisInternalSuperAdmin,
+  getTeknisWorkspaceWhere,
+  isWorkspaceInTeknisScope,
+  getTeknisManualSuperAdminIdSet,
+} = require('../utils/teknisScope');
+const {
+  isSuperAdminRole,
+  sendSafeError,
+} = require('../utils/tenantScope');
 
 /**
  * Helper untuk menyelesaikan Super Admin ID yang valid berdasarkan user / request
