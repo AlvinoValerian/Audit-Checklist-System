@@ -171,19 +171,6 @@ exports.createWorkspace = async (req, res) => {
       status,
     } = req.body;
 
-    const user = await extractUser(req);
-    let targetSuperAdminId = user?.rawId || superAdminId || req.query.superAdminId;
-    if (user && (user.role === 'Divisi Teknis' || user.role === 'Teknis')) {
-      targetSuperAdminId = '3';
-    }
-
-    if (!targetSuperAdminId) {
-      return res.status(401).json({
-        status: 'error',
-        message: 'Otentikasi diperlukan. Akun Super Admin tidak teridentifikasi.',
-      });
-    }
-
     const finalCompanyName = companyName || name;
     if (!finalCompanyName || !finalCompanyName.trim()) {
       return res.status(400).json({
