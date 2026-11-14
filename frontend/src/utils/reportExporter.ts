@@ -6,7 +6,7 @@ import { toast } from "sonner";
  * Menghindari beban SSR dan memastikan dependensi browser hanya dimuat saat tombol diklik di sisi client.
  */
 async function getJsPDF() {
-  const mod = await import("jspdf/dist/jspdf.umd.min.js");
+  const mod = await import("jspdf");
   return mod.jsPDF || (mod as any).default?.jsPDF || (mod as any).default;
 }
 
