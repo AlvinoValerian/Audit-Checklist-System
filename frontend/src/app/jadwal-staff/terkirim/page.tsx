@@ -116,9 +116,7 @@ function TerkirimContent() {
   const totalItems = report?.totalQuestions ?? 0;
   const answeredItems = report?.answeredQuestions ?? totalItems;
   const scorePercent = report?.scoreText || "-";
-  const displayStore = report?.storeName
-    ? `${report.storeName}${report.storeCode ? ` (${report.storeCode})` : ""}`
-    : (currentUser?.storeLocation || "-");
+  const displayStore = report?.storeName || (currentUser?.storeLocation || "-");
   const displaySchedule = report?.scheduleTitle || "-";
   const displaySigner = report ? report.signerName : (loading ? "-" : currentUser?.fullName || "-");
   const displayRole = report ? (report.signerRole || "") : "";
