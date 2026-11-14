@@ -72,14 +72,10 @@ const resolveSuperAdminId = async (req, user) => {
     } catch (e) {}
   }
 
-  // 5. Fallback Default: Super Admin pertama di database (menghindari layar kosong saat fresh visit)
-  try {
-    const fallbackSa = await prisma.super_admin.findFirst({
-      orderBy: { super_admin_id: 'asc' },
-      select: { super_admin_id: true },
-    });
-    if (fallbackSa) return fallbackSa.super_admin_id;
-  } catch (e) {}
+  // Super Admin terverifikasi
+  if (isSuperAdminRole(user) && user.rawId) {
+    return toBigIntSafe(user.rawId, ['sa-']);
+  }
 
   return null;
 };
@@ -112,11 +108,11 @@ const formatAdmin = (adm) => {
 /**
  * Format entitas Super Admin ke bentuk yang kompatibel dengan Frontend
  */
-const formatSuperAdmin = (sa) => {
+const formatSuperAdmin = (sa, meta = {}) => {
   const wsCount = sa.workspace ? sa.workspace.length : 0;
   const company = sa.company_name || 'Audit Pro System';
-  const wsText = wsCount > 0 
-    ? `${company} (${wsCount} Workspace)` 
+  const wsText = wsCount > 0
+    ? `${company} (${wsCount} Workspace)`
     : `${company} (Pusat / Semua Workspace)`;
 
   return {
@@ -129,9 +125,11 @@ const formatSuperAdmin = (sa) => {
     workspaceId: null,
     workspaceName: wsText,
     companyName: sa.company_name,
-    workspaces: sa.workspace ? sa.workspace.map(w => w.company_name) : [],
+    workspaces: sa.workspace ? sa.workspace.map((w) => w.company_name) : [],
     status: 'Aktif',
     rawStatus: 'active',
+    isSystemTeknis: Boolean(meta.isSystemTeknis ?? sa.email === TEKNIS_INTERNAL_EMAIL),
+    isManualSuperAdmin: Boolean(meta.isManualSuperAdmin),
     createdAt: sa.created_at
       ? new Date(sa.created_at).toLocaleDateString('id-ID', {
           day: '2-digit',
@@ -143,17 +141,62 @@ const formatSuperAdmin = (sa) => {
 };
 
 // GET /api/admins
-// Menampilkan admin dan super admin yang berelasi dengan akun yang sedang login
 exports.getAllAdmins = async (req, res) => {
   try {
-    const user = await extractUser(req);
+    await ensureSuperAdminTeknisColumn();
+    const user = req.user || (await extractUser(req));
+    const isTeknis = isTeknisUser(user);
     const cleanSaId = await resolveSuperAdminId(req, user);
 
-    if (!cleanSaId) {
-      return res.status(200).json({
-        status: 'success',
-        data: [],
+    if (!isTeknis && !cleanSaId) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Akses ditolak.',
       });
+    }
+
+    let adminWhere = {};
+    let saWhere = {};
+    let systemSa = null;
+    let manualSaIdSet = new Set();
+
+    if (isTeknis) {
+      systemSa = await getOrCreateTeknisInternalSuperAdmin();
+      manualSaIdSet = await getTeknisManualSuperAdminIdSet();
+
+      const allSaIds = [systemSa.super_admin_id];
+      for (const mid of manualSaIdSet) {
+        const parsed = toBigIntSafe(mid);
+        if (parsed && !allSaIds.some((id) => id === parsed)) {
+          allSaIds.push(parsed);
+        }
+      }
+
+      const teknisWsWhere = await getTeknisWorkspaceWhere();
+      adminWhere = {
+        OR: [
+          { role: 'Divisi Teknis' },
+          { role: 'Teknis' },
+          { workspace: teknisWsWhere },
+        ],
+      };
+      saWhere = {
+        super_admin_id: { in: allSaIds },
+      };
+    } else {
+      // Super Admin umum: hanya admin di bawah workspace miliknya
+      adminWhere = {
+        workspace: {
+          super_admin_id: cleanSaId,
+        },
+        OR: [
+          { role: null },
+          { role: { notIn: ['Divisi Teknis', 'Teknis'] } },
+        ],
+      };
+      saWhere = {
+        super_admin_id: cleanSaId,
+      };
     }
 
     const [admins, superAdmins] = await Promise.all([
@@ -171,9 +214,7 @@ exports.getAllAdmins = async (req, res) => {
         },
       }),
       prisma.super_admin.findMany({
-        where: {
-          super_admin_id: cleanSaId,
-        },
+        where: saWhere,
         include: {
           workspace: true,
         },
@@ -183,48 +224,111 @@ exports.getAllAdmins = async (req, res) => {
       }),
     ]);
 
-    const formattedSuperAdmins = superAdmins.map(formatSuperAdmin);
+    // Total Super Admin terdaftar di halaman Teknis (termasuk System Divisi Teknis + Super Admin manual)
+    const manualCount = isTeknis ? superAdmins.length : 0;
+
+    const formattedSuperAdmins = superAdmins.map((sa) =>
+      formatSuperAdmin(sa, {
+        isSystemTeknis: sa.email === TEKNIS_INTERNAL_EMAIL || (systemSa && sa.super_admin_id === systemSa.super_admin_id),
+        isManualSuperAdmin:
+          isTeknis &&
+          systemSa &&
+          sa.super_admin_id !== systemSa.super_admin_id &&
+          manualSaIdSet.has(sa.super_admin_id.toString()),
+      })
+    );
     const formattedAdmins = admins.map(formatAdmin);
 
-    // Super Admin miliknya ditampilkan di atas, diikuti Admin workspace miliknya
     const allAdmins = [...formattedSuperAdmins, ...formattedAdmins];
 
     return res.status(200).json({
       status: 'success',
       data: allAdmins,
+      meta: {
+        isTeknis,
+        manualSuperAdminCount: manualCount,
+        maxManualSuperAdmins: MAX_TEKNIS_MANUAL_SUPER_ADMINS,
+      },
     });
   } catch (error) {
-    console.error('❌ Error fetching admins:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal mengambil data admin dari database',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal mengambil data admin dari database');
   }
 };
 
 // GET /api/admins/:id
 exports.getAdminById = async (req, res) => {
   try {
+    await ensureSuperAdminTeknisColumn();
     const { id } = req.params;
-    const user = await extractUser(req);
+    const user = req.user || (await extractUser(req));
+    const isTeknis = isTeknisUser(user);
     const cleanSaId = await resolveSuperAdminId(req, user);
 
+    if (!isTeknis && !cleanSaId) {
+      return res.status(403).json({ status: 'error', message: 'Akses ditolak.' });
+    }
+
     if (id.startsWith('sa-')) {
-      const saId = BigInt(id.replace('sa-', ''));
+      const saId = toBigIntSafe(id, ['sa-']);
+      if (!saId) {
+        return res.status(400).json({ status: 'error', message: 'Format ID Super Admin tidak valid' });
+      }
+
+      let allowed = false;
+      let isSystemTeknis = false;
+      let isManualSuperAdmin = false;
+
+      if (isTeknis) {
+        const systemSa = await getOrCreateTeknisInternalSuperAdmin();
+        const manualSaIdSet = await getTeknisManualSuperAdminIdSet();
+        isSystemTeknis = saId === systemSa.super_admin_id;
+        isManualSuperAdmin = !isSystemTeknis && manualSaIdSet.has(saId.toString());
+        allowed = isSystemTeknis || isManualSuperAdmin;
+      } else {
+        allowed = saId === cleanSaId;
+      }
+
+      if (!allowed) {
+        return res.status(403).json({ status: 'error', message: 'Anda tidak memiliki akses ke akun Super Admin ini' });
+      }
+
       const superAdmin = await prisma.super_admin.findUnique({
         where: { super_admin_id: saId },
+        include: { workspace: true },
       });
       if (!superAdmin) {
         return res.status(404).json({ status: 'error', message: 'Super admin tidak ditemukan' });
       }
-      return res.status(200).json({ status: 'success', data: formatSuperAdmin(superAdmin) });
+      return res.status(200).json({
+        status: 'success',
+        data: formatSuperAdmin(superAdmin, { isSystemTeknis, isManualSuperAdmin }),
+      });
     }
 
-    const adminWhere = { admin_id: BigInt(id) };
-    if (cleanSaId) {
-      adminWhere.workspace = {
-        super_admin_id: cleanSaId,
+    const adminId = toBigIntSafe(id, ['adm-']);
+    if (!adminId) {
+      return res.status(400).json({ status: 'error', message: 'Format ID admin tidak valid' });
+    }
+
+    let adminWhere;
+    if (isTeknis) {
+      const teknisWsWhere = await getTeknisWorkspaceWhere();
+      adminWhere = {
+        admin_id: adminId,
+        OR: [
+          { role: 'Divisi Teknis' },
+          { role: 'Teknis' },
+          { workspace: teknisWsWhere },
+        ],
+      };
+    } else {
+      adminWhere = {
+        admin_id: adminId,
+        workspace: { super_admin_id: cleanSaId },
+        OR: [
+          { role: null },
+          { role: { notIn: ['Divisi Teknis', 'Teknis'] } },
+        ],
       };
     }
 
@@ -239,26 +343,22 @@ exports.getAdminById = async (req, res) => {
 
     return res.status(200).json({ status: 'success', data: formatAdmin(admin) });
   } catch (error) {
-    console.error('❌ Error fetching admin detail:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal mengambil detail admin',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal mengambil detail admin');
   }
 };
 
 // POST /api/admins
 exports.createAdmin = async (req, res) => {
   try {
-    console.log('📥 [POST /api/admins] Menerima data admin baru:', req.body);
-    const user = await extractUser(req);
+    await ensureSuperAdminTeknisColumn();
+    const user = req.user || (await extractUser(req));
+    const isTeknis = isTeknisUser(user);
     const cleanSaId = await resolveSuperAdminId(req, user);
 
     if (!cleanSaId) {
-      return res.status(401).json({
+      return res.status(403).json({
         status: 'error',
-        message: 'Otentikasi diperlukan. Akun Super Admin tidak teridentifikasi.',
+        message: 'Akses ditolak. Akun Super Admin / Divisi Teknis tidak teridentifikasi.',
       });
     }
 
@@ -269,8 +369,9 @@ exports.createAdmin = async (req, res) => {
       role = 'Admin',
       workspaceName,
       workspaceId,
+      companyName,
       status = 'Aktif',
-      password = 'password123',
+      password,
     } = req.body;
 
     if (!fullName || !fullName.trim()) {
@@ -281,86 +382,146 @@ exports.createAdmin = async (req, res) => {
       return res.status(400).json({ status: 'error', message: 'Email admin wajib diisi' });
     }
 
+    if (!password || !String(password).trim() || String(password).trim().length < 8) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Password wajib diisi minimal 8 karakter.',
+      });
+    }
+
     const cleanEmail = email.trim().toLowerCase();
 
-    // Cek duplikasi email di tabel admin dan super_admin
-    const [existingAdmin, existingSuperAdmin] = await Promise.all([
-      prisma.admin.findUnique({ where: { email: cleanEmail } }),
-      prisma.super_admin.findUnique({ where: { email: cleanEmail } }),
-    ]);
+    // Cek duplikasi email lintas tabel admin, super_admin, dan staff
+    const emailConflict = await findEmailConflict(cleanEmail);
 
-    if (existingAdmin || existingSuperAdmin) {
+    if (emailConflict) {
       return res.status(400).json({
         status: 'error',
         message: `Email "${cleanEmail}" sudah terdaftar dalam sistem. Gunakan email lain.`,
       });
     }
 
-    // Hash password
-    const hashedPassword = await bcrypt.hash(password || 'password123', 10);
+    const hashedPassword = await bcrypt.hash(String(password).trim(), 10);
 
-    // 1. Jika role Super Admin
+    // 1. Role Super Admin (HANYA aktif di Kelola Admin Divisi Teknis + batas maksimal 2 akun)
     if (role === 'Super Admin') {
+      if (!isTeknis) {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Pembuatan akun Super Admin manual hanya diizinkan pada halaman Kelola Admin Divisi Teknis.',
+        });
+      }
+
+      const systemSa = await getOrCreateTeknisInternalSuperAdmin();
+      const manualSaIdSet = await getTeknisManualSuperAdminIdSet();
+      const registeredTeknisSaIds = new Set(manualSaIdSet);
+      if (systemSa?.super_admin_id != null) {
+        registeredTeknisSaIds.add(systemSa.super_admin_id.toString());
+      }
+      const currentSuperAdminCount = registeredTeknisSaIds.size;
+
+      if (currentSuperAdminCount >= MAX_TEKNIS_MANUAL_SUPER_ADMINS) {
+        return res.status(400).json({
+          status: 'error',
+          message: `Batas maksimal akun Super Admin di Divisi Teknis telah tercapai (maksimal ${MAX_TEKNIS_MANUAL_SUPER_ADMINS} akun).`,
+        });
+      }
+
       const newSuperAdmin = await prisma.super_admin.create({
         data: {
           name: fullName.trim(),
           email: cleanEmail,
           phone_number: phone || null,
           password: hashedPassword,
-          company_name: 'Audit Pro System',
+          company_name: (companyName && companyName.trim()) || 'Divisi Teknis - Partner Super Admin',
+        },
+        include: {
+          workspace: true,
         },
       });
+
+      await prisma.$executeRawUnsafe(
+        `UPDATE super_admin SET created_by_teknis = TRUE WHERE super_admin_id = $1`,
+        newSuperAdmin.super_admin_id
+      );
 
       return res.status(201).json({
         status: 'success',
-        message: 'Super Admin berhasil ditambahkan',
-        data: formatSuperAdmin(newSuperAdmin),
+        message: 'Super Admin manual berhasil ditambahkan ke Divisi Teknis',
+        data: formatSuperAdmin(newSuperAdmin, {
+          isSystemTeknis: false,
+          isManualSuperAdmin: true,
+        }),
+        meta: {
+          manualSuperAdminCount: currentSuperAdminCount + 1,
+          maxManualSuperAdmins: MAX_TEKNIS_MANUAL_SUPER_ADMINS,
+        },
       });
     }
 
-    // 2. Pembuatan Admin Workspace (Hanya boleh di workspace milik Super Admin ini!)
+    // Cegah akun non-Teknis membuat role Divisi Teknis dari endpoint kelola-admin
+    if (!isTeknis && (role === 'Divisi Teknis' || role === 'Teknis')) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Anda tidak memiliki izin menambahkan akun Divisi Teknis dari menu ini.',
+      });
+    }
+
+    // 2. Pembuatan Admin Workspace
+    const wsOwnerScope = isTeknis
+      ? await getTeknisWorkspaceWhere()
+      : { super_admin_id: cleanSaId };
+
     let targetWorkspaceId = null;
 
     if (workspaceId) {
+      const parsedWsId = toBigIntSafe(workspaceId, ['ws-']);
+      if (!parsedWsId) {
+        return res.status(400).json({ status: 'error', message: 'Format ID workspace tidak valid.' });
+      }
       const ws = await prisma.workspace.findFirst({
         where: {
-          workspace_id: BigInt(workspaceId),
-          super_admin_id: cleanSaId,
+          AND: [{ workspace_id: parsedWsId }, wsOwnerScope],
         },
       });
-      if (ws) {
-        if (ws.status === 'inactive') {
-          return res.status(400).json({
-            status: 'error',
-            message: `Workspace "${ws.company_name}" berstatus Nonaktif dan tidak dapat dipilih.`,
-          });
-        }
-        targetWorkspaceId = ws.workspace_id;
+      if (!ws) {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Workspace tidak ditemukan atau Anda tidak memiliki akses.',
+        });
       }
+      if (ws.status === 'inactive') {
+        return res.status(400).json({
+          status: 'error',
+          message: `Workspace "${ws.company_name}" berstatus Nonaktif dan tidak dapat dipilih.`,
+        });
+      }
+      targetWorkspaceId = ws.workspace_id;
     } else if (workspaceName && workspaceName !== 'All Workspaces (Central)') {
       const ws = await prisma.workspace.findFirst({
         where: {
-          company_name: workspaceName.trim(),
-          super_admin_id: cleanSaId,
+          AND: [{ company_name: workspaceName.trim() }, wsOwnerScope],
         },
       });
-      if (ws) {
-        if (ws.status === 'inactive') {
-          return res.status(400).json({
-            status: 'error',
-            message: `Workspace "${ws.company_name}" berstatus Nonaktif dan tidak dapat dipilih.`,
-          });
-        }
-        targetWorkspaceId = ws.workspace_id;
+      if (!ws) {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Workspace penugasan tidak ditemukan dalam lingkup akun Anda.',
+        });
       }
+      if (ws.status === 'inactive') {
+        return res.status(400).json({
+          status: 'error',
+          message: `Workspace "${ws.company_name}" berstatus Nonaktif dan tidak dapat dipilih.`,
+        });
+      }
+      targetWorkspaceId = ws.workspace_id;
     }
 
-    // Fallback: Pasangkan ke workspace aktif milik Super Admin ini
     if (!targetWorkspaceId) {
       const defaultWs = await prisma.workspace.findFirst({
         where: {
-          super_admin_id: cleanSaId,
-          status: 'active',
+          AND: [{ status: 'active' }, wsOwnerScope],
         },
       });
       if (!defaultWs) {
@@ -387,55 +548,89 @@ exports.createAdmin = async (req, res) => {
       },
     });
 
-    console.log('✅ [POST /api/admins] Berhasil membuat Admin:', newAdmin.name);
-
     return res.status(201).json({
       status: 'success',
       message: 'Admin berhasil ditambahkan',
       data: formatAdmin(newAdmin),
     });
   } catch (error) {
-    console.error('❌ Error creating admin:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: error.message || 'Gagal menambahkan admin',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal menambahkan admin');
   }
 };
 
 // PUT /api/admins/:id
 exports.updateAdmin = async (req, res) => {
   try {
+    await ensureSuperAdminTeknisColumn();
     const { id } = req.params;
-    const user = await extractUser(req);
+    const user = req.user || (await extractUser(req));
+    const isTeknis = isTeknisUser(user);
     const cleanSaId = await resolveSuperAdminId(req, user);
 
-    if (!cleanSaId) {
-      return res.status(401).json({ status: 'error', message: 'Otentikasi diperlukan.' });
+    if (!isTeknis && !cleanSaId) {
+      return res.status(403).json({ status: 'error', message: 'Akses ditolak.' });
     }
 
     const {
       fullName,
       email,
       phone,
+      companyName,
       workspaceName,
       workspaceId,
       status,
       password,
     } = req.body;
 
+    if (password !== undefined && String(password).trim() && String(password).trim().length < 8) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Password baru minimal 8 karakter.',
+      });
+    }
+
     // 1. Update Super Admin
     if (id.startsWith('sa-')) {
-      const saId = BigInt(id.replace('sa-', ''));
-      if (saId !== cleanSaId) {
+      const saId = toBigIntSafe(id, ['sa-']);
+      if (!saId) {
+        return res.status(400).json({ status: 'error', message: 'Format ID Super Admin tidak valid.' });
+      }
+
+      let allowed = false;
+      let isSystemTeknis = false;
+      let isManualSuperAdmin = false;
+
+      if (isTeknis) {
+        const systemSa = await getOrCreateTeknisInternalSuperAdmin();
+        const manualSaIdSet = await getTeknisManualSuperAdminIdSet();
+        isSystemTeknis = saId === systemSa.super_admin_id;
+        isManualSuperAdmin = !isSystemTeknis && manualSaIdSet.has(saId.toString());
+        allowed = isSystemTeknis || isManualSuperAdmin;
+      } else {
+        allowed = saId === cleanSaId;
+      }
+
+      if (!allowed) {
         return res.status(403).json({ status: 'error', message: 'Anda tidak dapat mengubah akun Super Admin lain.' });
       }
 
       const updateData = { updated_at: new Date() };
       if (fullName) updateData.name = fullName.trim();
-      if (email) updateData.email = email.trim().toLowerCase();
+      if (email) {
+        const nextEmail = email.trim().toLowerCase();
+        const emailConflict = await findEmailConflict(nextEmail, { superAdminId: saId });
+        if (emailConflict) {
+          return res.status(400).json({
+            status: 'error',
+            message: `Email "${nextEmail}" sudah digunakan oleh akun lain.`,
+          });
+        }
+        updateData.email = nextEmail;
+      }
       if (phone !== undefined) updateData.phone_number = phone;
+      if (companyName !== undefined && companyName.trim()) {
+        updateData.company_name = companyName.trim();
+      }
       if (password && password.trim()) {
         updateData.password = await bcrypt.hash(password.trim(), 10);
       }
@@ -443,24 +638,51 @@ exports.updateAdmin = async (req, res) => {
       const updated = await prisma.super_admin.update({
         where: { super_admin_id: saId },
         data: updateData,
+        include: { workspace: true },
       });
+
+      if (password && password.trim()) {
+        try {
+          await prisma.$executeRawUnsafe(
+            `UPDATE super_admin SET token_version = COALESCE(token_version, 0) + 1 WHERE super_admin_id = $1`,
+            saId
+          );
+        } catch {}
+      }
 
       return res.status(200).json({
         status: 'success',
         message: 'Super Admin berhasil diperbarui',
-        data: formatSuperAdmin(updated),
+        data: formatSuperAdmin(updated, { isSystemTeknis, isManualSuperAdmin }),
       });
     }
 
-    // 2. Update Admin Workspace (Pastikan milik workspace Super Admin ini)
-    const adminId = BigInt(id);
+    // 2. Update Admin Workspace
+    const adminId = toBigIntSafe(id, ['adm-']);
+    if (!adminId) {
+      return res.status(400).json({ status: 'error', message: 'Format ID Admin tidak valid.' });
+    }
+
     const existingAdmin = await prisma.admin.findFirst({
-      where: {
-        admin_id: adminId,
-        workspace: {
-          super_admin_id: cleanSaId,
-        },
-      },
+      where: isTeknis
+        ? {
+            admin_id: adminId,
+            OR: [
+              { role: 'Divisi Teknis' },
+              { role: 'Teknis' },
+              { workspace: await getTeknisWorkspaceWhere() },
+            ],
+          }
+        : {
+            admin_id: adminId,
+            workspace: {
+              super_admin_id: cleanSaId,
+            },
+            OR: [
+              { role: null },
+              { role: { notIn: ['Divisi Teknis', 'Teknis'] } },
+            ],
+          },
     });
 
     if (!existingAdmin) {
@@ -472,7 +694,17 @@ exports.updateAdmin = async (req, res) => {
 
     const updateData = { updated_at: new Date() };
     if (fullName) updateData.name = fullName.trim();
-    if (email) updateData.email = email.trim().toLowerCase();
+    if (email) {
+      const nextEmail = email.trim().toLowerCase();
+      const emailConflict = await findEmailConflict(nextEmail, { adminId });
+      if (emailConflict) {
+        return res.status(400).json({
+          status: 'error',
+          message: `Email "${nextEmail}" sudah digunakan oleh akun lain.`,
+        });
+      }
+      updateData.email = nextEmail;
+    }
     if (phone !== undefined) updateData.phone = phone;
     if (status !== undefined) {
       updateData.status = status === 'Nonaktif' || status === 'inactive' ? 'inactive' : 'active';
@@ -481,32 +713,48 @@ exports.updateAdmin = async (req, res) => {
       updateData.password = await bcrypt.hash(password.trim(), 10);
     }
 
+    const wsOwnerScope = isTeknis
+      ? await getTeknisWorkspaceWhere()
+      : { super_admin_id: cleanSaId };
+
     if (workspaceId) {
-      const ws = await prisma.workspace.findFirst({
-        where: { workspace_id: BigInt(workspaceId), super_admin_id: cleanSaId },
-      });
-      if (ws) {
-        if (ws.status === 'inactive') {
-          return res.status(400).json({
-            status: 'error',
-            message: `Workspace "${ws.company_name}" berstatus Nonaktif dan tidak dapat dipilih.`,
-          });
-        }
-        updateData.workspace_id = ws.workspace_id;
+      const parsedWsId = toBigIntSafe(workspaceId, ['ws-']);
+      if (!parsedWsId) {
+        return res.status(400).json({ status: 'error', message: 'Format ID workspace tidak valid.' });
       }
+      const ws = await prisma.workspace.findFirst({
+        where: { AND: [{ workspace_id: parsedWsId }, wsOwnerScope] },
+      });
+      if (!ws) {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Workspace tidak ditemukan atau Anda tidak memiliki akses.',
+        });
+      }
+      if (ws.status === 'inactive' && existingAdmin.workspace_id !== ws.workspace_id) {
+        return res.status(400).json({
+          status: 'error',
+          message: `Workspace "${ws.company_name}" berstatus Nonaktif dan tidak dapat dipilih.`,
+        });
+      }
+      updateData.workspace_id = ws.workspace_id;
     } else if (workspaceName && workspaceName !== 'All Workspaces (Central)') {
       const ws = await prisma.workspace.findFirst({
-        where: { company_name: workspaceName.trim(), super_admin_id: cleanSaId },
+        where: { AND: [{ company_name: workspaceName.trim() }, wsOwnerScope] },
       });
-      if (ws) {
-        if (ws.status === 'inactive') {
-          return res.status(400).json({
-            status: 'error',
-            message: `Workspace "${ws.company_name}" berstatus Nonaktif dan tidak dapat dipilih.`,
-          });
-        }
-        updateData.workspace_id = ws.workspace_id;
+      if (!ws) {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Workspace tidak ditemukan atau di luar lingkup akun Anda.',
+        });
       }
+      if (ws.status === 'inactive' && existingAdmin.workspace_id !== ws.workspace_id) {
+        return res.status(400).json({
+          status: 'error',
+          message: `Workspace "${ws.company_name}" berstatus Nonaktif dan tidak dapat dipilih.`,
+        });
+      }
+      updateData.workspace_id = ws.workspace_id;
     }
 
     const updated = await prisma.admin.update({
@@ -515,18 +763,22 @@ exports.updateAdmin = async (req, res) => {
       include: { workspace: true },
     });
 
+    if (updateData.status === 'inactive' || (password && password.trim())) {
+      try {
+        await prisma.$executeRawUnsafe(
+          `UPDATE admin SET token_version = COALESCE(token_version, 0) + 1 WHERE admin_id = $1`,
+          adminId
+        );
+      } catch {}
+    }
+
     return res.status(200).json({
       status: 'success',
       message: 'Admin berhasil diperbarui',
       data: formatAdmin(updated),
     });
   } catch (error) {
-    console.error('❌ Error updating admin:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: error.message || 'Gagal memperbarui admin',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal memperbarui admin');
   }
 };
 
@@ -534,7 +786,8 @@ exports.updateAdmin = async (req, res) => {
 exports.deleteAdmin = async (req, res) => {
   try {
     const { id } = req.params;
-    const user = await extractUser(req);
+    const user = req.user || (await extractUser(req));
+    const isTeknis = isTeknisUser(user);
     const cleanSaId = await resolveSuperAdminId(req, user);
 
     if (id.startsWith('sa-')) {
@@ -544,24 +797,54 @@ exports.deleteAdmin = async (req, res) => {
       });
     }
 
-    if (!cleanSaId) {
-      return res.status(401).json({ status: 'error', message: 'Otentikasi diperlukan.' });
+    if (!isTeknis && !cleanSaId) {
+      return res.status(403).json({ status: 'error', message: 'Akses ditolak.' });
     }
 
-    const adminId = BigInt(id);
+    const adminId = toBigIntSafe(id, ['adm-']);
+    if (!adminId) {
+      return res.status(400).json({ status: 'error', message: 'Format ID admin tidak valid.' });
+    }
+
     const existing = await prisma.admin.findFirst({
-      where: {
-        admin_id: adminId,
-        workspace: {
-          super_admin_id: cleanSaId,
-        },
-      },
+      where: isTeknis
+        ? {
+            admin_id: adminId,
+            OR: [
+              { role: 'Divisi Teknis' },
+              { role: 'Teknis' },
+              { workspace: await getTeknisWorkspaceWhere() },
+            ],
+          }
+        : {
+            admin_id: adminId,
+            workspace: {
+              super_admin_id: cleanSaId,
+            },
+            OR: [
+              { role: null },
+              { role: { notIn: ['Divisi Teknis', 'Teknis'] } },
+            ],
+          },
     });
 
     if (!existing) {
       return res.status(403).json({
         status: 'error',
         message: 'Admin tidak ditemukan atau bukan milik workspace Anda.',
+      });
+    }
+
+    if (
+      isTeknis &&
+      existing.workspace_id &&
+      !(await isWorkspaceInTeknisScope(existing.workspace_id)) &&
+      existing.role !== 'Divisi Teknis' &&
+      existing.role !== 'Teknis'
+    ) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Admin tidak berada dalam lingkup Divisi Teknis.',
       });
     }
 
@@ -574,11 +857,6 @@ exports.deleteAdmin = async (req, res) => {
       message: 'Admin berhasil dihapus',
     });
   } catch (error) {
-    console.error('❌ Error deleting admin:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: error.message || 'Gagal menghapus admin',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal menghapus admin');
   }
 };

@@ -878,25 +878,13 @@ export default function CreateHolidayView({
               {/* KALENDER INTERAKTIF KOMPAK */}
               <div className="p-3 sm:p-3.5 bg-slate-50/90 border border-slate-200 rounded-xl space-y-2.5">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-200">
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-6 h-6 rounded-md bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
-                      <Calendar className="w-3.5 h-3.5" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-[11px] font-bold text-slate-900">Peta Libur & Pilih Tanggal</h3>
-                        {selectedStores.length > 0 && (
-                          <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
-                            {selectedStores.length === 1 ? selectedStores[0] : `${selectedStores.length} Toko Dipilih`}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[9px] text-slate-500">
-                        {selectedStores.length > 0
-                          ? "Klik tanggal pada kotak untuk memilih periode libur."
-                          : "Pilih cabang toko di atas untuk mengaktifkan kalender."}
-                      </p>
-                    </div>
+                  <div>
+                    <h3 className="text-[11px] font-bold text-slate-900">Peta Libur & Pilih Tanggal</h3>
+                    <p className="text-[9px] text-slate-500">
+                      {selectedStores.length > 0
+                        ? "Klik tanggal pada kotak untuk memilih periode libur."
+                        : "Pilih cabang toko di atas untuk mengaktifkan kalender."}
+                    </p>
                   </div>
 
                   <div className="flex items-center gap-1.5 self-end sm:self-auto">
@@ -921,16 +909,6 @@ export default function CreateHolidayView({
                         <ChevronRight className="w-3 h-3" />
                       </button>
                     </div>
-
-                    <button
-                      type="button"
-                      onClick={() => setCalendarMonth(new Date())}
-                      className="px-2 py-1 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-md text-[9px] font-semibold transition-colors flex items-center gap-1 cursor-pointer shadow-2xs"
-                      title="Kembali ke bulan saat ini"
-                    >
-                      <RotateCcw className="w-2.5 h-2.5" />
-                      <span>Bulan Ini</span>
-                    </button>
                   </div>
                 </div>
 

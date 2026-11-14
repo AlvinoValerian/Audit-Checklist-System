@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const holidayController = require('../controllers/holiday.controller');
+const { requireAuth, requireRole } = require('../middlewares/auth.middleware');
+
+router.use(requireAuth, requireRole('Super Admin', 'Admin', 'Area Admin', 'Divisi Teknis', 'Teknis'));
 
 // GET /api/holidays - Ambil semua libur toko
 router.get('/', holidayController.getAllHolidays);

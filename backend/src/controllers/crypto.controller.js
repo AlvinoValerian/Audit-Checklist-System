@@ -1,6 +1,7 @@
-const { encryptImage, decryptImage, isEncrypted } = require('../utils/crypto.utils');
+const { encryptImage, decryptImage } = require('../utils/crypto.utils');
 const prisma = require('../config/prisma');
 const { extractUser } = require('../middlewares/auth.middleware');
+const { sendSafeError, isStaffRole } = require('../utils/tenantScope');
 
 /**
  * POST /api/crypto/encrypt
@@ -31,11 +32,7 @@ exports.encryptPayload = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('❌ [POST /api/crypto/encrypt] Error:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal mengenkripsi gambar: ' + error.message,
-    });
+    return sendSafeError(res, error, 'Gagal mengenkripsi gambar.');
   }
 };
 
@@ -66,11 +63,7 @@ exports.decryptPayload = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('❌ [POST /api/crypto/decrypt] Error:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal mendekripsi gambar: ' + error.message,
-    });
+    return sendSafeError(res, error, 'Gagal mendekripsi gambar.');
   }
 };
 
@@ -80,7 +73,14 @@ exports.decryptPayload = async (req, res) => {
  */
 exports.saveProfilePhoto = async (req, res) => {
   try {
-    const user = await extractUser(req);
+    const user = req.user || (await extractUser(req));
+    if (!user || !user.rawId) {
+      return res.status(401).json({
+        status: 'error',
+        message: 'Autentikasi diperlukan.',
+      });
+    }
+
     const { photo } = req.body;
 
     if (!photo) {
@@ -90,10 +90,9 @@ exports.saveProfilePhoto = async (req, res) => {
       });
     }
 
-    // Enkripsi foto sebelum disimpan
     const encryptedPhoto = encryptImage(photo);
 
-    if (user && user.role === 'Staff' && user.rawId) {
+    if (isStaffRole(user) && user.rawId) {
       await prisma.staff.update({
         where: { staff_id: BigInt(user.rawId) },
         data: { photo: encryptedPhoto, updated_at: new Date() },
@@ -111,10 +110,6 @@ exports.saveProfilePhoto = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('❌ [POST /api/crypto/profile-photo] Error:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal memproses foto profil: ' + error.message,
-    });
+    return sendSafeError(res, error, 'Gagal memproses foto profil.');
   }
 };

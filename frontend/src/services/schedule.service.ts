@@ -1,5 +1,6 @@
 import { AuditSchedule, ScheduleStats, ScheduleStatus } from "@/types/schedule";
 import { AuthService } from "@/lib/auth";
+import { apiFetch } from "@/lib/api-client";
 
 const getBackendUrl = (): string => {
   if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
@@ -19,17 +20,11 @@ const getAuthHeaders = (): Record<string, string> => {
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
-  if (rawId && !rawId.startsWith("adm-")) {
-    headers["x-super-admin-id"] = rawId;
-    headers["x-user-id"] = rawId;
-  }
-  if (user?.email) {
-    headers["x-user-email"] = user.email;
-  }
   const activeWs = AuthService.getActiveWorkspace();
   if (activeWs?.id) {
     headers["x-workspace-id"] = activeWs.id;
+  } else if (user?.workspaceId) {
+    headers["x-workspace-id"] = user.workspaceId;
   }
   return headers;
 };
@@ -521,13 +516,16 @@ export const ScheduleService = {
       const user = AuthService.getCurrentUser();
       const activeWs = AuthService.getActiveWorkspace();
       const targetWs = workspaceId !== undefined ? workspaceId : activeWs?.id;
-      const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
+      const isSuperAdmin = user?.role === "Super Admin";
+      const saRawId = isSuperAdmin
+        ? user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined)
+        : undefined;
 
       let queryParam = "";
       if (targetWs) {
         queryParam = `?workspaceId=${targetWs}`;
-      } else if (rawId && !rawId.startsWith("adm-")) {
-        queryParam = `?superAdminId=${rawId}`;
+      } else if (isSuperAdmin && saRawId) {
+        queryParam = `?superAdminId=${saRawId}`;
       } else if (user?.email) {
         queryParam = `?email=${encodeURIComponent(user.email)}`;
       }
@@ -537,7 +535,7 @@ export const ScheduleService = {
         headers["x-workspace-id"] = targetWs;
       }
 
-      const res = await fetch(`${BACKEND_URL}/api/schedules${queryParam}`, {
+      const res = await apiFetch(`${BACKEND_URL}/api/schedules${queryParam}`, {
         method: "GET",
         headers,
         cache: "no-store",
@@ -569,7 +567,7 @@ export const ScheduleService = {
 
   async getByIdAsync(id: string): Promise<AuditSchedule | undefined> {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/schedules/${id}`, {
+      const res = await apiFetch(`${BACKEND_URL}/api/schedules/${id}`, {
         method: "GET",
         headers: getAuthHeaders(),
         cache: "no-store",
@@ -589,7 +587,7 @@ export const ScheduleService = {
   async createAsync(data: Omit<AuditSchedule, "id">): Promise<AuditSchedule> {
     let res: Response;
     try {
-      res = await fetch(`${BACKEND_URL}/api/schedules`, {
+      res = await apiFetch(`${BACKEND_URL}/api/schedules`, {
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify(data),
@@ -611,7 +609,7 @@ export const ScheduleService = {
   async createBatchAsync(items: Array<Omit<AuditSchedule, "id">>): Promise<AuditSchedule[]> {
     let res: Response;
     try {
-      res = await fetch(`${BACKEND_URL}/api/schedules`, {
+      res = await apiFetch(`${BACKEND_URL}/api/schedules`, {
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify({ items }),
@@ -633,7 +631,7 @@ export const ScheduleService = {
   async updateAsync(id: string, data: Partial<AuditSchedule>): Promise<AuditSchedule> {
     let res: Response;
     try {
-      res = await fetch(`${BACKEND_URL}/api/schedules/${id}`, {
+      res = await apiFetch(`${BACKEND_URL}/api/schedules/${id}`, {
         method: "PUT",
         headers: getAuthHeaders(),
         body: JSON.stringify(data),
@@ -654,7 +652,7 @@ export const ScheduleService = {
   async deleteAsync(id: string, permanent: boolean = false): Promise<boolean> {
     let res: Response;
     try {
-      res = await fetch(`${BACKEND_URL}/api/schedules/${id}${permanent ? "?permanent=true" : ""}`, {
+      res = await apiFetch(`${BACKEND_URL}/api/schedules/${id}${permanent ? "?permanent=true" : ""}`, {
         method: "DELETE",
         headers: getAuthHeaders(),
       });

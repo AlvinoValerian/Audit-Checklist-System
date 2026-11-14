@@ -87,7 +87,7 @@ function PengaturanContent() {
         toast.error("Respons server tidak sesuai harapan.");
       }
     } catch {
-      toast.error("Gagal terhubung ke backend server (http://localhost:5000).");
+      toast.error("Gagal terhubung ke backend server.");
     } finally {
       setIsRefreshing(false);
     }

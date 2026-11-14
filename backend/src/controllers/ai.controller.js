@@ -2,10 +2,11 @@ const prisma = require('../config/prisma');
 const AIService = require('../services/ai.service');
 const AuditContextService = require('../services/audit-context.service');
 const { extractUser } = require('../middlewares/auth.middleware');
+const { isSuperAdminRole, isTeknisRole, isStaffRole, sendSafeError } = require('../utils/tenantScope');
 
 /**
  * Self-healing: Buat tabel ai_chat_session jika belum ada
- * Dilengkapi kolom user_role untuk isolasi penuh Super Admin, Admin, Divisi Teknis, dan Staff
+ * Dilengkapi kolom user_role untuk isolasi penuh Super Admin, Admin, dan Divisi Teknis
  */
 const ensureAIChatTable = async () => {
   try {
@@ -31,160 +32,40 @@ const ensureAIChatTable = async () => {
   }
 };
 
-// Jalankan self-healing saat file dimuat
 ensureAIChatTable();
 
 /**
- * Helper Resolusi Identitas Pengguna Terisolasi
- * Menjamin 100% data chat TIDAK TERCAMPUR antara:
- * - Super Admin (superadmin:<id>)
- * - Admin Workspace (admin:<id>)
- * - Divisi Teknis (teknis:<id>)
- * - Staff Lapangan (staff:<id>)
+ * Resolusi Identitas Pengguna Terisolasi secara KETAT dari req.user (JWT terverifikasi).
+ * Menjamin data chat TIDAK BISA dipalsukan lewat header x-user-id/email/role.
  */
 const resolveCanonicalUser = async (req) => {
-  // 1. Ekstraksi dari JWT Token
-  const authUser = await extractUser(req);
-
-  // 2. Ambil header jika token tidak ada / expired
-  const headerUserId = req.headers['x-user-id'] || req.headers['x-super-admin-id'] || null;
-  const headerEmail = (req.headers['x-user-email'] || req.query.email || '').trim().toLowerCase() || null;
-  const headerRole = req.headers['x-user-role'] || null;
-  const headerWsId = req.headers['x-workspace-id'] || null;
-
-  let email = (authUser?.email || headerEmail || '').toLowerCase().trim();
-  let role = authUser?.role || headerRole || null;
-  let workspaceId = authUser?.workspaceId || headerWsId || null;
-  let fullName = authUser?.fullName || authUser?.name || null;
-  let rawId = authUser?.rawId || null;
-
-  // 3. Resolusi akurat berdasarkan Email di Database (Super Admin vs Admin vs Teknis vs Staff)
-  if (email) {
-    try {
-      // Cek apakah akun Super Admin
-      const sa = await prisma.super_admin.findUnique({ where: { email } });
-      if (sa) {
-        return {
-          canonicalId: `superadmin:${sa.super_admin_id}`,
-          rawId: sa.super_admin_id.toString(),
-          email: sa.email.toLowerCase(),
-          role: 'Super Admin',
-          workspaceId: workspaceId || null,
-          fullName: sa.name || 'Super Admin',
-        };
-      }
-
-      // Cek apakah akun Admin atau Divisi Teknis
-      const adm = await prisma.admin.findUnique({
-        where: { email },
-        include: { workspace: true },
-      });
-      if (adm) {
-        let actualRole = adm.role || role || 'Admin';
-        try {
-          const roleRows = await prisma.$queryRawUnsafe(`SELECT role FROM admin WHERE admin_id = $1 LIMIT 1`, adm.admin_id);
-          if (roleRows && roleRows[0]?.role) {
-            actualRole = roleRows[0].role;
-          }
-        } catch (e) {}
-        const isTeknis = actualRole.toLowerCase().includes('teknis');
-        const rolePrefix = isTeknis ? 'teknis' : 'admin';
-        return {
-          canonicalId: `${rolePrefix}:${adm.admin_id}`,
-          rawId: adm.admin_id.toString(),
-          email: adm.email.toLowerCase(),
-          role: actualRole,
-          workspaceId: adm.workspace_id?.toString() || workspaceId || null,
-          fullName: adm.name || actualRole,
-        };
-      }
-
-      // Cek apakah akun Staff Lapangan
-      const staffMember = await prisma.staff.findFirst({
-        where: { email },
-        include: { store: true },
-      });
-      if (staffMember) {
-        return {
-          canonicalId: `staff:${staffMember.staff_id}`,
-          rawId: staffMember.staff_id.toString(),
-          email: staffMember.email.toLowerCase(),
-          role: 'Staff',
-          workspaceId: staffMember.store?.workspace_id?.toString() || workspaceId || null,
-          fullName: staffMember.name || 'Staff Lapangan',
-        };
-      }
-    } catch (dbErr) {
-      console.warn('⚠️ [resolveCanonicalUser] DB lookup error:', dbErr.message);
-    }
+  const authUser = req.user || (await extractUser(req));
+  if (!authUser || !authUser.rawId) {
+    return null;
   }
 
-  // 4. Resolusi jika email belum tersambung ke database, tapi ada identitas role & ID
-  if (role && role.toLowerCase() === 'super admin') {
-    const cleanId = (rawId || headerUserId || '1').toString().replace(/^sa-/, '');
-    return {
-      canonicalId: `superadmin:${cleanId}`,
-      rawId: cleanId,
-      email: email || null,
-      role: 'Super Admin',
-      workspaceId,
-      fullName: fullName || 'Super Admin',
-    };
+  let prefix = 'admin';
+  if (isSuperAdminRole(authUser)) {
+    prefix = 'superadmin';
+  } else if (isTeknisRole(authUser)) {
+    prefix = 'teknis';
+  } else if (isStaffRole(authUser)) {
+    prefix = 'staff';
   }
 
-  if (role && role.toLowerCase().includes('teknis')) {
-    const cleanId = (rawId || headerUserId || '1').toString().replace(/^adm-/, '').replace(/^tek-/, '');
-    return {
-      canonicalId: `teknis:${cleanId}`,
-      rawId: cleanId,
-      email: email || null,
-      role: 'Divisi Teknis',
-      workspaceId,
-      fullName: fullName || 'Divisi Teknis',
-    };
-  }
-
-  if (role && role.toLowerCase().includes('admin')) {
-    const cleanId = (rawId || headerUserId || '1').toString().replace(/^adm-/, '');
-    return {
-      canonicalId: `admin:${cleanId}`,
-      rawId: cleanId,
-      email: email || null,
-      role: 'Admin',
-      workspaceId,
-      fullName: fullName || 'Admin Workspace',
-    };
-  }
-
-  if (role && role.toLowerCase().includes('staff')) {
-    const cleanId = (rawId || headerUserId || '1').toString().replace(/^staff-/, '');
-    return {
-      canonicalId: `staff:${cleanId}`,
-      rawId: cleanId,
-      email: email || null,
-      role: 'Staff',
-      workspaceId,
-      fullName: fullName || 'Staff Lapangan',
-    };
-  }
-
-  // 5. Fallback unik
-  const fallbackKey = headerUserId || (email ? email : `user-${Date.now()}`);
   return {
-    canonicalId: `user:${fallbackKey}`,
-    rawId: fallbackKey,
-    email: email || null,
-    role: role || 'Pengguna',
-    workspaceId,
-    fullName: fullName || 'Pengguna',
+    canonicalId: `${prefix}:${authUser.rawId}`,
+    rawId: String(authUser.rawId),
+    email: authUser.email ? authUser.email.toLowerCase().trim() : null,
+    role: authUser.role || 'Admin',
+    workspaceId: authUser.workspaceId ? String(authUser.workspaceId) : null,
+    fullName: authUser.fullName || 'Pengguna',
   };
 };
 
 const AIController = {
   /**
    * GET /api/ai/session
-   * Mengambil sesi chat AI aktif terisolasi pengguna saat ini
-   * (mempertahankan chat saat refresh / pindah halaman / logout)
    */
   async getActiveSession(req, res) {
     try {
@@ -194,6 +75,9 @@ const AIController = {
 
       await ensureAIChatTable();
       const user = await resolveCanonicalUser(req);
+      if (!user) {
+        return res.status(401).json({ status: 'error', message: 'Autentikasi diperlukan.' });
+      }
 
       const rows = await prisma.$queryRawUnsafe(
         `SELECT session_id, user_id, user_email, user_role, workspace_id, title, messages, created_at, updated_at
@@ -231,7 +115,6 @@ const AIController = {
         });
       }
 
-      // Jika belum ada sesi aktif, kembalikan sesi kosong
       return res.status(200).json({
         status: 'success',
         data: {
@@ -243,23 +126,21 @@ const AIController = {
         },
       });
     } catch (error) {
-      console.error('❌ Error getActiveSession:', error);
-      return res.status(500).json({
-        status: 'error',
-        message: 'Gagal memuat sesi chat aktif AI.',
-        error: error.message,
-      });
+      return sendSafeError(res, error, 'Gagal memuat sesi chat aktif AI.');
     }
   },
 
   /**
    * POST /api/ai/ask
-   * Mengirim pertanyaan ke AI dan menyimpannya secara persisten ke database
-   * Strictly terisolasi per akun pengguna
    */
   async handleAskAI(req, res) {
     try {
       await ensureAIChatTable();
+      const user = await resolveCanonicalUser(req);
+      if (!user) {
+        return res.status(401).json({ status: 'error', message: 'Autentikasi diperlukan.' });
+      }
+
       const { question, context } = req.body;
 
       if (!question || typeof question !== 'string' || !question.trim()) {
@@ -269,9 +150,6 @@ const AIController = {
         });
       }
 
-      const user = await resolveCanonicalUser(req);
-
-      // Konteks persona pengguna untuk AI Service
       const userContext = [
         `Identitas Pengguna yang Bertanya:`,
         `- Nama: ${user.fullName}`,
@@ -288,7 +166,6 @@ const AIController = {
         now.getMinutes()
       ).padStart(2, '0')}`;
 
-      // Buat struktur pesan
       const userMessage = {
         id: `user-${Date.now()}`,
         sender: 'user',
@@ -314,7 +191,6 @@ const AIController = {
         ],
       };
 
-      // 2. Simpan pesan ke sesi aktif di PostgreSQL
       try {
         const existingSession = await prisma.$queryRawUnsafe(
           `SELECT session_id, messages, title, user_id, user_email
@@ -361,7 +237,6 @@ const AIController = {
             currentSession.session_id
           );
         } else {
-          // Buat sesi baru untuk pengguna
           const initialMessages = [userMessage, aiMessage];
           const initialTitle = question.trim().slice(0, 45);
 
@@ -394,23 +269,20 @@ const AIController = {
         },
       });
     } catch (error) {
-      console.error('❌ AI Controller Error:', error);
-      return res.status(500).json({
-        status: 'error',
-        message: error.message || 'Terjadi kesalahan pada server saat memproses pertanyaan AI.',
-      });
+      return sendSafeError(res, error, 'Terjadi kesalahan pada server saat memproses pertanyaan AI.');
     }
   },
 
   /**
    * POST /api/ai/reset
-   * Mengatur ulang sesi chat aktif: sesi lama diarsip di database (is_active = FALSE) sehingga data tidak hilang
-   * dan kanvas obrolan baru menjadi bersih HANYA untuk pengguna ini.
    */
   async handleResetSession(req, res) {
     try {
       await ensureAIChatTable();
       const user = await resolveCanonicalUser(req);
+      if (!user) {
+        return res.status(401).json({ status: 'error', message: 'Autentikasi diperlukan.' });
+      }
 
       await prisma.$executeRawUnsafe(
         `UPDATE ai_chat_session
@@ -429,12 +301,7 @@ const AIController = {
         message: 'Sesi tanya jawab AI telah diatur ulang. Obrolan lama tersimpan aman dalam arsip.',
       });
     } catch (error) {
-      console.error('❌ Error resetSession:', error);
-      return res.status(500).json({
-        status: 'error',
-        message: 'Gagal mengatur ulang sesi chat AI.',
-        error: error.message,
-      });
+      return sendSafeError(res, error, 'Gagal mengatur ulang sesi chat AI.');
     }
   },
 };

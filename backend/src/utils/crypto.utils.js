@@ -1,11 +1,42 @@
 const crypto = require('crypto');
 
-// Master secret key untuk enkripsi AES-256-GCM
-const RAW_KEY = process.env.ENCRYPTION_SECRET || process.env.JWT_SECRET || 'audit_pro_secure_master_key_2026';
-// Buat key 32-byte (256 bit) konsisten dengan SHA-256
-const ENCRYPTION_KEY = crypto.createHash('sha256').update(RAW_KEY).digest();
 const ALGORITHM = 'aes-256-gcm';
 const PREFIX = 'enc:v1:';
+
+const deriveKey = (secret) => crypto.createHash('sha256').update(String(secret)).digest();
+
+const getPrimaryKey = () => {
+  const raw =
+    process.env.ENCRYPTION_SECRET ||
+    process.env.JWT_SECRET ||
+    'audit_pro_secure_master_key_2026';
+  return deriveKey(raw);
+};
+
+/**
+ * Daftar kandidat kunci untuk dekripsi mundur (backward-compatible)
+ * agar foto/data lama yang terenkripsi sebelum rotasi secret tetap bisa dibuka.
+ */
+const getDecryptKeyCandidates = () => {
+  const secrets = [
+    process.env.ENCRYPTION_SECRET,
+    process.env.JWT_SECRET,
+    'audit_checklist_system_jwt_secret_key_2024',
+    'audit_pro_secure_master_key_2026',
+  ].filter(Boolean);
+
+  const uniqueHex = new Set();
+  const keys = [];
+  for (const s of secrets) {
+    const keyBuf = deriveKey(s);
+    const hex = keyBuf.toString('hex');
+    if (!uniqueHex.has(hex)) {
+      uniqueHex.add(hex);
+      keys.push(keyBuf);
+    }
+  }
+  return keys;
+};
 
 /**
  * Memeriksa apakah sebuah string sudah terenkripsi dengan format sistem
@@ -30,7 +61,7 @@ const encryptImage = (text) => {
   try {
     // IV acak 12 byte (standar aman untuk GCM)
     const iv = crypto.randomBytes(12);
-    const cipher = crypto.createCipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
+    const cipher = crypto.createCipheriv(ALGORITHM, getPrimaryKey(), iv);
 
     let ciphertext = cipher.update(text, 'utf8', 'hex');
     ciphertext += cipher.final('hex');
@@ -40,7 +71,7 @@ const encryptImage = (text) => {
     return `${PREFIX}${iv.toString('hex')}:${authTag}:${ciphertext}`;
   } catch (err) {
     console.error('❌ [Crypto] Gagal mengenkripsi gambar:', err);
-    throw new Error('Gagal mengenkripsi gambar: ' + err.message);
+    throw new Error('Gagal mengenkripsi gambar.');
   }
 };
 
@@ -74,16 +105,24 @@ const decryptImage = (encryptedText) => {
     const iv = Buffer.from(ivHex, 'hex');
     const authTag = Buffer.from(authTagHex, 'hex');
 
-    const decipher = crypto.createDecipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
-    decipher.setAuthTag(authTag);
+    const candidates = getDecryptKeyCandidates();
+    for (const keyBuf of candidates) {
+      try {
+        const decipher = crypto.createDecipheriv(ALGORITHM, keyBuf, iv);
+        decipher.setAuthTag(authTag);
 
-    let decrypted = decipher.update(ciphertextHex, 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
+        let decrypted = decipher.update(ciphertextHex, 'hex', 'utf8');
+        decrypted += decipher.final('utf8');
+        return decrypted;
+      } catch {
+        // Coba kunci kandidat berikutnya jika GCM authTag tidak cocok
+      }
+    }
 
-    return decrypted;
+    console.warn('⚠️ [Crypto] Tidak ada kunci yang cocok untuk mendekripsi payload enc:v1.');
+    return encryptedText;
   } catch (err) {
     console.error('❌ [Crypto] Gagal mendekripsi gambar:', err.message);
-    // Kembalikan encryptedText atau fallback jika kunci tidak cocok
     return encryptedText;
   }
 };

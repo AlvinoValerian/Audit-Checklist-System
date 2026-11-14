@@ -12,6 +12,7 @@ import {
   Pencil,
 } from "lucide-react";
 import { StaffUser } from "@/types/staff";
+import DecryptedImage from "@/components/DecryptedImage";
 
 interface DetailStaffModalProps {
   isOpen: boolean;
@@ -69,9 +70,17 @@ export default function DetailStaffModal({
           {/* Top Profile Summary Card */}
           <div className="bg-slate-50/60 border border-slate-100 rounded-xl p-3.5 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              {/* Avatar Initials */}
-              <div className="w-11 h-11 rounded-full bg-sky-100 text-sky-700 font-bold text-sm flex items-center justify-center shrink-0">
-                {initials || "ST"}
+              {/* Avatar Photo / Initials */}
+              <div className="w-11 h-11 rounded-full bg-sky-100 text-sky-700 font-bold text-sm flex items-center justify-center shrink-0 overflow-hidden border border-sky-200">
+                {staff.photo ? (
+                  <DecryptedImage
+                    src={staff.photo}
+                    alt={staff.fullName}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  initials || "ST"
+                )}
               </div>
               <div>
                 <h3 className="font-bold text-slate-900 text-sm">

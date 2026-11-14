@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/admin.controller');
+const { requireAuth, requireRole } = require('../middlewares/auth.middleware');
+
+router.use(requireAuth, requireRole('Super Admin', 'Divisi Teknis', 'Teknis'));
 
 // Admin Routes
 router.get('/', adminController.getAllAdmins);

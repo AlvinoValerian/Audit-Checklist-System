@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   ArrowLeft,
   FileDown,
@@ -21,14 +21,46 @@ import { AuditReportItem } from "@/types/report";
 import { toast } from "sonner";
 import DecryptedImage from "@/components/DecryptedImage";
 import { exportSingleReport } from "@/utils/reportExporter";
+import { ReportService } from "@/services/report.service";
 
 interface DetailLaporanViewProps {
   report: AuditReportItem;
   onBack: () => void;
 }
 
-export default function DetailLaporanView({ report, onBack }: DetailLaporanViewProps) {
+export default function DetailLaporanView({ report: initialReport, onBack }: DetailLaporanViewProps) {
+  const [report, setReport] = useState<AuditReportItem>(initialReport);
+  const [isLoadingDetails, setIsLoadingDetails] = useState(
+    initialReport.status !== "Tidak Mengerjakan" && (!initialReport.findings || initialReport.findings.length === 0)
+  );
   const [isDownloading, setIsDownloading] = useState(false);
+
+  useEffect(() => {
+    setReport(initialReport);
+    let isMounted = true;
+    if (
+      initialReport.status !== "Tidak Mengerjakan" &&
+      (!initialReport.findings || initialReport.findings.length === 0) &&
+      initialReport.id
+    ) {
+      setIsLoadingDetails(true);
+      ReportService.fetchById(initialReport.id)
+        .then((full) => {
+          if (isMounted && full) {
+            setReport(full);
+          }
+        })
+        .catch((err) => console.warn("DetailLaporanView: failed to fetch full report:", err))
+        .finally(() => {
+          if (isMounted) setIsLoadingDetails(false);
+        });
+    } else {
+      setIsLoadingDetails(false);
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [initialReport]);
 
   const handleDownloadPdf = async () => {
     if (isDownloading) return;
@@ -298,7 +330,17 @@ export default function DetailLaporanView({ report, onBack }: DetailLaporanViewP
         </div>
 
         {/* List of Checklist Cards */}
-        {findings.length > 0 ? (
+        {isLoadingDetails ? (
+          <div className="bg-white border border-slate-200 rounded-xl p-10 text-center space-y-3">
+            <Loader2 className="w-6 h-6 text-[#193f53] animate-spin mx-auto" />
+            <div className="text-xs font-semibold text-slate-700">
+              Memuat butir checklist & foto temuan lapangan...
+            </div>
+            <p className="text-[11px] text-slate-400">
+              Mengambil data verifikasi langsung dari database
+            </p>
+          </div>
+        ) : findings.length > 0 ? (
           <div className="space-y-3">
             {findings.map((item, index) => {
               const itemNumber = String(index + 1).padStart(2, "0");
@@ -454,7 +496,12 @@ export default function DetailLaporanView({ report, onBack }: DetailLaporanViewP
           </p>
         </div>
 
-        {isNonCompliant ? (
+        {isLoadingDetails ? (
+          <div className="bg-white border border-slate-200 rounded-xl p-8 text-center space-y-2">
+            <Loader2 className="w-5 h-5 text-slate-400 animate-spin mx-auto" />
+            <p className="text-xs text-slate-500 font-medium">Memuat verifikasi foto petugas & tanda tangan digital...</p>
+          </div>
+        ) : isNonCompliant ? (
           <div className="rounded-xl border border-rose-200 bg-rose-50/50 p-6 text-center space-y-2">
             <AlertCircle className="w-7 h-7 text-rose-500 mx-auto" />
             <h4 className="text-xs sm:text-sm font-bold text-rose-900">

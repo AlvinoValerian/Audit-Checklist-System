@@ -18,6 +18,8 @@ import {
 } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import { AuthService, AuthUser } from "@/lib/auth";
+import { apiFetch } from "@/lib/api-client";
+import StaffAuthGuard from "@/components/auth/StaffAuthGuard";
 import StaffBottomNav from "../components/StaffBottomNav";
 import DecryptedImage from "@/components/DecryptedImage";
 import { optimizeAndResizeImage, encryptImageData } from "@/lib/image-crypto";
@@ -40,29 +42,22 @@ function ProfileContent() {
     // Ambil data profil staf terbaru langsung dari database PostgreSQL secara realtime
     const fetchLatestProfile = async () => {
       try {
-        const token = AuthService.getToken();
-        const headers: Record<string, string> = {};
-        if (token) headers["Authorization"] = `Bearer ${token}`;
+        const res = await apiFetch("/api/auth/me", { cache: "no-store" });
 
-        let res: Response | null = null;
-        try {
-          res = await fetch("/api/auth/me", { headers, cache: "no-store" });
-          if (!res || res.status >= 500) {
-            throw new Error(`HTTP ${res?.status}`);
-          }
-        } catch {
-          res = await fetch("http://127.0.0.1:5000/api/auth/me", { headers, cache: "no-store" });
-        }
-
-        if (res && (res.status === 401 || res.status === 403)) {
-          const errJson = await res.json().catch(() => null);
-          toast.error(errJson?.message || "Akun Anda dinonaktifkan atau sesi telah berakhir.");
-          AuthService.logout();
-          router.replace("/login");
+        if (res.status === 401) {
           return;
         }
 
-        if (res && res.ok) {
+        if (res.status === 403) {
+          const errJson = await res.json().catch(() => null);
+          if (errJson?.code === "ACCOUNT_INACTIVE") {
+            return;
+          }
+          toast.error(errJson?.message || "Akses ditolak.");
+          return;
+        }
+
+        if (res.ok) {
           const json = await res.json();
           if (json.status === "success" && json.data?.user) {
             setCurrentUser(json.data.user);
@@ -83,19 +78,17 @@ function ProfileContent() {
     return () => window.removeEventListener("focus", handleFocus);
   }, [router]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     setLogoutNotice({
       show: true,
       message: "Anda telah berhasil keluar dari akun. Mengalihkan...",
     });
-    AuthService.logout();
-    setTimeout(() => {
-      if (typeof window !== "undefined") {
-        window.location.href = "/login";
-      } else {
-        router.push("/login");
-      }
-    }, 1100);
+    await AuthService.logoutAsync({ broadcast: true });
+    if (typeof window !== "undefined") {
+      window.location.replace("/login?reason=logout");
+    } else {
+      router.replace("/login?reason=logout");
+    }
   };
 
   // Handler Ganti Foto Profil: Resize -> Encrypt AES-GCM -> Simpan ke Database
@@ -114,51 +107,32 @@ function ProfileContent() {
       const encryptedPhoto = await encryptImageData(optimizedBase64);
 
       // 3. Simpan ke database PostgreSQL via endpoint API
-      const token = AuthService.getToken();
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-      };
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-      const rawId =
-        currentUser?.rawId ||
-        (currentUser?.id
-          ? currentUser.id.replace(/^staff-/, "").replace(/^sa-/, "").replace(/^adm-/, "")
-          : undefined);
-      if (rawId) headers["x-user-id"] = rawId;
-      if (currentUser?.email) headers["x-user-email"] = currentUser.email;
-      if (currentUser?.role) headers["x-user-role"] = currentUser.role;
+      const res = await apiFetch("/api/auth/profile", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          profilePicture: encryptedPhoto,
+        }),
+      });
 
-      let res: Response | null = null;
-      try {
-        res = await fetch("/api/auth/profile", {
-          method: "PUT",
-          headers,
-          body: JSON.stringify({
-            profilePicture: encryptedPhoto,
-          }),
-        });
-        if (!res || res.status >= 500) {
-          throw new Error(`HTTP ${res?.status}`);
-        }
-      } catch {
-        res = await fetch("http://127.0.0.1:5000/api/auth/profile", {
-          method: "PUT",
-          headers,
-          body: JSON.stringify({
-            profilePicture: encryptedPhoto,
-          }),
-        });
-      }
-
-      if (res && (res.status === 401 || res.status === 403)) {
-        const errJson = await res.json().catch(() => null);
-        toast.error(errJson?.message || "Sesi berakhir atau akun tidak aktif.", { id: "profile-upload" });
-        AuthService.logout();
-        router.replace("/login");
+      if (res.status === 401) {
+        toast.dismiss("profile-upload");
         return;
       }
 
-      if (res && res.ok) {
+      if (res.status === 403) {
+        const errJson = await res.json().catch(() => null);
+        if (errJson?.code === "ACCOUNT_INACTIVE") {
+          toast.dismiss("profile-upload");
+          return;
+        }
+        toast.error(errJson?.message || "Akses ditolak.", { id: "profile-upload" });
+        return;
+      }
+
+      if (res.ok) {
         const json = await res.json();
         const updatedUser = json?.data?.user || {
           ...currentUser!,
@@ -439,17 +413,19 @@ function ProfileContent() {
 
 export default function ProfilePage() {
   return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen bg-[#f3f4fa] flex items-center justify-center text-slate-800">
-          <div className="flex items-center gap-2 text-sm font-semibold">
-            <RotateCcw className="w-4 h-4 animate-spin text-[#193f53]" />
-            <span>Memuat profil pengguna...</span>
+    <StaffAuthGuard>
+      <Suspense
+        fallback={
+          <div className="min-h-screen bg-[#f3f4fa] flex items-center justify-center text-slate-800">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <RotateCcw className="w-4 h-4 animate-spin text-[#193f53]" />
+              <span>Memuat profil pengguna...</span>
+            </div>
           </div>
-        </div>
-      }
-    >
-      <ProfileContent />
-    </Suspense>
+        }
+      >
+        <ProfileContent />
+      </Suspense>
+    </StaffAuthGuard>
   );
 }

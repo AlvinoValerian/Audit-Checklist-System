@@ -1,7 +1,12 @@
 import { TeknisUser, TeknisStats } from "@/types/teknis";
 import { AuthService } from "@/lib/auth";
+import { apiFetch } from "@/lib/api-client";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
+const getApiBase = (): string => {
+  if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
+  if (typeof window !== "undefined") return "/api";
+  return "http://127.0.0.1:5000/api";
+};
 const LOCAL_STORAGE_KEY = "audit_pro_teknis_users_cache";
 
 export const defaultTeknisUsers: TeknisUser[] = [
@@ -73,27 +78,24 @@ export const TeknisService = {
   async fetchAll(workspaceId?: string): Promise<TeknisUser[]> {
     try {
       const token = AuthService.getToken();
-      const currentUser = AuthService.getCurrentUser();
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
       };
       if (token) headers["Authorization"] = `Bearer ${token}`;
-      if (currentUser?.rawId) headers["x-user-id"] = currentUser.rawId;
-      if (currentUser?.email) headers["x-user-email"] = currentUser.email;
 
-      let url = `${API_BASE}/teknis`;
+      const base = getApiBase();
+      let url = `${base}/teknis`;
       if (workspaceId && workspaceId !== "all") {
         url += `?workspaceId=${encodeURIComponent(workspaceId)}`;
       }
 
-      const res = await fetch(url, { headers });
-      if (res.ok) {
+      const res = await apiFetch(url, { headers, cache: "no-store" });
+
+      if (res && res.ok) {
         const json = await res.json();
         if (json.status === "success" && Array.isArray(json.data)) {
-          if (json.data.length > 0) {
-            this.setCache(json.data);
-            return json.data;
-          }
+          this.setCache(json.data);
+          return json.data;
         }
       }
     } catch (err) {
@@ -113,23 +115,21 @@ export const TeknisService = {
     data: Omit<TeknisUser, "id" | "rawId" | "createdAt"> & { password?: string }
   ): Promise<TeknisUser> {
     const token = AuthService.getToken();
-    const currentUser = AuthService.getCurrentUser();
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
     if (token) headers["Authorization"] = `Bearer ${token}`;
-    if (currentUser?.rawId) headers["x-user-id"] = currentUser.rawId;
-    if (currentUser?.email) headers["x-user-email"] = currentUser.email;
 
-    const res = await fetch(`${API_BASE}/teknis`, {
+    const base = getApiBase();
+    const res = await apiFetch(`${base}/teknis`, {
       method: "POST",
       headers,
       body: JSON.stringify(data),
     });
 
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      throw new Error(errJson.message || "Gagal membuat user teknis.");
+    if (!res || !res.ok) {
+      const errJson = await res?.json().catch(() => ({}));
+      throw new Error(errJson?.message || "Gagal membuat user teknis.");
     }
 
     const json = await res.json();
@@ -147,22 +147,21 @@ export const TeknisService = {
     data: Partial<TeknisUser> & { password?: string }
   ): Promise<TeknisUser> {
     const token = AuthService.getToken();
-    const currentUser = AuthService.getCurrentUser();
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
     if (token) headers["Authorization"] = `Bearer ${token}`;
-    if (currentUser?.rawId) headers["x-user-id"] = currentUser.rawId;
 
-    const res = await fetch(`${API_BASE}/teknis/${encodeURIComponent(id)}`, {
+    const base = getApiBase();
+    const res = await apiFetch(`${base}/teknis/${encodeURIComponent(id)}`, {
       method: "PUT",
       headers,
       body: JSON.stringify(data),
     });
 
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      throw new Error(errJson.message || "Gagal memperbarui user teknis.");
+    if (!res || !res.ok) {
+      const errJson = await res?.json().catch(() => ({}));
+      throw new Error(errJson?.message || "Gagal memperbarui user teknis.");
     }
 
     const json = await res.json();
@@ -182,14 +181,15 @@ export const TeknisService = {
     };
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
-    const res = await fetch(`${API_BASE}/teknis/${encodeURIComponent(id)}`, {
+    const base = getApiBase();
+    const res = await apiFetch(`${base}/teknis/${encodeURIComponent(id)}`, {
       method: "DELETE",
       headers,
     });
 
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      throw new Error(errJson.message || "Gagal menonaktifkan user teknis.");
+    if (!res || !res.ok) {
+      const errJson = await res?.json().catch(() => ({}));
+      throw new Error(errJson?.message || "Gagal menonaktifkan user teknis.");
     }
 
     const json = await res.json();
@@ -209,14 +209,15 @@ export const TeknisService = {
     };
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
-    const res = await fetch(`${API_BASE}/teknis/${encodeURIComponent(id)}/restore`, {
+    const base = getApiBase();
+    const res = await apiFetch(`${base}/teknis/${encodeURIComponent(id)}/restore`, {
       method: "PATCH",
       headers,
     });
 
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      throw new Error(errJson.message || "Gagal mengaktifkan kembali user teknis.");
+    if (!res || !res.ok) {
+      const errJson = await res?.json().catch(() => ({}));
+      throw new Error(errJson?.message || "Gagal mengaktifkan kembali user teknis.");
     }
 
     const json = await res.json();

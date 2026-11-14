@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import { AuthService, AuthUser } from "@/lib/auth";
+import StaffAuthGuard from "@/components/auth/StaffAuthGuard";
 import StaffBottomNav from "../components/StaffBottomNav";
 
 interface IssueItem {
@@ -549,17 +550,19 @@ function IssuesContent() {
 
 export default function IssuesPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">
-          <div className="flex items-center gap-2 text-sm">
-            <RotateCcw className="w-4 h-4 animate-spin text-blue-400" />
-            <span>Memuat daftar isu & temuan...</span>
+    <StaffAuthGuard>
+      <Suspense
+        fallback={
+          <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">
+            <div className="flex items-center gap-2 text-sm">
+              <RotateCcw className="w-4 h-4 animate-spin text-blue-400" />
+              <span>Memuat daftar isu & temuan...</span>
+            </div>
           </div>
-        </div>
-      }
-    >
-      <IssuesContent />
-    </Suspense>
+        }
+      >
+        <IssuesContent />
+      </Suspense>
+    </StaffAuthGuard>
   );
 }
