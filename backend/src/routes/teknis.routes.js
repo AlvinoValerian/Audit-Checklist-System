@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const teknisController = require('../controllers/teknis.controller');
+const { requireAuth, requireRole } = require('../middlewares/auth.middleware');
+
+router.use(requireAuth, requireRole('Divisi Teknis', 'Teknis'));
 
 // GET /api/teknis/stats - Statistik teknis
 router.get('/stats', teknisController.getTeknisStats);

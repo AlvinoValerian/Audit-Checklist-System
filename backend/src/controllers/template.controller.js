@@ -1,5 +1,12 @@
 const prisma = require('../config/prisma');
 const { extractUser } = require('../middlewares/auth.middleware');
+const { toBigIntSafe } = require('../utils/teknisScope');
+const {
+  sendSafeError,
+  assertWorkspaceAccess,
+  resolveScopedWorkspaceContext,
+  assertStoreAccess,
+} = require('../utils/tenantScope');
 
 /**
  * Format entitas Checklist Template dari database PostgreSQL ke format standar Frontend
@@ -80,9 +87,41 @@ exports.getAllTemplates = async (req, res) => {
   try {
     const { search, status, storeId, workspaceId } = req.query;
     const user = await extractUser(req);
-    const requestedWsId = workspaceId || req.headers['x-workspace-id'];
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Autentikasi diperlukan.',
+      });
+    }
 
-    const where = {};
+    const requestedWsId = workspaceId || req.headers['x-workspace-id'];
+    const scope = await resolveScopedWorkspaceContext(user, requestedWsId, {
+      teknisUseSingleDefaultOnAll: true,
+    });
+
+    if (!scope.ok) {
+      return res.status(scope.status).json({
+        success: false,
+        message: scope.message,
+      });
+    }
+
+    if (scope.workspaceIds.length === 0) {
+      return res.status(200).json({
+        success: true,
+        count: 0,
+        stats: { total: 0, active: 0, inactive: 0, activePercentage: 0 },
+        data: [],
+      });
+    }
+
+    const storeScopeFilter = scope.prismaWorkspaceWhere.workspace_id
+      ? { workspace_id: scope.prismaWorkspaceWhere.workspace_id }
+      : { workspace: scope.prismaWorkspaceWhere };
+
+    const where = {
+      store: storeScopeFilter,
+    };
 
     // Filter Status
     if (status && status !== 'Semua') {
@@ -94,28 +133,16 @@ exports.getAllTemplates = async (req, res) => {
       }
     }
 
-    // Filter Store / Workspace (Strict Workspace Isolation)
-    if (user && (user.role === 'Divisi Teknis' || user.role === 'Teknis') && user.workspaceId) {
-      try {
-        const cleanWs = BigInt(user.workspaceId.toString().replace(/^ws-/, ''));
-        where.store = { workspace_id: cleanWs };
-      } catch (e) {}
-    } else if (storeId) {
-      try {
-        where.store_id = BigInt(storeId.toString().replace(/^st-/, ''));
-      } catch (e) {}
-    } else if (requestedWsId && requestedWsId !== 'all') {
-      try {
-        const cleanWs = BigInt(requestedWsId.toString().replace(/^ws-/, ''));
-        where.store = { workspace_id: cleanWs };
-      } catch (e) {
-        console.warn('⚠️ [getAllTemplates] Invalid workspaceId:', requestedWsId);
+    // Filter Store (dengan verifikasi hak akses store & konsistensi tenant)
+    if (storeId && storeId !== 'all') {
+      const storeCheck = await assertStoreAccess(user, storeId);
+      if (!storeCheck.ok) {
+        return res.status(storeCheck.status).json({
+          success: false,
+          message: storeCheck.message,
+        });
       }
-    } else if (user && user.role === 'Admin' && user.workspaceId) {
-      try {
-        const cleanWs = BigInt(user.workspaceId.toString().replace(/^ws-/, ''));
-        where.store = { workspace_id: cleanWs };
-      } catch (e) {}
+      where.store_id = storeCheck.storeId;
     }
 
     // Filter Pencarian (Gunakan AND agar tidak menimpa filter workspace)
@@ -180,12 +207,7 @@ exports.getAllTemplates = async (req, res) => {
       data: formattedData,
     });
   } catch (error) {
-    console.error('❌ Error getAllTemplates:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Gagal mengambil data template checklist',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal mengambil data template checklist');
   }
 };
 
@@ -194,9 +216,17 @@ exports.getAllTemplates = async (req, res) => {
  */
 exports.getTemplateById = async (req, res) => {
   try {
+    const user = await extractUser(req);
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Autentikasi diperlukan.',
+      });
+    }
+
     const { id } = req.params;
-    const numericId = parseInt(id, 10);
-    if (isNaN(numericId)) {
+    const templateId = toBigIntSafe(id, ['tpl-']);
+    if (!templateId) {
       return res.status(400).json({
         success: false,
         message: 'Format ID template tidak valid',
@@ -204,7 +234,7 @@ exports.getTemplateById = async (req, res) => {
     }
 
     const template = await prisma.checklist_template.findUnique({
-      where: { template_id: BigInt(numericId) },
+      where: { template_id: templateId },
       include: {
         template_category: {
           include: {
@@ -235,17 +265,20 @@ exports.getTemplateById = async (req, res) => {
       });
     }
 
+    const access = await assertWorkspaceAccess(user, template.store?.workspace_id);
+    if (!access.ok) {
+      return res.status(access.status === 400 ? 403 : access.status).json({
+        success: false,
+        message: access.message || 'Anda tidak memiliki akses ke template milik tenant lain',
+      });
+    }
+
     return res.status(200).json({
       success: true,
       data: formatTemplate(template),
     });
   } catch (error) {
-    console.error('❌ Error getTemplateById:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Gagal mengambil detail template checklist',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal mengambil detail template checklist');
   }
 };
 
@@ -270,11 +303,17 @@ exports.createTemplate = async (req, res) => {
     } = req.body;
 
     const user = await extractUser(req);
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Autentikasi diperlukan.',
+      });
+    }
+
     const resolvedCreatorName =
-      (createdBy || user?.fullName || user?.name || '').trim() ||
-      (req.headers['x-user-email'] ? req.headers['x-user-email'].split('@')[0] : 'Admin');
+      (createdBy || user.fullName || user.email?.split('@')[0] || 'Admin').trim();
     const resolvedCreatorRole =
-      (creatorRole || user?.role || '').trim() || 'Admin';
+      (user.role || creatorRole || 'Admin').trim();
 
     const finalTitle = (title || templateName || template_name || '').trim();
     if (!finalTitle) {
@@ -284,48 +323,112 @@ exports.createTemplate = async (req, res) => {
       });
     }
 
-    // Resolusi Store & Admin ID fallback jika tidak disediakan
-    let targetStoreId = null;
+    // Resolusi Store secara ketat dalam cakupan workspace milik user
+    let targetStoreRecord = null;
     if (storeId) {
-      try {
-        targetStoreId = BigInt(storeId.toString().replace(/^st-/, ''));
-      } catch (e) {}
-    }
-    let targetAdminId = null;
-    if (adminId) {
-      try {
-        targetAdminId = BigInt(adminId.toString().replace(/^adm-/, ''));
-      } catch (e) {}
+      const storeCheck = await assertStoreAccess(user, storeId);
+      if (!storeCheck.ok) {
+        return res.status(storeCheck.status).json({
+          success: false,
+          message: storeCheck.message,
+        });
+      }
+      targetStoreRecord = storeCheck.store;
+    } else {
+      const requestedWs = req.body.workspaceId || req.headers['x-workspace-id'] || req.query.workspaceId;
+      const scope = await resolveScopedWorkspaceContext(user, requestedWs, {
+        teknisUseSingleDefaultOnAll: true,
+      });
+      if (!scope.ok) {
+        return res.status(scope.status).json({
+          success: false,
+          message: scope.message,
+        });
+      }
+      if (scope.workspaceIds.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Belum ada workspace atau toko aktif. Tambahkan workspace & toko terlebih dahulu.',
+        });
+      }
+
+      const storeScopeFilter = scope.prismaWorkspaceWhere.workspace_id
+        ? { workspace_id: scope.prismaWorkspaceWhere.workspace_id }
+        : { workspace: scope.prismaWorkspaceWhere };
+
+      targetStoreRecord = await prisma.store.findFirst({
+        where: storeScopeFilter,
+        include: {
+          workspace: {
+            select: { workspace_id: true, status: true },
+          },
+        },
+        orderBy: { store_id: 'asc' },
+      });
+
+      if (!targetStoreRecord) {
+        return res.status(400).json({
+          success: false,
+          message: 'Belum ada toko pada workspace ini. Tambahkan toko terlebih dahulu sebelum membuat template checklist.',
+        });
+      }
     }
 
-    if (!targetStoreId) {
-      const targetWs = req.body.workspaceId || req.headers['x-workspace-id'] || user?.workspaceId;
-      if (targetWs && targetWs !== 'all') {
-        try {
-          const cleanWs = BigInt(targetWs.toString().replace(/^ws-/, ''));
-          const storeInWs = await prisma.store.findFirst({
-            where: { workspace_id: cleanWs },
-            select: { store_id: true },
-          });
-          if (storeInWs) targetStoreId = storeInWs.store_id;
-        } catch (e) {
-          console.warn('⚠️ [createTemplate] Invalid targetWs:', targetWs);
-        }
+    if (
+      targetStoreRecord.workspace &&
+      (targetStoreRecord.workspace.status === 'inactive' ||
+        targetStoreRecord.workspace.status === 'Nonaktif')
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: 'Workspace ini sedang dinonaktifkan. Pembuatan template checklist diberhentikan.',
+      });
+    }
+
+    const targetStoreId = targetStoreRecord.store_id;
+
+    // Resolusi Admin ID hanya dari admin di workspace target (tanpa fallback global lintas tenant)
+    let targetAdminId = null;
+    if (adminId) {
+      const parsedAdmId = toBigIntSafe(adminId, ['adm-']);
+      if (parsedAdmId) {
+        const admInWs = await prisma.admin.findFirst({
+          where: { admin_id: parsedAdmId, workspace_id: targetStoreRecord.workspace_id },
+          select: { admin_id: true },
+        });
+        if (admInWs) targetAdminId = admInWs.admin_id;
       }
-      if (!targetStoreId) {
-        const firstStore = await prisma.store.findFirst({ select: { store_id: true } });
-        targetStoreId = firstStore ? firstStore.store_id : 1n;
+    }
+
+    if (!targetAdminId && user.role !== 'Super Admin' && user.role !== 'Staff' && user.rawId) {
+      const parsedSelfAdm = toBigIntSafe(user.rawId, ['adm-']);
+      if (parsedSelfAdm) {
+        const selfAdm = await prisma.admin.findFirst({
+          where: { admin_id: parsedSelfAdm, workspace_id: targetStoreRecord.workspace_id },
+          select: { admin_id: true },
+        });
+        if (selfAdm) targetAdminId = selfAdm.admin_id;
       }
+    }
+
+    if (!targetAdminId && targetStoreRecord.admin_id) {
+      targetAdminId = targetStoreRecord.admin_id;
     }
 
     if (!targetAdminId) {
-      const user = await extractUser(req);
-      if (user?.adminId) {
-        targetAdminId = BigInt(user.adminId);
-      } else {
-        const firstAdmin = await prisma.admin.findFirst({ select: { admin_id: true } });
-        targetAdminId = firstAdmin ? firstAdmin.admin_id : 1n;
-      }
+      const wsAdmin = await prisma.admin.findFirst({
+        where: { workspace_id: targetStoreRecord.workspace_id },
+        select: { admin_id: true },
+        orderBy: { admin_id: 'asc' },
+      });
+      if (wsAdmin) targetAdminId = wsAdmin.admin_id;
+    }
+
+    if (!targetAdminId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Admin penanggung jawab pada workspace ini belum tersedia.',
+      });
     }
 
     const finalStatus =
@@ -423,12 +526,7 @@ exports.createTemplate = async (req, res) => {
       data: formatTemplate(fullTemplate),
     });
   } catch (error) {
-    console.error('❌ Error createTemplate:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Gagal membuat template checklist baru',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal membuat template checklist baru');
   }
 };
 
@@ -437,9 +535,16 @@ exports.createTemplate = async (req, res) => {
  */
 exports.updateTemplate = async (req, res) => {
   try {
+    const user = await extractUser(req);
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Autentikasi diperlukan.',
+      });
+    }
     const { id } = req.params;
-    const numericId = parseInt(id, 10);
-    if (isNaN(numericId)) {
+    const templateId = toBigIntSafe(id, ['tpl-']);
+    if (!templateId) {
       return res.status(400).json({
         success: false,
         message: 'Format ID template tidak valid',
@@ -459,13 +564,24 @@ exports.updateTemplate = async (req, res) => {
 
     // Pastikan template ada
     const existing = await prisma.checklist_template.findUnique({
-      where: { template_id: BigInt(numericId) },
+      where: { template_id: templateId },
+      include: {
+        store: { select: { workspace_id: true } },
+      },
     });
 
     if (!existing) {
       return res.status(404).json({
         success: false,
         message: 'Template checklist tidak ditemukan',
+      });
+    }
+
+    const access = await assertWorkspaceAccess(user, existing.store?.workspace_id);
+    if (!access.ok) {
+      return res.status(access.status === 400 ? 403 : access.status).json({
+        success: false,
+        message: access.message || 'Anda tidak memiliki akses untuk mengubah template milik tenant lain',
       });
     }
 
@@ -503,7 +619,7 @@ exports.updateTemplate = async (req, res) => {
     await prisma.$transaction(async (tx) => {
       // 1. Update data dasar template
       await tx.checklist_template.update({
-        where: { template_id: BigInt(numericId) },
+        where: { template_id: templateId },
         data: updateData,
       });
 
@@ -511,7 +627,7 @@ exports.updateTemplate = async (req, res) => {
       if (resolvedCategories && Array.isArray(resolvedCategories)) {
         // Hapus kategori lama (otomatis cascade delete tugas)
         await tx.template_category.deleteMany({
-          where: { template_id: BigInt(numericId) },
+          where: { template_id: templateId },
         });
 
         // Insert kategori & tugas baru
@@ -522,7 +638,7 @@ exports.updateTemplate = async (req, res) => {
 
           const createdCat = await tx.template_category.create({
             data: {
-              template_id: BigInt(numericId),
+              template_id: templateId,
               category_name: catName,
               sort_order: cIdx + 1,
             },
@@ -550,7 +666,7 @@ exports.updateTemplate = async (req, res) => {
     });
 
     const fullTemplate = await prisma.checklist_template.findUnique({
-      where: { template_id: BigInt(numericId) },
+      where: { template_id: templateId },
       include: {
         template_category: {
           include: {
@@ -568,12 +684,7 @@ exports.updateTemplate = async (req, res) => {
       data: formatTemplate(fullTemplate),
     });
   } catch (error) {
-    console.error('❌ Error updateTemplate:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Gagal memperbarui template checklist',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal memperbarui template checklist');
   }
 };
 
@@ -582,12 +693,42 @@ exports.updateTemplate = async (req, res) => {
  */
 exports.toggleStatus = async (req, res) => {
   try {
+    const user = await extractUser(req);
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Autentikasi diperlukan.',
+      });
+    }
     const { id } = req.params;
-    const numericId = parseInt(id, 10);
-    if (isNaN(numericId)) {
+    const templateId = toBigIntSafe(id, ['tpl-']);
+    if (!templateId) {
       return res.status(400).json({
         success: false,
         message: 'Format ID template tidak valid',
+      });
+    }
+
+    const existing = await prisma.checklist_template.findUnique({
+      where: { template_id: templateId },
+      select: {
+        status: true,
+        store: { select: { workspace_id: true } },
+      },
+    });
+
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        message: 'Template checklist tidak ditemukan',
+      });
+    }
+
+    const access = await assertWorkspaceAccess(user, existing.store?.workspace_id);
+    if (!access.ok) {
+      return res.status(access.status === 400 ? 403 : access.status).json({
+        success: false,
+        message: access.message || 'Anda tidak memiliki akses untuk mengubah status template milik tenant lain',
       });
     }
 
@@ -597,21 +738,14 @@ exports.toggleStatus = async (req, res) => {
     if (status) {
       nextStatus = status === 'Nonaktif' || status === 'inactive' ? 'inactive' : 'active';
     } else {
-      // Toggle
-      const existing = await prisma.checklist_template.findUnique({
-        where: { template_id: BigInt(numericId) },
-        select: { status: true },
-      });
-      if (existing) {
-        nextStatus = existing.status === 'active' ? 'inactive' : 'active';
-      }
+      nextStatus = existing.status === 'active' ? 'inactive' : 'active';
     }
 
     // Jika ingin menonaktifkan, pastikan tidak ada jadwal audit aktif yang terhubung
     if (nextStatus === 'inactive') {
       const activeSchedules = await prisma.schedule.findMany({
         where: {
-          template_id: BigInt(numericId),
+          template_id: templateId,
           deleted_at: null,
           NOT: {
             status: { in: ['cancelled', 'Dibatalkan', 'inactive'] },
@@ -636,7 +770,7 @@ exports.toggleStatus = async (req, res) => {
     }
 
     const updated = await prisma.checklist_template.update({
-      where: { template_id: BigInt(numericId) },
+      where: { template_id: templateId },
       data: { status: nextStatus },
       include: {
         template_category: {
@@ -655,12 +789,7 @@ exports.toggleStatus = async (req, res) => {
       data: formatTemplate(updated),
     });
   } catch (error) {
-    console.error('❌ Error toggleStatus:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Gagal mengubah status template checklist',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal mengubah status template checklist');
   }
 };
 
@@ -669,12 +798,41 @@ exports.toggleStatus = async (req, res) => {
  */
 exports.deleteTemplate = async (req, res) => {
   try {
+    const user = await extractUser(req);
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Autentikasi diperlukan.',
+      });
+    }
     const { id } = req.params;
-    const numericId = parseInt(id, 10);
-    if (isNaN(numericId)) {
+    const templateId = toBigIntSafe(id, ['tpl-']);
+    if (!templateId) {
       return res.status(400).json({
         success: false,
         message: 'Format ID template tidak valid',
+      });
+    }
+
+    const existing = await prisma.checklist_template.findUnique({
+      where: { template_id: templateId },
+      include: {
+        store: { select: { workspace_id: true } },
+      },
+    });
+
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        message: 'Template checklist tidak ditemukan',
+      });
+    }
+
+    const access = await assertWorkspaceAccess(user, existing.store?.workspace_id);
+    if (!access.ok) {
+      return res.status(access.status === 400 ? 403 : access.status).json({
+        success: false,
+        message: access.message || 'Anda tidak memiliki akses untuk menghapus template milik tenant lain',
       });
     }
 
@@ -682,7 +840,7 @@ exports.deleteTemplate = async (req, res) => {
 
     if (isPermanent) {
       await prisma.checklist_template.delete({
-        where: { template_id: BigInt(numericId) },
+        where: { template_id: templateId },
       });
       return res.status(200).json({
         success: true,
@@ -692,7 +850,7 @@ exports.deleteTemplate = async (req, res) => {
       // Pastikan tidak ada jadwal audit aktif yang terhubung sebelum soft delete
       const activeSchedules = await prisma.schedule.findMany({
         where: {
-          template_id: BigInt(numericId),
+          template_id: templateId,
           deleted_at: null,
           NOT: {
             status: { in: ['cancelled', 'Dibatalkan', 'inactive'] },
@@ -708,7 +866,7 @@ exports.deleteTemplate = async (req, res) => {
       }
 
       await prisma.checklist_template.update({
-        where: { template_id: BigInt(numericId) },
+        where: { template_id: templateId },
         data: { status: 'inactive' },
       });
       return res.status(200).json({
@@ -717,12 +875,7 @@ exports.deleteTemplate = async (req, res) => {
       });
     }
   } catch (error) {
-    console.error('❌ Error deleteTemplate:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Gagal menghapus template checklist',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal menghapus template checklist');
   }
 };
 
@@ -732,20 +885,39 @@ exports.deleteTemplate = async (req, res) => {
 exports.getTemplateStats = async (req, res) => {
   try {
     const user = await extractUser(req);
-    const requestedWsId = req.query.workspaceId || req.headers['x-workspace-id'];
-    const where = {};
-
-    if (requestedWsId && requestedWsId !== 'all') {
-      try {
-        const cleanWs = BigInt(requestedWsId.toString().replace(/^ws-/, ''));
-        where.store = { workspace_id: cleanWs };
-      } catch (e) {}
-    } else if (user && user.role === 'Admin' && user.workspaceId) {
-      try {
-        const cleanWs = BigInt(user.workspaceId.toString().replace(/^ws-/, ''));
-        where.store = { workspace_id: cleanWs };
-      } catch (e) {}
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Autentikasi diperlukan.',
+      });
     }
+
+    const requestedWsId = req.query.workspaceId || req.headers['x-workspace-id'];
+    const scope = await resolveScopedWorkspaceContext(user, requestedWsId, {
+      teknisUseSingleDefaultOnAll: true,
+    });
+
+    if (!scope.ok) {
+      return res.status(scope.status).json({
+        success: false,
+        message: scope.message,
+      });
+    }
+
+    if (scope.workspaceIds.length === 0) {
+      return res.status(200).json({
+        success: true,
+        data: { total: 0, active: 0, inactive: 0, activePercentage: 0 },
+      });
+    }
+
+    const storeScopeFilter = scope.prismaWorkspaceWhere.workspace_id
+      ? { workspace_id: scope.prismaWorkspaceWhere.workspace_id }
+      : { workspace: scope.prismaWorkspaceWhere };
+
+    const where = {
+      store: storeScopeFilter,
+    };
 
     const total = await prisma.checklist_template.count({ where });
     const active = await prisma.checklist_template.count({
@@ -764,11 +936,6 @@ exports.getTemplateStats = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('❌ Error getTemplateStats:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Gagal mengambil statistik template',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal mengambil statistik template');
   }
 };

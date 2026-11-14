@@ -1,8 +1,18 @@
 const prisma = require('../config/prisma');
 const bcrypt = require('bcrypt');
-const { extractUser } = require('../middlewares/auth.middleware');
+const { extractUser, bumpTokenVersion } = require('../middlewares/auth.middleware');
 const { encryptImageData, decryptImageData } = require('../utils/imageCrypto');
+const { encryptBinaryAttachment } = require('../utils/binaryImageCrypto');
 const { syncExpiredSchedulesToDb } = require('../utils/scheduleSync');
+const { toBigIntSafe } = require('../utils/teknisScope');
+const {
+  sendSafeError,
+  assertWorkspaceAccess,
+  resolveScopedWorkspaceContext,
+  assertStoreAccess,
+  isStaffRole,
+} = require('../utils/tenantScope');
+const { findEmailConflict } = require('../utils/emailUniqueness');
 
 /**
  * Self-healing: Pastikan kolom position dan deleted_at selalu tersedia di PostgreSQL
@@ -76,11 +86,22 @@ exports.getAllStaff = async (req, res) => {
     await ensureStaffColumns();
 
     const user = await extractUser(req);
+    if (!user) {
+      return res.status(401).json({ status: 'error', message: 'Autentikasi diperlukan.' });
+    }
     const { workspaceId, storeId, status, search } = req.query;
     const headerWsId = req.headers['x-workspace-id'];
-    const activeWsId = (user && (user.role === 'Divisi Teknis' || user.role === 'Teknis') && user.workspaceId)
-      ? user.workspaceId
-      : (workspaceId || headerWsId);
+    const requestedWsId = workspaceId || headerWsId;
+
+    const scope = await resolveScopedWorkspaceContext(user, requestedWsId, {
+      teknisUseSingleDefaultOnAll: true,
+    });
+    if (!scope.ok) {
+      return res.status(scope.status).json({ status: 'error', message: scope.message });
+    }
+    if (scope.workspaceIds.length === 0) {
+      return res.status(200).json({ status: 'success', total: 0, data: [] });
+    }
 
     let query = `
       SELECT 
@@ -95,36 +116,26 @@ exports.getAllStaff = async (req, res) => {
       LEFT JOIN store st ON s.store_id = st.store_id
       LEFT JOIN admin a ON s.admin_id = a.admin_id
       LEFT JOIN workspace w ON st.workspace_id = w.workspace_id
-      WHERE 1=1
+      WHERE st.workspace_id = ANY($1::bigint[])
     `;
-    const params = [];
+    const params = [scope.workspaceIds];
 
-    // Filter workspace
-    if (activeWsId && activeWsId !== 'all') {
-      try {
-        const cleanWsId = BigInt(activeWsId.toString().replace(/\D/g, ''));
-        params.push(cleanWsId);
-        query += ` AND st.workspace_id = $${params.length}`;
-      } catch (e) {
-        console.warn('⚠️ Invalid workspaceId format:', activeWsId);
+    // Filter storeId (tervalidasi kepemilikan store)
+    if (storeId && storeId !== 'all' && storeId !== 'Semua Toko') {
+      const storeAccess = await assertStoreAccess(user, storeId);
+      if (!storeAccess.ok) {
+        return res.status(storeAccess.status).json({
+          status: 'error',
+          message: storeAccess.message,
+        });
       }
-    }
-
-    // Filter storeId
-    if (storeId) {
-      try {
-        const cleanStoreId = BigInt(storeId.toString().replace(/\D/g, ''));
-        params.push(cleanStoreId);
-        query += ` AND s.store_id = $${params.length}`;
-      } catch (e) {
-        console.warn('⚠️ Invalid storeId format:', storeId);
-      }
+      params.push(storeAccess.storeId);
+      query += ` AND s.store_id = $${params.length}`;
     }
 
     // Filter status
     if (status && status !== 'Semua') {
       if (status === 'Aktif' || status === 'active') {
-        params.push('active');
         query += ` AND (s.status = 'active' OR s.status = 'Aktif' OR s.status IS NULL)`;
       } else if (status === 'Nonaktif' || status === 'inactive') {
         query += ` AND (s.status = 'inactive' OR s.status = 'Nonaktif')`;
@@ -155,12 +166,7 @@ exports.getAllStaff = async (req, res) => {
       data,
     });
   } catch (error) {
-    console.error('❌ Error fetching staff:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal memuat data staf',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal memuat data staf');
   }
 };
 
@@ -171,8 +177,18 @@ exports.getAllStaff = async (req, res) => {
 exports.getStaffById = async (req, res) => {
   try {
     await ensureStaffColumns();
+    const user = await extractUser(req);
+    if (!user) {
+      return res.status(401).json({ status: 'error', message: 'Autentikasi diperlukan.' });
+    }
     const { id } = req.params;
-    const cleanId = BigInt(id.toString().replace(/\D/g, ''));
+    const cleanId = toBigIntSafe(id, ['staff-']);
+    if (!cleanId) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Format ID staf tidak valid',
+      });
+    }
 
     const query = `
       SELECT 
@@ -199,17 +215,20 @@ exports.getStaffById = async (req, res) => {
       });
     }
 
+    const access = await assertWorkspaceAccess(user, rows[0].workspace_id);
+    if (!access.ok) {
+      return res.status(access.status === 400 ? 403 : access.status).json({
+        status: 'error',
+        message: access.message || 'Anda tidak memiliki akses ke data staf milik tenant lain',
+      });
+    }
+
     return res.status(200).json({
       status: 'success',
       data: formatStaff(rows[0]),
     });
   } catch (error) {
-    console.error('❌ Error fetching staff by id:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal memuat detail staf',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal memuat detail staf');
   }
 };
 
@@ -221,6 +240,11 @@ exports.createStaff = async (req, res) => {
   try {
     await ensureStaffColumns();
 
+    const user = await extractUser(req);
+    if (!user) {
+      return res.status(401).json({ status: 'error', message: 'Autentikasi diperlukan.' });
+    }
+
     const {
       fullName,
       email,
@@ -229,7 +253,8 @@ exports.createStaff = async (req, res) => {
       position = 'Auditor Lapangan',
       status = 'Aktif',
       phone,
-      password = 'password123',
+      password,
+      workspaceId,
     } = req.body;
 
     if (!fullName || !fullName.trim()) {
@@ -246,53 +271,77 @@ exports.createStaff = async (req, res) => {
       });
     }
 
+    const rawPassword = typeof password === 'string' ? password.trim() : '';
+    if (!rawPassword || rawPassword.length < 6) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Password staf wajib diisi minimal 6 karakter',
+      });
+    }
+
     const cleanEmail = email.trim().toLowerCase();
 
-    // Cek duplikasi email di tabel staff
-    const existingStaff = await prisma.staff.findUnique({
-      where: { email: cleanEmail },
-    });
+    // Cek duplikasi email lintas tabel staff, admin, dan super_admin
+    const emailConflict = await findEmailConflict(cleanEmail);
 
-    if (existingStaff) {
+    if (emailConflict) {
       return res.status(400).json({
         status: 'error',
-        message: `Email "${cleanEmail}" sudah terdaftar untuk staf lain.`,
+        message:
+          emailConflict.table === 'staff'
+            ? `Email "${cleanEmail}" sudah terdaftar untuk staf lain.`
+            : `Email "${cleanEmail}" sudah terdaftar dalam sistem (${emailConflict.role}). Gunakan email lain.`,
       });
     }
 
-    // Resolusi Store
+    const rawActiveWsId = workspaceId || req.headers['x-workspace-id'] || req.query.workspaceId;
+    const scope = await resolveScopedWorkspaceContext(user, rawActiveWsId, {
+      teknisUseSingleDefaultOnAll: true,
+    });
+    if (!scope.ok) {
+      return res.status(scope.status).json({
+        status: 'error',
+        message: scope.message,
+      });
+    }
+
+    const storeScopeFilter = scope.prismaWorkspaceWhere.workspace_id
+      ? { workspace_id: scope.prismaWorkspaceWhere.workspace_id }
+      : { workspace: scope.prismaWorkspaceWhere };
+
+    // Resolusi Store STRICTLY dalam ruang lingkup tenant milik user
     let resolvedStore = null;
     if (storeId) {
-      const cleanStoreId = BigInt(storeId.toString().replace(/\D/g, ''));
-      resolvedStore = await prisma.store.findUnique({
-        where: { store_id: cleanStoreId },
-      });
-    }
-
-    if (!resolvedStore && storeName) {
-      resolvedStore = await prisma.store.findFirst({
-        where: { store_name: { equals: storeName.trim(), mode: 'insensitive' } },
-      });
-    }
-
-    // Fallback jika tidak ditemukan spesifik, cari toko pertama yang ada
-    if (!resolvedStore) {
-      const activeWsId = req.headers['x-workspace-id'] || req.query.workspaceId;
-      if (activeWsId && activeWsId !== 'all') {
-        const cleanWsId = BigInt(activeWsId.toString().replace(/\D/g, ''));
-        resolvedStore = await prisma.store.findFirst({
-          where: { workspace_id: cleanWsId },
+      const storeAccess = await assertStoreAccess(user, storeId);
+      if (!storeAccess.ok) {
+        return res.status(storeAccess.status).json({
+          status: 'error',
+          message: storeAccess.message,
         });
       }
-      if (!resolvedStore) {
-        resolvedStore = await prisma.store.findFirst();
-      }
+      resolvedStore = storeAccess.store;
+    }
+
+    if (!resolvedStore && storeName && scope.workspaceIds.length > 0) {
+      resolvedStore = await prisma.store.findFirst({
+        where: {
+          store_name: { equals: storeName.trim(), mode: 'insensitive' },
+          ...(scope.targetWorkspaceId ? { workspace_id: scope.targetWorkspaceId } : storeScopeFilter),
+        },
+      });
+    }
+
+    if (!resolvedStore && scope.workspaceIds.length > 0) {
+      resolvedStore = await prisma.store.findFirst({
+        where: scope.targetWorkspaceId ? { workspace_id: scope.targetWorkspaceId } : storeScopeFilter,
+        orderBy: { store_id: 'asc' },
+      });
     }
 
     if (!resolvedStore) {
       return res.status(400).json({
         status: 'error',
-        message: 'Toko penempatan tidak ditemukan dalam database.',
+        message: 'Toko penempatan belum tersedia pada workspace ini. Harap tambahkan toko terlebih dahulu.',
       });
     }
 
@@ -310,8 +359,25 @@ exports.createStaff = async (req, res) => {
       }
     }
 
+    // Pastikan store memiliki admin_id valid dalam workspace yang sama
+    let targetAdminId = resolvedStore.admin_id;
+    if (!targetAdminId && resolvedStore.workspace_id) {
+      const wsAdmin = await prisma.admin.findFirst({
+        where: { workspace_id: resolvedStore.workspace_id },
+        select: { admin_id: true },
+      });
+      if (wsAdmin) targetAdminId = wsAdmin.admin_id;
+    }
+
+    if (!targetAdminId) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Admin penanggung jawab toko belum tersedia pada workspace ini.',
+      });
+    }
+
     // Hash password
-    const hashedPassword = await bcrypt.hash(password || 'password123', 10);
+    const hashedPassword = await bcrypt.hash(rawPassword, 10);
     const dbStatus = (status === 'Nonaktif' || status === 'inactive') ? 'inactive' : 'active';
     const cleanPhone = phone ? phone.trim() : null;
 
@@ -326,7 +392,7 @@ exports.createStaff = async (req, res) => {
     const insertedRows = await prisma.$queryRawUnsafe(
       insertQuery,
       resolvedStore.store_id,
-      resolvedStore.admin_id,
+      targetAdminId,
       cleanEmail,
       fullName.trim(),
       cleanPhone,
@@ -345,10 +411,12 @@ exports.createStaff = async (req, res) => {
         st.city,
         st.address,
         st.workspace_id,
-        a.name AS admin_name
+        a.name AS admin_name,
+        w.company_name AS workspace_name
       FROM staff s
       LEFT JOIN store st ON s.store_id = st.store_id
       LEFT JOIN admin a ON s.admin_id = a.admin_id
+      LEFT JOIN workspace w ON st.workspace_id = w.workspace_id
       WHERE s.staff_id = $1
     `, inserted.staff_id);
 
@@ -360,12 +428,7 @@ exports.createStaff = async (req, res) => {
       data: formatted,
     });
   } catch (error) {
-    console.error('❌ Error creating staff:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal menambahkan staf baru',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal menambahkan staf baru');
   }
 };
 
@@ -376,8 +439,18 @@ exports.createStaff = async (req, res) => {
 exports.updateStaff = async (req, res) => {
   try {
     await ensureStaffColumns();
+    const user = await extractUser(req);
+    if (!user) {
+      return res.status(401).json({ status: 'error', message: 'Autentikasi diperlukan.' });
+    }
     const { id } = req.params;
-    const cleanId = BigInt(id.toString().replace(/\D/g, ''));
+    const cleanId = toBigIntSafe(id, ['staff-']);
+    if (!cleanId) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Format ID staf tidak valid',
+      });
+    }
 
     const {
       fullName,
@@ -394,6 +467,7 @@ exports.updateStaff = async (req, res) => {
     // Cek keberadaan staf
     const existing = await prisma.staff.findUnique({
       where: { staff_id: cleanId },
+      include: { store: { select: { workspace_id: true } } },
     });
 
     if (!existing) {
@@ -403,37 +477,53 @@ exports.updateStaff = async (req, res) => {
       });
     }
 
-    // Jika email diubah, pastikan tidak bentrok
-    if (email && email.trim().toLowerCase() !== existing.email.toLowerCase()) {
-      const emailDup = await prisma.staff.findUnique({
-        where: { email: email.trim().toLowerCase() },
+    const access = await assertWorkspaceAccess(user, existing.store?.workspace_id);
+    if (!access.ok) {
+      return res.status(access.status === 400 ? 403 : access.status).json({
+        status: 'error',
+        message: access.message || 'Anda tidak memiliki akses untuk mengubah data staf milik tenant lain.',
       });
-      if (emailDup) {
+    }
+
+    // Jika email diisi/diubah, pastikan tidak bentrok lintas tabel (staff, admin, super_admin)
+    if (email && email.trim()) {
+      const nextEmail = email.trim().toLowerCase();
+      const emailConflict = await findEmailConflict(nextEmail, { staffId: cleanId });
+      if (emailConflict) {
         return res.status(400).json({
           status: 'error',
-          message: `Email "${email.trim()}" sudah digunakan staf lain.`,
+          message:
+            emailConflict.table === 'staff'
+              ? `Email "${email.trim()}" sudah digunakan staf lain.`
+              : `Email "${email.trim()}" sudah digunakan oleh akun ${emailConflict.role} lain di sistem.`,
         });
       }
     }
 
-    // Resolusi Store baru jika disediakan
+    // Resolusi Store baru jika disediakan (ketat dalam ruang lingkup tenant milik user)
     let resolvedStoreId = existing.store_id;
     let resolvedAdminId = existing.admin_id;
 
     if (storeId) {
-      const cleanStoreId = BigInt(storeId.toString().replace(/\D/g, ''));
-      const s = await prisma.store.findUnique({ where: { store_id: cleanStoreId } });
-      if (s) {
-        resolvedStoreId = s.store_id;
-        resolvedAdminId = s.admin_id;
+      const storeAccess = await assertStoreAccess(user, storeId);
+      if (!storeAccess.ok) {
+        return res.status(storeAccess.status).json({
+          status: 'error',
+          message: storeAccess.message,
+        });
       }
-    } else if (storeName) {
+      resolvedStoreId = storeAccess.store.store_id;
+      resolvedAdminId = storeAccess.store.admin_id || resolvedAdminId;
+    } else if (storeName && existing.store?.workspace_id) {
       const s = await prisma.store.findFirst({
-        where: { store_name: { equals: storeName.trim(), mode: 'insensitive' } },
+        where: {
+          store_name: { equals: storeName.trim(), mode: 'insensitive' },
+          workspace_id: existing.store.workspace_id,
+        },
       });
       if (s) {
         resolvedStoreId = s.store_id;
-        resolvedAdminId = s.admin_id;
+        resolvedAdminId = s.admin_id || resolvedAdminId;
       }
     }
 
@@ -473,10 +563,19 @@ exports.updateStaff = async (req, res) => {
       photoClause = `, photo = $${params.length}`;
     }
 
+    let hasPasswordChange = false;
     if (password && password.trim() !== '') {
-      const hashed = await bcrypt.hash(password.trim(), 10);
+      const cleanPass = password.trim();
+      if (cleanPass.length < 6) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Password baru minimal 6 karakter',
+        });
+      }
+      const hashed = await bcrypt.hash(cleanPass, 10);
       params.push(hashed);
       passwordClause = `, password = $${params.length}`;
+      hasPasswordChange = true;
     }
 
     params.push(cleanId);
@@ -501,6 +600,10 @@ exports.updateStaff = async (req, res) => {
 
     await prisma.$executeRawUnsafe(updateQuery, ...params);
 
+    if (newStatus === 'inactive' || hasPasswordChange) {
+      await bumpTokenVersion({ rawId: cleanId.toString(), role: 'Staff' });
+    }
+
     // Ambil full hasil update
     const fullRows = await prisma.$queryRawUnsafe(`
       SELECT 
@@ -509,10 +612,12 @@ exports.updateStaff = async (req, res) => {
         st.city,
         st.address,
         st.workspace_id,
-        a.name AS admin_name
+        a.name AS admin_name,
+        w.company_name AS workspace_name
       FROM staff s
       LEFT JOIN store st ON s.store_id = st.store_id
       LEFT JOIN admin a ON s.admin_id = a.admin_id
+      LEFT JOIN workspace w ON st.workspace_id = w.workspace_id
       WHERE s.staff_id = $1
     `, cleanId);
 
@@ -524,12 +629,7 @@ exports.updateStaff = async (req, res) => {
       data: formatted,
     });
   } catch (error) {
-    console.error('❌ Error updating staff:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal memperbarui data staf',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal memperbarui data staf');
   }
 };
 
@@ -540,8 +640,41 @@ exports.updateStaff = async (req, res) => {
 exports.restoreStaff = async (req, res) => {
   try {
     await ensureStaffColumns();
+    const user = await extractUser(req);
+    if (!user) {
+      return res.status(401).json({ status: 'error', message: 'Autentikasi diperlukan.' });
+    }
     const { id } = req.params;
-    const cleanId = BigInt(id.toString().replace(/\D/g, ''));
+    const cleanId = toBigIntSafe(id, ['staff-']);
+    if (!cleanId) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Format ID staf tidak valid',
+      });
+    }
+
+    const existingRows = await prisma.$queryRawUnsafe(`
+      SELECT s.staff_id, st.workspace_id
+      FROM staff s
+      LEFT JOIN store st ON s.store_id = st.store_id
+      WHERE s.staff_id = $1
+      LIMIT 1
+    `, cleanId);
+
+    if (!existingRows || existingRows.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Staf tidak ditemukan',
+      });
+    }
+
+    const access = await assertWorkspaceAccess(user, existingRows[0].workspace_id);
+    if (!access.ok) {
+      return res.status(access.status === 400 ? 403 : access.status).json({
+        status: 'error',
+        message: access.message || 'Anda tidak memiliki akses untuk memulihkan staf milik tenant lain.',
+      });
+    }
 
     await prisma.$executeRawUnsafe(`
       UPDATE staff
@@ -556,19 +689,14 @@ exports.restoreStaff = async (req, res) => {
         st.city,
         st.address,
         st.workspace_id,
-        a.name AS admin_name
+        a.name AS admin_name,
+        w.company_name AS workspace_name
       FROM staff s
       LEFT JOIN store st ON s.store_id = st.store_id
       LEFT JOIN admin a ON s.admin_id = a.admin_id
+      LEFT JOIN workspace w ON st.workspace_id = w.workspace_id
       WHERE s.staff_id = $1
     `, cleanId);
-
-    if (!fullRows || fullRows.length === 0) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Staf tidak ditemukan',
-      });
-    }
 
     const formatted = formatStaff(fullRows[0]);
 
@@ -578,12 +706,7 @@ exports.restoreStaff = async (req, res) => {
       data: formatted,
     });
   } catch (error) {
-    console.error('❌ Error restoring staff:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal mengaktifkan kembali staf',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal mengaktifkan kembali staf');
   }
 };
 
@@ -594,9 +717,42 @@ exports.restoreStaff = async (req, res) => {
 exports.deleteStaff = async (req, res) => {
   try {
     await ensureStaffColumns();
+    const user = await extractUser(req);
+    if (!user) {
+      return res.status(401).json({ status: 'error', message: 'Autentikasi diperlukan.' });
+    }
     const { id } = req.params;
-    const cleanId = BigInt(id.toString().replace(/\D/g, ''));
+    const cleanId = toBigIntSafe(id, ['staff-']);
+    if (!cleanId) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Format ID staf tidak valid',
+      });
+    }
     const isPermanent = req.query.permanent === 'true';
+
+    const existingRows = await prisma.$queryRawUnsafe(`
+      SELECT s.staff_id, st.workspace_id
+      FROM staff s
+      LEFT JOIN store st ON s.store_id = st.store_id
+      WHERE s.staff_id = $1
+      LIMIT 1
+    `, cleanId);
+
+    if (!existingRows || existingRows.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Staf tidak ditemukan',
+      });
+    }
+
+    const access = await assertWorkspaceAccess(user, existingRows[0].workspace_id);
+    if (!access.ok) {
+      return res.status(access.status === 400 ? 403 : access.status).json({
+        status: 'error',
+        message: access.message || 'Anda tidak memiliki akses untuk menonaktifkan staf milik tenant lain.',
+      });
+    }
 
     if (isPermanent) {
       await prisma.$executeRawUnsafe(`
@@ -616,6 +772,8 @@ exports.deleteStaff = async (req, res) => {
       WHERE staff_id = $1
     `, cleanId);
 
+    await bumpTokenVersion({ rawId: cleanId.toString(), role: 'Staff' });
+
     const fullRows = await prisma.$queryRawUnsafe(`
       SELECT 
         s.*,
@@ -623,10 +781,12 @@ exports.deleteStaff = async (req, res) => {
         st.city,
         st.address,
         st.workspace_id,
-        a.name AS admin_name
+        a.name AS admin_name,
+        w.company_name AS workspace_name
       FROM staff s
       LEFT JOIN store st ON s.store_id = st.store_id
       LEFT JOIN admin a ON s.admin_id = a.admin_id
+      LEFT JOIN workspace w ON st.workspace_id = w.workspace_id
       WHERE s.staff_id = $1
     `, cleanId);
 
@@ -638,12 +798,7 @@ exports.deleteStaff = async (req, res) => {
       data: formatted,
     });
   } catch (error) {
-    console.error('❌ Error deleting/soft-deleting staff:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal menonaktifkan staf',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal menonaktifkan staf');
   }
 };
 
@@ -654,14 +809,37 @@ exports.deleteStaff = async (req, res) => {
 exports.toggleStatus = async (req, res) => {
   try {
     await ensureStaffColumns();
+    const user = await extractUser(req);
+    if (!user) {
+      return res.status(401).json({ status: 'error', message: 'Autentikasi diperlukan.' });
+    }
     const { id } = req.params;
-    const cleanId = BigInt(id.toString().replace(/\D/g, ''));
+    const cleanId = toBigIntSafe(id, ['staff-']);
+    if (!cleanId) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Format ID staf tidak valid',
+      });
+    }
 
-    const rows = await prisma.$queryRawUnsafe(`SELECT status FROM staff WHERE staff_id = $1`, cleanId);
+    const rows = await prisma.$queryRawUnsafe(`
+      SELECT s.status, st.workspace_id
+      FROM staff s
+      LEFT JOIN store st ON s.store_id = st.store_id
+      WHERE s.staff_id = $1
+    `, cleanId);
     if (!rows || rows.length === 0) {
       return res.status(404).json({
         status: 'error',
         message: 'Staf tidak ditemukan',
+      });
+    }
+
+    const access = await assertWorkspaceAccess(user, rows[0].workspace_id);
+    if (!access.ok) {
+      return res.status(access.status === 400 ? 403 : access.status).json({
+        status: 'error',
+        message: access.message || 'Anda tidak memiliki akses untuk mengubah status staf milik tenant lain.',
       });
     }
 
@@ -675,6 +853,10 @@ exports.toggleStatus = async (req, res) => {
       WHERE staff_id = $3
     `, nextStatus, nextDeletedAt, cleanId);
 
+    if (nextStatus === 'inactive') {
+      await bumpTokenVersion({ rawId: cleanId.toString(), role: 'Staff' });
+    }
+
     const fullRows = await prisma.$queryRawUnsafe(`
       SELECT 
         s.*,
@@ -682,10 +864,12 @@ exports.toggleStatus = async (req, res) => {
         st.city,
         st.address,
         st.workspace_id,
-        a.name AS admin_name
+        a.name AS admin_name,
+        w.company_name AS workspace_name
       FROM staff s
       LEFT JOIN store st ON s.store_id = st.store_id
       LEFT JOIN admin a ON s.admin_id = a.admin_id
+      LEFT JOIN workspace w ON st.workspace_id = w.workspace_id
       WHERE s.staff_id = $1
     `, cleanId);
 
@@ -697,12 +881,7 @@ exports.toggleStatus = async (req, res) => {
       data: formatted,
     });
   } catch (error) {
-    console.error('❌ Error toggling staff status:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal mengubah status staf',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal mengubah status staf');
   }
 };
 
@@ -910,8 +1089,18 @@ const doesScheduleApplyOnDate = (schedule, targetDateStr, targetDayShort) => {
   return scheduleDateStr === targetDateStr;
 };
 
-const getActiveHolidaysOnDate = async (targetDateStr) => {
+const getActiveHolidaysOnDate = async (targetDateStr, workspaceIds = null) => {
   try {
+    if (Array.isArray(workspaceIds) && workspaceIds.length > 0) {
+      return await prisma.$queryRawUnsafe(`
+        SELECT * FROM store_holiday
+        WHERE deleted_at IS NULL
+          AND status != 'Dibatalkan'
+          AND start_date <= $1::date
+          AND end_date >= $1::date
+          AND workspace_id = ANY($2::bigint[])
+      `, targetDateStr, workspaceIds);
+    }
     return await prisma.$queryRawUnsafe(`
       SELECT * FROM store_holiday
       WHERE deleted_at IS NULL
@@ -928,6 +1117,7 @@ const evaluateHolidayForSchedule = (schedule, targetDateStr, storeHolidays = [],
   if (!schedule) return { isHoliday: false, reason: null, matchedStoreHoliday: null, matchedException: null };
   const sIdStr = schedule.schedule_id.toString();
   const sStoreId = schedule.store_id ? schedule.store_id.toString() : '';
+  const sWorkspaceId = schedule.store?.workspace_id ? schedule.store.workspace_id.toString() : '';
   const sStoreName = (schedule.store?.store_name || fallbackStoreName || '').trim().toLowerCase();
 
   const matchedException = (schedule.schedule_exception || []).find((e) => {
@@ -940,8 +1130,12 @@ const evaluateHolidayForSchedule = (schedule, targetDateStr, storeHolidays = [],
 
   const matchedStoreHoliday = (storeHolidays || []).find((h) => {
     const hStoreId = h.store_id ? h.store_id.toString() : '';
+    const hWorkspaceId = h.workspace_id ? h.workspace_id.toString() : '';
     const hStoreName = (h.store_name || '').trim().toLowerCase();
-    const storeMatches = (hStoreId && hStoreId === sStoreId) || (hStoreName && hStoreName === sStoreName);
+    const sameWorkspace = Boolean(hWorkspaceId && sWorkspaceId && hWorkspaceId === sWorkspaceId);
+    const storeMatches =
+      (hStoreId && hStoreId === sStoreId) ||
+      (sameWorkspace && !hStoreId && hStoreName && hStoreName === sStoreName);
     if (!storeMatches) return false;
 
     const lType = h.libur_type || 'full';
@@ -974,153 +1168,165 @@ const evaluateHolidayForSchedule = (schedule, targetDateStr, storeHolidays = [],
 exports.getMySchedules = async (req, res) => {
   try {
     const user = await extractUser(req);
+    if (!user) {
+      return res.status(401).json({ status: 'error', message: 'Autentikasi diperlukan.' });
+    }
+
     let staffId = null;
     let storeId = null;
-    let staffName = user?.fullName || 'Staf Lapangan';
+    let targetWorkspaceId = null;
+    let staffName = user.fullName || 'Staf Lapangan';
     let storeName = 'Toko Cabang';
     let storeLocation = 'Kota Malang';
     let storeCode = 'ST-01';
-    let staffPosition = user?.position || 'Auditor Lapangan';
-    let staffPhoto = user?.profilePicture || null;
+    let staffPosition = user.position || 'Auditor Lapangan';
+    let staffPhoto = user.profilePicture || null;
 
-    const isStaffUser =
-      user &&
-      (user.role === 'Staff' ||
-       user.role === 'Auditor Lapangan' ||
-       user.id?.toString().startsWith('staff-') ||
-       user.role?.toLowerCase().includes('staff') ||
-       user.role?.toLowerCase().includes('auditor'));
+    const isStaffUser = isStaffRole(user);
 
-    // 1. Identifikasi Staff jika user login sebagai Staff
+    // 1. Jika Staff: identifikasi STRICT dari JWT/DB user.rawId, tolak cross-store spoofing
     if (isStaffUser) {
-      const cleanStaffId = user.rawId || user.id?.toString().replace(/^staff-/, '');
-      if (cleanStaffId && !isNaN(Number(cleanStaffId))) {
-        try {
-          const st = await prisma.staff.findUnique({
-            where: { staff_id: BigInt(cleanStaffId) },
-            include: { store: true },
+      const cleanStaffId = toBigIntSafe(user.rawId, ['staff-']);
+      if (!cleanStaffId) {
+        return res.status(403).json({ status: 'error', message: 'Identitas staf tidak valid.' });
+      }
+      const st = await prisma.staff.findUnique({
+        where: { staff_id: cleanStaffId },
+        include: { store: true },
+      });
+      if (!st) {
+        return res.status(404).json({ status: 'error', message: 'Akun staf tidak ditemukan.' });
+      }
+      const extra = await getStaffExtra(st.staff_id);
+      if (extra.deleted_at || st.status === 'inactive' || st.status === 'Nonaktif') {
+        return res.status(403).json({
+          status: 'error',
+          code: 'ACCOUNT_INACTIVE',
+          message: 'Akun staf Anda berstatus Nonaktif atau telah dihapus. Hubungi Admin untuk mengaktifkan kembali.',
+        });
+      }
+
+      if (req.query.storeId) {
+        const reqStoreId = toBigIntSafe(req.query.storeId, ['str-', 'st-', 'toko-']);
+        if (!reqStoreId || (st.store_id && reqStoreId !== st.store_id)) {
+          return res.status(403).json({
+            status: 'error',
+            message: 'Anda hanya diperbolehkan mengakses jadwal gerai penugasan Anda sendiri.',
           });
-          if (st) {
-            const extra = await getStaffExtra(st.staff_id);
-            if (extra.deleted_at || st.status === 'inactive' || st.status === 'Nonaktif') {
-              return res.status(403).json({
-                status: 'error',
-                message: 'Akun staf Anda berstatus Nonaktif atau telah dihapus. Hubungi Admin untuk mengaktifkan kembali.',
-              });
-            }
-            staffId = st.staff_id;
-            storeId = st.store_id;
-            staffName = st.name;
-            staffPosition = extra.position || 'Auditor Lapangan';
-            staffPhoto = st.photo || staffPhoto;
-            if (st.store) {
-              storeName = st.store.store_name;
-              storeLocation = st.store.address || st.store.city || 'Cabang';
-              storeCode = `ST-${st.store.store_id.toString()}`;
-            }
-          }
-        } catch (e) {
-          console.warn('⚠️ Gagal mengambil detail staff:', e.message);
         }
       }
-    }
 
-    // Jika staffId belum terisi dan ada email user, cari langsung ke tabel staff
-    if (!staffId && user?.email) {
-      try {
-        const stByEmail = await prisma.staff.findUnique({
-          where: { email: user.email.trim().toLowerCase() },
-          include: { store: true },
-        });
-        if (stByEmail) {
-          const extra = await getStaffExtra(stByEmail.staff_id);
-          if (extra.deleted_at || stByEmail.status === 'inactive' || stByEmail.status === 'Nonaktif') {
-            return res.status(403).json({
-              status: 'error',
-              message: 'Akun staf Anda berstatus Nonaktif atau telah dihapus.',
-            });
-          }
-          staffId = stByEmail.staff_id;
-          storeId = stByEmail.store_id;
-          staffName = stByEmail.name;
-          staffPosition = extra.position || 'Auditor Lapangan';
-          staffPhoto = stByEmail.photo || staffPhoto;
-          if (stByEmail.store) {
-            storeName = stByEmail.store.store_name;
-            storeLocation = stByEmail.store.address || stByEmail.store.city || 'Cabang';
-            storeCode = `ST-${stByEmail.store.store_id.toString()}`;
-          }
+      staffId = st.staff_id;
+      storeId = st.store_id;
+      targetWorkspaceId = st.store?.workspace_id || null;
+      staffName = st.name;
+      staffPosition = extra.position || 'Auditor Lapangan';
+      staffPhoto = st.photo || staffPhoto;
+      if (st.store) {
+        storeName = st.store.store_name;
+        storeLocation = st.store.address || st.store.city || 'Cabang';
+        storeCode = `ST-${st.store.store_id.toString()}`;
+      }
+    } else {
+      // Manager Preview (Admin / Super Admin / Divisi Teknis): Wajib dalam cakupan workspace tenant user
+      if (req.query.staffId) {
+        const cleanStaffId = toBigIntSafe(req.query.staffId, ['staff-']);
+        if (!cleanStaffId) {
+          return res.status(400).json({ status: 'error', message: 'Format ID staf tidak valid.' });
         }
-      } catch (e) {}
-    }
-
-    if (req.query.staffId && !isStaffUser) {
-      // Dukungan query param jika Admin/SuperAdmin ingin melihat jadwal staf tertentu
-      try {
-        const cleanStaffId = req.query.staffId.toString().replace(/^staff-/, '');
         const st = await prisma.staff.findUnique({
-          where: { staff_id: BigInt(cleanStaffId) },
+          where: { staff_id: cleanStaffId },
           include: { store: true },
         });
-        if (st) {
-          const extra = await getStaffExtra(st.staff_id);
-          staffId = st.staff_id;
-          storeId = st.store_id;
-          staffName = st.name;
-          staffPosition = extra.position || 'Auditor Lapangan';
-          staffPhoto = st.photo || null;
-          if (st.store) {
-            storeName = st.store.store_name;
-            storeLocation = st.store.address || st.store.city || 'Cabang';
-            storeCode = `ST-${st.store.store_id.toString()}`;
+        if (!st) {
+          return res.status(404).json({ status: 'error', message: 'Staf tidak ditemukan.' });
+        }
+        const access = await assertWorkspaceAccess(user, st.store?.workspace_id);
+        if (!access.ok) {
+          return res.status(access.status === 400 ? 403 : access.status).json({
+            status: 'error',
+            message: access.message,
+          });
+        }
+        const extra = await getStaffExtra(st.staff_id);
+        staffId = st.staff_id;
+        storeId = st.store_id;
+        targetWorkspaceId = st.store?.workspace_id || null;
+        staffName = st.name;
+        staffPosition = extra.position || 'Auditor Lapangan';
+        staffPhoto = st.photo || null;
+        if (st.store) {
+          storeName = st.store.store_name;
+          storeLocation = st.store.address || st.store.city || 'Cabang';
+          storeCode = `ST-${st.store.store_id.toString()}`;
+        }
+      } else if (req.query.storeId || req.headers['x-store-id']) {
+        const stAccess = await assertStoreAccess(user, req.query.storeId || req.headers['x-store-id']);
+        if (!stAccess.ok) {
+          return res.status(stAccess.status).json({ status: 'error', message: stAccess.message });
+        }
+        storeId = stAccess.store.store_id;
+        targetWorkspaceId = stAccess.store.workspace_id;
+      } else {
+        const scope = await resolveScopedWorkspaceContext(
+          user,
+          req.query.workspaceId || req.headers['x-workspace-id'],
+          { teknisUseSingleDefaultOnAll: true }
+        );
+        if (!scope.ok) {
+          return res.status(scope.status).json({ status: 'error', message: scope.message });
+        }
+        if (scope.workspaceIds.length > 0) {
+          const storeScopeFilter = scope.prismaWorkspaceWhere.workspace_id
+            ? { workspace_id: scope.prismaWorkspaceWhere.workspace_id }
+            : { workspace: scope.prismaWorkspaceWhere };
+          const firstScopedStore = await prisma.store.findFirst({
+            where: scope.targetWorkspaceId ? { workspace_id: scope.targetWorkspaceId } : storeScopeFilter,
+            orderBy: { store_id: 'asc' },
+          });
+          if (firstScopedStore) {
+            storeId = firstScopedStore.store_id;
+            targetWorkspaceId = firstScopedStore.workspace_id;
           }
         }
-      } catch (e) {}
-    }
-
-    // Resolusi Store ID spesifik: Staf HANYA melihat jadwal untuk toko yang dinaungi
-    let targetStoreId = null;
-
-    if (storeId) {
-      targetStoreId = storeId;
-    } else if (req.query.storeId || req.headers['x-store-id']) {
-      const sId = (req.query.storeId || req.headers['x-store-id']).toString().replace(/^str-/, '').replace(/^st-/, '');
-      if (!isNaN(Number(sId))) {
-        targetStoreId = BigInt(sId);
-      }
-    } else if (user?.storeId) {
-      const sId = user.storeId.toString().replace(/^str-/, '').replace(/^st-/, '');
-      if (!isNaN(Number(sId))) {
-        targetStoreId = BigInt(sId);
       }
     }
 
-    if (!targetStoreId && user?.storeName) {
-      const sByName = await prisma.store.findFirst({
-        where: { store_name: { contains: user.storeName.trim(), mode: 'insensitive' } },
-      });
-      if (sByName) targetStoreId = sByName.store_id;
-    }
-
-    // Default ke toko pertama jika belum terdefinisi
+    const targetStoreId = storeId;
     if (!targetStoreId) {
-      const firstStore = await prisma.store.findFirst({
-        orderBy: { store_id: 'asc' },
+      return res.status(200).json({
+        status: 'success',
+        data: {
+          staff: {
+            name: staffName,
+            shift: staffPosition || 'Auditor Lapangan',
+            dateFormatted: getWibDateParts(new Date()).formattedDateLong,
+            photo: staffPhoto || null,
+          },
+          store: null,
+          progress: {
+            completed: 0,
+            total: 0,
+            expired: 0,
+            late: 0,
+            percentage: 0,
+            label: 'Belum ada gerai yang ditugaskan',
+          },
+          schedules: [],
+        },
       });
-      if (firstStore) targetStoreId = firstStore.store_id;
     }
 
     // Update informasi gerai aktif sesuai targetStoreId
-    if (targetStoreId) {
-      const activeStore = await prisma.store.findUnique({
-        where: { store_id: targetStoreId },
-      });
-      if (activeStore) {
-        storeId = activeStore.store_id;
-        storeName = activeStore.store_name;
-        storeLocation = activeStore.address || activeStore.city || 'Cabang';
-        storeCode = `ST-${activeStore.store_id.toString()}`;
-      }
+    const activeStore = await prisma.store.findUnique({
+      where: { store_id: targetStoreId },
+    });
+    if (activeStore) {
+      storeId = activeStore.store_id;
+      targetWorkspaceId = activeStore.workspace_id;
+      storeName = activeStore.store_name;
+      storeLocation = activeStore.address || activeStore.city || 'Cabang';
+      storeCode = `ST-${activeStore.store_id.toString()}`;
     }
 
     // 2. Kriteria pencarian jadwal dari database: HANYA untuk toko yang dinaungi
@@ -1131,9 +1337,7 @@ exports.getMySchedules = async (req, res) => {
     };
 
     // Auto-sync jadwal kedaluwarsa ke database checklist_report sebelum mengambil data
-    if (targetStoreId) {
-      await syncExpiredSchedulesToDb({ storeId: targetStoreId, staffId });
-    }
+    await syncExpiredSchedulesToDb({ storeId: targetStoreId, staffId });
 
     // 3. Query PostgreSQL Schedule dengan relasi lengkap
     const schedules = await prisma.schedule.findMany({
@@ -1188,8 +1392,11 @@ exports.getMySchedules = async (req, res) => {
     // 4. Filter HANYA jadwal yang berlaku hari ini (realtime)
     const todaySchedules = schedules.filter((s) => doesScheduleApplyOnDate(s, todayStr, dayOfWeekShort));
 
-    // Ambil data libur toko (store_holiday) aktif hari ini
-    const todayStoreHolidays = await getActiveHolidaysOnDate(todayStr);
+    // Ambil data libur toko (store_holiday) aktif hari ini terisolasi per workspace
+    const todayStoreHolidays = await getActiveHolidaysOnDate(
+      todayStr,
+      targetWorkspaceId ? [targetWorkspaceId] : null
+    );
 
     // 5. Transformasi data jadwal real hari ini dari database
     const scheduleItems = todaySchedules.map((s) => {
@@ -1407,12 +1614,7 @@ exports.getMySchedules = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('❌ Error in getMySchedules:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal memuat jadwal tugas staff',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal memuat jadwal tugas staff');
   }
 };
 
@@ -1432,33 +1634,26 @@ exports.getStaffScheduleDetail = async (req, res) => {
     const scheduleId = BigInt(rawId);
 
     const user = await extractUser(req);
-    const isStaffUser =
-      user &&
-      (user.role === 'Staff' ||
-       user.role === 'Auditor Lapangan' ||
-       user.id?.toString().startsWith('staff-') ||
-       user.role?.toLowerCase().includes('staff') ||
-       user.role?.toLowerCase().includes('auditor'));
+    if (!user) {
+      return res.status(401).json({ status: 'error', message: 'Autentikasi diperlukan.' });
+    }
+    const isStaffUser = isStaffRole(user);
 
-    let viewerStoreId = null;
     if (isStaffUser) {
-      let st = null;
-      const cleanStaffId = user.rawId || user.id?.toString().replace(/^staff-/, '');
-      if (cleanStaffId && !isNaN(Number(cleanStaffId))) {
-        st = await prisma.staff.findUnique({ where: { staff_id: BigInt(cleanStaffId) } });
+      const cleanStaffId = toBigIntSafe(user.rawId, ['staff-']);
+      const st = cleanStaffId
+        ? await prisma.staff.findUnique({ where: { staff_id: cleanStaffId } })
+        : null;
+      if (!st) {
+        return res.status(403).json({ status: 'error', message: 'Akun staf tidak ditemukan.' });
       }
-      if (!st && user.email) {
-        st = await prisma.staff.findUnique({ where: { email: user.email.trim().toLowerCase() } });
-      }
-      if (st) {
-        const extra = await getStaffExtra(st.staff_id);
-        if (extra.deleted_at || st.status === 'inactive' || st.status === 'Nonaktif') {
-          return res.status(403).json({
-            status: 'error',
-            message: 'Akun staf Anda berstatus Nonaktif atau telah dihapus.',
-          });
-        }
-        viewerStoreId = st.store_id;
+      const extra = await getStaffExtra(st.staff_id);
+      if (extra.deleted_at || st.status === 'inactive' || st.status === 'Nonaktif') {
+        return res.status(403).json({
+          status: 'error',
+          code: 'ACCOUNT_INACTIVE',
+          message: 'Akun staf Anda berstatus Nonaktif atau telah dihapus.',
+        });
       }
     }
 
@@ -1481,10 +1676,11 @@ exports.getStaffScheduleDetail = async (req, res) => {
       });
     }
 
-    if (isStaffUser && viewerStoreId && baseSchedule.store_id.toString() !== viewerStoreId.toString()) {
-      return res.status(403).json({
+    const storeAccess = await assertStoreAccess(user, baseSchedule.store_id);
+    if (!storeAccess.ok) {
+      return res.status(storeAccess.status).json({
         status: 'error',
-        message: 'Anda tidak memiliki akses ke jadwal cabang gerai lain.',
+        message: storeAccess.message || 'Anda tidak memiliki akses ke jadwal cabang gerai lain.',
       });
     }
 
@@ -1601,7 +1797,10 @@ exports.getStaffScheduleDetail = async (req, res) => {
     const isRecurring = isRecurringSchedule(currentSchedule);
     const appliesToday = doesScheduleApplyOnDate(currentSchedule, todayStr, wibNow.dayOfWeekShort);
 
-    const todayStoreHolidays = await getActiveHolidaysOnDate(todayStr);
+    const todayStoreHolidays = await getActiveHolidaysOnDate(
+      todayStr,
+      currentSchedule.store?.workspace_id ? [currentSchedule.store.workspace_id] : null
+    );
     const holidayEval = evaluateHolidayForSchedule(currentSchedule, todayStr, todayStoreHolidays);
 
     const reports = currentSchedule.checklist_report || [];
@@ -1721,12 +1920,7 @@ exports.getStaffScheduleDetail = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('❌ Error in getStaffScheduleDetail:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal memuat detail jadwal audit',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal memuat detail jadwal audit');
   }
 };
 
@@ -1736,6 +1930,11 @@ exports.getStaffScheduleDetail = async (req, res) => {
  */
 exports.submitStaffAudit = async (req, res) => {
   try {
+    const user = await extractUser(req);
+    if (!user) {
+      return res.status(401).json({ status: 'error', message: 'Autentikasi diperlukan.' });
+    }
+
     const rawId = req.params.id.toString().replace(/^sch-/, '');
     if (!rawId || isNaN(Number(rawId))) {
       return res.status(400).json({
@@ -1775,43 +1974,37 @@ exports.submitStaffAudit = async (req, res) => {
       });
     }
 
-    const user = await extractUser(req);
-    const isStaffUser =
-      user &&
-      (user.role === 'Staff' ||
-       user.role === 'Auditor Lapangan' ||
-       user.id?.toString().startsWith('staff-') ||
-       user.role?.toLowerCase().includes('staff') ||
-       user.role?.toLowerCase().includes('auditor'));
+    const storeAccess = await assertStoreAccess(user, schedule.store_id);
+    if (!storeAccess.ok) {
+      return res.status(storeAccess.status).json({
+        status: 'error',
+        message: storeAccess.message || 'Anda tidak dapat menyerahkan laporan audit untuk cabang gerai lain.',
+      });
+    }
+
+    const isStaffUser = isStaffRole(user);
 
     let staffId = null;
     let resolvedStaff = null;
     let staffPosition = 'Auditor Lapangan';
 
-    if (user?.id) {
-      const rawStaffId = (user.rawId || user.id.toString()).replace(/^staff-/, '');
-      if (isStaffUser && rawStaffId && !isNaN(Number(rawStaffId))) {
-        resolvedStaff = await prisma.staff.findUnique({
-          where: { staff_id: BigInt(rawStaffId) },
-        });
+    if (isStaffUser) {
+      const cleanStaffId = toBigIntSafe(user.rawId, ['staff-']);
+      resolvedStaff = cleanStaffId
+        ? await prisma.staff.findUnique({ where: { staff_id: cleanStaffId } })
+        : null;
+      if (!resolvedStaff) {
+        return res.status(403).json({ status: 'error', message: 'Akun staf tidak ditemukan.' });
       }
-    }
-
-    if (!resolvedStaff && user?.email) {
-      resolvedStaff = await prisma.staff.findUnique({
-        where: { email: user.email.trim().toLowerCase() },
-      });
-    }
-
-    if (resolvedStaff) {
       const extra = await getStaffExtra(resolvedStaff.staff_id);
       if (extra.deleted_at || resolvedStaff.status === 'inactive' || resolvedStaff.status === 'Nonaktif') {
         return res.status(403).json({
           status: 'error',
+          code: 'ACCOUNT_INACTIVE',
           message: 'Akun staf Anda berstatus Nonaktif atau telah dihapus.',
         });
       }
-      if (isStaffUser && resolvedStaff.store_id && resolvedStaff.store_id.toString() !== schedule.store_id.toString()) {
+      if (resolvedStaff.store_id && resolvedStaff.store_id !== schedule.store_id) {
         return res.status(403).json({
           status: 'error',
           message: 'Anda tidak dapat menyerahkan laporan audit untuk cabang gerai lain.',
@@ -1819,10 +2012,8 @@ exports.submitStaffAudit = async (req, res) => {
       }
       staffId = resolvedStaff.staff_id;
       staffPosition = extra.position || 'Auditor Lapangan';
-    }
-
-    if (!staffId) {
-      // Cari staf aktif yang tidak terhapus pada jadwal atau toko terkait
+    } else {
+      // Manager/Supervisor preview: hanya boleh menggunakan staf aktif di gerai tersebut (tanpa fallback lintas toko/tenant)
       const activeStoreStaff = await prisma.$queryRawUnsafe(`
         SELECT s.staff_id, s.name, s.position
         FROM staff s
@@ -1837,27 +2028,13 @@ exports.submitStaffAudit = async (req, res) => {
         staffId = activeStoreStaff[0].staff_id;
         resolvedStaff = activeStoreStaff[0];
         staffPosition = activeStoreStaff[0].position || 'Auditor Lapangan';
-      } else {
-        const anyActiveStaff = await prisma.$queryRawUnsafe(`
-          SELECT staff_id, name, position
-          FROM staff
-          WHERE deleted_at IS NULL
-            AND status IN ('active', 'Aktif')
-          ORDER BY staff_id ASC
-          LIMIT 1
-        `);
-        if (anyActiveStaff && anyActiveStaff[0]) {
-          staffId = anyActiveStaff[0].staff_id;
-          resolvedStaff = anyActiveStaff[0];
-          staffPosition = anyActiveStaff[0].position || 'Auditor Lapangan';
-        }
       }
     }
 
     if (!staffId) {
       return res.status(400).json({
         status: 'error',
-        message: 'Tidak dapat mengidentifikasi staf pelapor aktif.',
+        message: 'Tidak dapat mengidentifikasi staf pelapor aktif pada gerai ini.',
       });
     }
 
@@ -1894,8 +2071,11 @@ exports.submitStaffAudit = async (req, res) => {
       });
     }
 
-    // Cek apakah toko / jadwal sedang berstatus LIBUR hari ini
-    const storeHolidays = await getActiveHolidaysOnDate(todayDateStr);
+    // Cek apakah toko / jadwal sedang berstatus LIBUR hari ini terisolasi per workspace
+    const storeHolidays = await getActiveHolidaysOnDate(
+      todayDateStr,
+      schedule.store?.workspace_id ? [schedule.store.workspace_id] : null
+    );
     const holidayEval = evaluateHolidayForSchedule(schedule, todayDateStr, storeHolidays);
 
     if (holidayEval.isHoliday) {
@@ -2030,8 +2210,11 @@ exports.submitStaffAudit = async (req, res) => {
 
       let validTaskId = rawTaskId;
       try {
-        const taskExists = await prisma.template_task.findUnique({
-          where: { task_id: rawTaskId },
+        const taskExists = await prisma.template_task.findFirst({
+          where: {
+            task_id: rawTaskId,
+            ...(schedule?.template_id ? { template_category: { template_id: schedule.template_id } } : {}),
+          },
           select: { task_id: true }
         });
         if (!taskExists && fallbackTemplateTask) {
@@ -2067,13 +2250,13 @@ exports.submitStaffAudit = async (req, res) => {
 
       if (createdAnswer && ans.photo && typeof ans.photo === 'string') {
         try {
-          const encryptedPhoto = ans.photo.startsWith('ENC:v1:') ? ans.photo : encryptImageData(ans.photo);
+          const encryptedPhoto = encryptBinaryAttachment(ans.photo);
           await prisma.attachment.create({
             data: {
               report_id: report.report_id,
               answer_id: createdAnswer.answer_id,
               caption: `Bukti Foto Task #${validTaskId}`,
-              file_url: Buffer.from(encryptedPhoto, 'utf8'),
+              file_url: encryptedPhoto,
               file_type: 'task_photo',
             },
           });
@@ -2085,14 +2268,14 @@ exports.submitStaffAudit = async (req, res) => {
 
     if (selfiePhoto && typeof selfiePhoto === 'string') {
       try {
-        const encryptedSelfie = selfiePhoto.startsWith('ENC:v1:') ? selfiePhoto : encryptImageData(selfiePhoto);
+        const encryptedSelfie = encryptBinaryAttachment(selfiePhoto);
         await prisma.attachment.create({
           data: {
             report_id: report.report_id,
             caption: 'Foto Verifikasi Kehadiran Bertugas',
             signer_name: resolvedSignerName,
             signer_role: resolvedSignerRole,
-            file_url: Buffer.from(encryptedSelfie, 'utf8'),
+            file_url: encryptedSelfie,
             file_type: 'report_photo',
           },
         });
@@ -2103,14 +2286,14 @@ exports.submitStaffAudit = async (req, res) => {
 
     if (signature && typeof signature === 'string') {
       try {
-        const encryptedSig = signature.startsWith('ENC:v1:') ? signature : encryptImageData(signature);
+        const encryptedSig = encryptBinaryAttachment(signature, 'image/png');
         await prisma.attachment.create({
           data: {
             report_id: report.report_id,
             caption: 'Tanda Tangan Digital Verifikasi Staff',
             signer_name: resolvedSignerName,
             signer_role: resolvedSignerRole,
-            file_url: Buffer.from(encryptedSig, 'utf8'),
+            file_url: encryptedSig,
             file_type: 'signature',
           },
         });
@@ -2121,6 +2304,28 @@ exports.submitStaffAudit = async (req, res) => {
 
     const reportNumber = `CHK-${todayDateStr.replace(/-/g, '')}-${report.report_id.toString().padStart(4, '0')}`;
     const submittedAtFormatted = wibNow.formattedDateTime;
+
+    // Emit Realtime Event ke Dashboard & Monitoring Admin via SSE
+    const wsId = schedule?.store?.workspace_id;
+    if (wsId) {
+      try {
+        const { emitWorkspaceEvent } = require('../utils/realtimeEmitter');
+        emitWorkspaceEvent(wsId, 'audit:submitted', {
+          reportId: report.report_id.toString(),
+          reportNumber,
+          scheduleId: scheduleId.toString(),
+          storeName: schedule?.store?.store_name || 'Outlet',
+          status: reportStatus,
+          signerName: resolvedSignerName,
+        });
+        emitWorkspaceEvent(wsId, 'schedule:updated', {
+          scheduleId: scheduleId.toString(),
+          action: 'submit',
+        });
+      } catch (sseErr) {
+        console.warn('Realtime event emit error:', sseErr.message);
+      }
+    }
 
     return res.status(201).json({
       status: 'success',
@@ -2145,12 +2350,7 @@ exports.submitStaffAudit = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('❌ Error in submitStaffAudit:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal menyerahkan laporan audit',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal menyerahkan laporan audit');
   }
 };
 
@@ -2161,36 +2361,31 @@ exports.submitStaffAudit = async (req, res) => {
 exports.getReportDetail = async (req, res) => {
   try {
     const user = await extractUser(req);
-    const isStaffUser =
-      user &&
-      (user.role === 'Staff' ||
-       user.role === 'Auditor Lapangan' ||
-       user.id?.toString().startsWith('staff-') ||
-       user.role?.toLowerCase().includes('staff') ||
-       user.role?.toLowerCase().includes('auditor'));
+    if (!user) {
+      return res.status(401).json({ status: 'error', message: 'Autentikasi diperlukan.' });
+    }
+    const isStaffUser = isStaffRole(user);
 
     let viewerStaffId = null;
     let viewerStoreId = null;
     if (isStaffUser) {
-      let st = null;
-      const cleanStaffId = user.rawId || user.id?.toString().replace(/^staff-/, '');
-      if (cleanStaffId && !isNaN(Number(cleanStaffId))) {
-        st = await prisma.staff.findUnique({ where: { staff_id: BigInt(cleanStaffId) } });
+      const cleanStaffId = toBigIntSafe(user.rawId, ['staff-']);
+      const st = cleanStaffId
+        ? await prisma.staff.findUnique({ where: { staff_id: cleanStaffId } })
+        : null;
+      if (!st) {
+        return res.status(403).json({ status: 'error', message: 'Akun staf tidak ditemukan.' });
       }
-      if (!st && user.email) {
-        st = await prisma.staff.findUnique({ where: { email: user.email.trim().toLowerCase() } });
+      const extra = await getStaffExtra(st.staff_id);
+      if (extra.deleted_at || st.status === 'inactive' || st.status === 'Nonaktif') {
+        return res.status(403).json({
+          status: 'error',
+          code: 'ACCOUNT_INACTIVE',
+          message: 'Akun staf Anda berstatus Nonaktif atau telah dihapus.',
+        });
       }
-      if (st) {
-        const extra = await getStaffExtra(st.staff_id);
-        if (extra.deleted_at || st.status === 'inactive' || st.status === 'Nonaktif') {
-          return res.status(403).json({
-            status: 'error',
-            message: 'Akun staf Anda berstatus Nonaktif atau telah dihapus.',
-          });
-        }
-        viewerStaffId = st.staff_id;
-        viewerStoreId = st.store_id;
-      }
+      viewerStaffId = st.staff_id;
+      viewerStoreId = st.store_id;
     }
 
     const rawParam = req.params.id ? req.params.id.toString() : '';
@@ -2225,16 +2420,37 @@ exports.getReportDetail = async (req, res) => {
           message: 'Laporan audit tidak ditemukan di database.',
         });
       }
-      if (isStaffUser && viewerStoreId && report.schedule?.store_id?.toString() !== viewerStoreId.toString()) {
-        return res.status(403).json({
+      const access = await assertStoreAccess(user, report.schedule?.store_id);
+      if (!access.ok) {
+        return res.status(access.status).json({
           status: 'error',
-          message: 'Anda tidak memiliki akses ke laporan audit gerai lain.',
+          message: access.message || 'Anda tidak memiliki akses ke laporan audit gerai/tenant lain.',
         });
       }
     } else {
-      const latestWhere = viewerStoreId
-        ? { schedule: { store_id: viewerStoreId } }
-        : (viewerStaffId ? { staff_id: viewerStaffId } : {});
+      let latestWhere = null;
+      if (isStaffUser) {
+        latestWhere = viewerStoreId
+          ? { schedule: { store_id: viewerStoreId } }
+          : { staff_id: viewerStaffId };
+      } else {
+        const scope = await resolveScopedWorkspaceContext(
+          user,
+          req.query.workspaceId || req.headers['x-workspace-id'],
+          { teknisUseSingleDefaultOnAll: true }
+        );
+        if (!scope.ok) {
+          return res.status(scope.status).json({ status: 'error', message: scope.message });
+        }
+        if (scope.workspaceIds.length === 0) {
+          return res.status(404).json({ status: 'error', message: 'Laporan audit tidak ditemukan di database.' });
+        }
+        const storeScopeFilter = scope.prismaWorkspaceWhere.workspace_id
+          ? { workspace_id: scope.prismaWorkspaceWhere.workspace_id }
+          : { workspace: scope.prismaWorkspaceWhere };
+        latestWhere = { schedule: { store: storeScopeFilter } };
+      }
+
       report = await prisma.checklist_report.findFirst({
         where: latestWhere,
         include: {
@@ -2322,11 +2538,7 @@ exports.getReportDetail = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('❌ Error in getReportDetail:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal memuat detail laporan: ' + error.message,
-    });
+    return sendSafeError(res, error, 'Gagal memuat detail laporan');
   }
 };
 
@@ -2337,73 +2549,92 @@ exports.getReportDetail = async (req, res) => {
 exports.getMyHistory = async (req, res) => {
   try {
     const user = await extractUser(req);
+    if (!user) {
+      return res.status(401).json({ status: 'error', message: 'Autentikasi diperlukan.' });
+    }
     let staffId = null;
     let storeId = null;
+    let managerScopeStoreFilter = null;
 
-    const isStaffUser =
-      user &&
-      (user.role === 'Staff' ||
-       user.role === 'Auditor Lapangan' ||
-       user.id?.toString().startsWith('staff-') ||
-       user.role?.toLowerCase().includes('staff') ||
-       user.role?.toLowerCase().includes('auditor'));
+    const isStaffUser = isStaffRole(user);
 
-    // 1. Prioritaskan resolusi store_id dari database tabel staff (bukan cache client/query param)
+    // 1. Jika Staff: identifikasi STRICT dari JWT/DB, tolak storeId lintas cabang
     if (isStaffUser) {
-      let st = null;
-      const cleanStaffId = user.rawId || user.id?.toString().replace(/^staff-/, '');
-      if (cleanStaffId && !isNaN(Number(cleanStaffId))) {
-        st = await prisma.staff.findUnique({ where: { staff_id: BigInt(cleanStaffId) } });
+      const cleanStaffId = toBigIntSafe(user.rawId, ['staff-']);
+      const st = cleanStaffId
+        ? await prisma.staff.findUnique({ where: { staff_id: cleanStaffId } })
+        : null;
+      if (!st) {
+        return res.status(403).json({ status: 'error', message: 'Akun staf tidak ditemukan.' });
       }
-      if (!st && user.email) {
-        st = await prisma.staff.findUnique({ where: { email: user.email.trim().toLowerCase() } });
+      const extra = await getStaffExtra(st.staff_id);
+      if (extra.deleted_at || st.status === 'inactive' || st.status === 'Nonaktif') {
+        return res.status(403).json({
+          status: 'error',
+          code: 'ACCOUNT_INACTIVE',
+          message: 'Akun staf Anda berstatus Nonaktif atau telah dihapus.',
+        });
       }
-      if (st) {
-        const extra = await getStaffExtra(st.staff_id);
-        if (extra.deleted_at || st.status === 'inactive' || st.status === 'Nonaktif') {
+      if (req.query.storeId) {
+        const reqStoreId = toBigIntSafe(req.query.storeId, ['str-', 'st-', 'toko-']);
+        if (!reqStoreId || (st.store_id && reqStoreId !== st.store_id)) {
           return res.status(403).json({
             status: 'error',
-            message: 'Akun staf Anda berstatus Nonaktif atau telah dihapus.',
+            message: 'Anda hanya diperbolehkan mengakses riwayat gerai penugasan Anda sendiri.',
+          });
+        }
+      }
+      staffId = st.staff_id;
+      storeId = st.store_id;
+    } else {
+      // Manager Preview (Admin / SA / Teknis)
+      if (req.query.staffId) {
+        const cleanStaffId = toBigIntSafe(req.query.staffId, ['staff-']);
+        if (!cleanStaffId) {
+          return res.status(400).json({ status: 'error', message: 'Format ID staf tidak valid.' });
+        }
+        const st = await prisma.staff.findUnique({
+          where: { staff_id: cleanStaffId },
+          include: { store: true },
+        });
+        if (!st) {
+          return res.status(404).json({ status: 'error', message: 'Staf tidak ditemukan.' });
+        }
+        const access = await assertWorkspaceAccess(user, st.store?.workspace_id);
+        if (!access.ok) {
+          return res.status(access.status === 400 ? 403 : access.status).json({
+            status: 'error',
+            message: access.message,
           });
         }
         staffId = st.staff_id;
         storeId = st.store_id;
-      }
-    } else if (user?.email) {
-      const st = await prisma.staff.findUnique({
-        where: { email: user.email.trim().toLowerCase() },
-      });
-      if (st) {
-        const extra = await getStaffExtra(st.staff_id);
-        if (extra.deleted_at || st.status === 'inactive' || st.status === 'Nonaktif') {
-          return res.status(403).json({
-            status: 'error',
-            message: 'Akun staf Anda berstatus Nonaktif atau telah dihapus.',
+      } else if (req.query.storeId || req.headers['x-store-id']) {
+        const stAccess = await assertStoreAccess(user, req.query.storeId || req.headers['x-store-id']);
+        if (!stAccess.ok) {
+          return res.status(stAccess.status).json({ status: 'error', message: stAccess.message });
+        }
+        storeId = stAccess.store.store_id;
+      } else {
+        const scope = await resolveScopedWorkspaceContext(
+          user,
+          req.query.workspaceId || req.headers['x-workspace-id'],
+          { teknisUseSingleDefaultOnAll: true }
+        );
+        if (!scope.ok) {
+          return res.status(scope.status).json({ status: 'error', message: scope.message });
+        }
+        if (scope.workspaceIds.length === 0) {
+          return res.status(200).json({
+            status: 'success',
+            totalReports: 0,
+            store: null,
+            data: [],
           });
         }
-        staffId = st.staff_id;
-        storeId = st.store_id;
-      }
-    }
-
-    if (req.query.staffId && !isStaffUser) {
-      try {
-        const cleanStaffId = req.query.staffId.toString().replace(/^staff-/, '');
-        const st = await prisma.staff.findUnique({ where: { staff_id: BigInt(cleanStaffId) } });
-        if (st) {
-          staffId = st.staff_id;
-          storeId = st.store_id;
-        }
-      } catch (e) {}
-    }
-
-    if (!storeId) {
-      if (req.query.storeId || req.headers['x-store-id']) {
-        const sId = (req.query.storeId || req.headers['x-store-id']).toString().replace(/^str-/, '').replace(/^st-/, '');
-        if (!isNaN(Number(sId))) storeId = BigInt(sId);
-      } else if (user?.storeId) {
-        const sId = user.storeId.toString().replace(/^str-/, '').replace(/^st-/, '');
-        if (!isNaN(Number(sId))) storeId = BigInt(sId);
+        managerScopeStoreFilter = scope.prismaWorkspaceWhere.workspace_id
+          ? { workspace_id: scope.prismaWorkspaceWhere.workspace_id }
+          : { workspace: scope.prismaWorkspaceWhere };
       }
     }
 
@@ -2411,9 +2642,18 @@ exports.getMyHistory = async (req, res) => {
     if (storeId) {
       whereClause.schedule = { store_id: storeId };
       await syncExpiredSchedulesToDb({ storeId, staffId });
+    } else if (managerScopeStoreFilter) {
+      whereClause.schedule = { store: managerScopeStoreFilter };
+    } else {
+      return res.status(200).json({
+        status: 'success',
+        totalReports: 0,
+        store: null,
+        data: [],
+      });
     }
 
-    let reports = await prisma.checklist_report.findMany({
+    const reports = await prisma.checklist_report.findMany({
       where: whereClause,
       include: {
         schedule: {
@@ -2431,27 +2671,6 @@ exports.getMyHistory = async (req, res) => {
         { created_at: 'desc' },
       ],
     });
-
-    // Jangan bocorkan laporan gerai lain jika gerai staf ini memang belum memiliki riwayat
-    if (reports.length === 0 && !storeId) {
-      reports = await prisma.checklist_report.findMany({
-        include: {
-          schedule: {
-            include: {
-              store: true,
-              checklist_template: true,
-            },
-          },
-          staff: true,
-          checklist_answer: true,
-          attachment: true,
-        },
-        orderBy: [
-          { completed_at: 'desc' },
-          { created_at: 'desc' },
-        ],
-      });
-    }
 
     const staffExtrasMap = await getStaffExtrasMap(reports.map((r) => r.staff_id));
     const groupsMap = new Map();
@@ -2614,10 +2833,6 @@ exports.getMyHistory = async (req, res) => {
       data: resultGroups,
     });
   } catch (error) {
-    console.error('❌ [getMyHistory] Error:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal mengambil riwayat audit staff: ' + error.message,
-    });
+    return sendSafeError(res, error, 'Gagal mengambil riwayat audit staff');
   }
 };

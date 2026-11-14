@@ -1,5 +1,6 @@
 import { TemplateItem, TemplateStats, TemplateStatus } from "@/types/template";
 import { AuthService } from "@/lib/auth";
+import { apiFetch } from "@/lib/api-client";
 
 const getBackendUrl = (): string => {
   if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
@@ -21,14 +22,6 @@ const getAuthHeaders = (): Record<string, string> => {
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
-  if (rawId && !rawId.startsWith("adm-")) {
-    headers["x-super-admin-id"] = rawId;
-    headers["x-user-id"] = rawId;
-  }
-  if (user?.email) {
-    headers["x-user-email"] = user.email;
-  }
   if (activeWs?.id) {
     headers["x-workspace-id"] = activeWs.id;
   } else if (user?.workspaceId) {
@@ -133,7 +126,7 @@ export const TemplateService = {
       }
 
       const queryString = params.toString() ? `?${params.toString()}` : "";
-      const res = await fetch(`${BACKEND_URL}/api/templates${queryString}`, {
+      const res = await apiFetch(`${BACKEND_URL}/api/templates${queryString}`, {
         method: "GET",
         headers,
       });
@@ -201,7 +194,7 @@ export const TemplateService = {
 
   async getByIdAsync(id: string): Promise<TemplateItem | undefined> {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/templates/${id}`, {
+      const res = await apiFetch(`${BACKEND_URL}/api/templates/${id}`, {
         headers: getAuthHeaders(),
       });
       if (res.ok) {
@@ -229,7 +222,7 @@ export const TemplateService = {
         headers["x-workspace-id"] = targetWs;
       }
 
-      const res = await fetch(`${BACKEND_URL}/api/templates`, {
+      const res = await apiFetch(`${BACKEND_URL}/api/templates`, {
         method: "POST",
         headers,
         body: JSON.stringify(data),
@@ -260,7 +253,7 @@ export const TemplateService = {
   create(data: Omit<TemplateItem, "id">): TemplateItem {
     // Background async backend sync
     if (typeof window !== "undefined") {
-      fetch(`${BACKEND_URL}/api/templates`, {
+      apiFetch(`${BACKEND_URL}/api/templates`, {
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify(data),
@@ -299,7 +292,7 @@ export const TemplateService = {
 
   async updateAsync(id: string, data: Partial<TemplateItem>): Promise<TemplateItem | null> {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/templates/${id}`, {
+      const res = await apiFetch(`${BACKEND_URL}/api/templates/${id}`, {
         method: "PUT",
         headers: getAuthHeaders(),
         body: JSON.stringify(data),
@@ -333,7 +326,7 @@ export const TemplateService = {
   update(id: string, data: Partial<TemplateItem>): TemplateItem | null {
     // Background async backend sync
     if (typeof window !== "undefined") {
-      fetch(`${BACKEND_URL}/api/templates/${id}`, {
+      apiFetch(`${BACKEND_URL}/api/templates/${id}`, {
         method: "PUT",
         headers: getAuthHeaders(),
         body: JSON.stringify(data),
@@ -374,7 +367,7 @@ export const TemplateService = {
 
   async toggleStatusAsync(id: string, status?: TemplateStatus): Promise<TemplateItem | null> {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/templates/${id}/status`, {
+      const res = await apiFetch(`${BACKEND_URL}/api/templates/${id}/status`, {
         method: "PATCH",
         headers: getAuthHeaders(),
         body: JSON.stringify({ status }),
@@ -404,7 +397,7 @@ export const TemplateService = {
 
   async deleteAsync(id: string, permanent = false): Promise<boolean> {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/templates/${id}${permanent ? "?permanent=true" : ""}`, {
+      const res = await apiFetch(`${BACKEND_URL}/api/templates/${id}${permanent ? "?permanent=true" : ""}`, {
         method: "DELETE",
         headers: getAuthHeaders(),
       });
@@ -426,7 +419,7 @@ export const TemplateService = {
 
   delete(id: string): boolean {
     if (typeof window !== "undefined") {
-      fetch(`${BACKEND_URL}/api/templates/${id}`, {
+      apiFetch(`${BACKEND_URL}/api/templates/${id}`, {
         method: "DELETE",
         headers: getAuthHeaders(),
       }).catch((e) => console.warn("Background template delete error:", e));

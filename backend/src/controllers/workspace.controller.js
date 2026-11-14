@@ -1,5 +1,17 @@
 const prisma = require('../config/prisma');
 const { extractUser } = require('../middlewares/auth.middleware');
+const {
+  isTeknisUser,
+  toBigIntSafe,
+  getOrCreateTeknisInternalSuperAdmin,
+  getTeknisWorkspaceWhere,
+} = require('../utils/teknisScope');
+const {
+  isSuperAdminRole,
+  isAdminRole,
+  assertWorkspaceAccess,
+  sendSafeError,
+} = require('../utils/tenantScope');
 
 // Helper to format workspace data for frontend
 const formatWorkspace = (ws) => {
@@ -34,8 +46,12 @@ const formatWorkspace = (ws) => {
 // HANYA menampilkan workspace yang berelasi dengan user yang sedang login
 exports.getAllWorkspaces = async (req, res) => {
   try {
-    const user = await extractUser(req);
-    const where = {};
+    const user = req.user || (await extractUser(req));
+    if (!user) {
+      return res.status(401).json({ status: 'error', message: 'Autentikasi diperlukan.' });
+    }
+
+    let where = {};
 
     if (user && user.role === 'Super Admin' && user.rawId) {
       where.super_admin_id = BigInt(user.rawId);
@@ -48,11 +64,7 @@ exports.getAllWorkspaces = async (req, res) => {
       const sId = req.query.superAdminId.toString().replace(/^sa-/, '');
       where.super_admin_id = BigInt(sId);
     } else {
-      // Jika belum terotentikasi, tidak boleh menampilkan data milik Super Admin lain
-      return res.status(200).json({
-        status: 'success',
-        data: [],
-      });
+      return res.status(403).json({ status: 'error', message: 'Akses workspace ditolak.' });
     }
 
     const workspaces = await prisma.workspace.findMany({
@@ -86,12 +98,7 @@ exports.getAllWorkspaces = async (req, res) => {
       data: formatted,
     });
   } catch (error) {
-    console.error('Error fetching workspaces:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal mengambil data workspace dari database',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal mengambil data workspace dari database');
   }
 };
 
@@ -110,8 +117,8 @@ exports.getWorkspaceById = async (req, res) => {
       where.workspace_id = BigInt(user.workspaceId);
     }
 
-    const workspace = await prisma.workspace.findFirst({
-      where,
+    const workspace = await prisma.workspace.findUnique({
+      where: { workspace_id: access.workspaceId },
       include: {
         store: {
           select: {
@@ -129,7 +136,7 @@ exports.getWorkspaceById = async (req, res) => {
     if (!workspace) {
       return res.status(404).json({
         status: 'error',
-        message: 'Workspace tidak ditemukan atau Anda tidak memiliki akses.',
+        message: 'Workspace tidak ditemukan.',
       });
     }
 
@@ -138,19 +145,21 @@ exports.getWorkspaceById = async (req, res) => {
       data: formatWorkspace(workspace),
     });
   } catch (error) {
-    console.error('Error fetching workspace detail:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal mengambil detail workspace',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal mengambil detail workspace');
   }
 };
 
 // POST /api/workspaces
 exports.createWorkspace = async (req, res) => {
   try {
-    console.log('📥 [POST /api/workspaces] Menerima data baru:', req.body);
+    const user = req.user || (await extractUser(req));
+    if (!user || (!isTeknisUser(user) && !isSuperAdminRole(user))) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Hanya Super Admin atau Divisi Teknis yang dapat membuat workspace.',
+      });
+    }
+
     const {
       companyName,
       name,
@@ -160,7 +169,6 @@ exports.createWorkspace = async (req, res) => {
       picPhone,
       headquartersAddress,
       status,
-      superAdminId,
     } = req.body;
 
     const user = await extractUser(req);
@@ -184,7 +192,21 @@ exports.createWorkspace = async (req, res) => {
       });
     }
 
-    const cleanSaId = BigInt(targetSuperAdminId.toString().replace(/^sa-/, ''));
+    let cleanSaId = null;
+    if (isTeknisUser(user)) {
+      const systemSa = await getOrCreateTeknisInternalSuperAdmin();
+      cleanSaId = systemSa.super_admin_id;
+    } else if (user.rawId) {
+      cleanSaId = toBigIntSafe(user.rawId, ['sa-']);
+    }
+
+    if (!cleanSaId) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Akun Super Admin tidak teridentifikasi.',
+      });
+    }
+
     const superAdmin = await prisma.super_admin.findUnique({
       where: { super_admin_id: cleanSaId },
     });
@@ -213,20 +235,13 @@ exports.createWorkspace = async (req, res) => {
       },
     });
 
-    console.log('✅ [POST /api/workspaces] Berhasil membuat workspace:', newWorkspace.company_name);
-
     return res.status(201).json({
       status: 'success',
       message: 'Workspace berhasil ditambahkan',
       data: formatWorkspace(newWorkspace),
     });
   } catch (error) {
-    console.error('❌ Error creating workspace:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: error.message || 'Gagal membuat workspace',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal membuat workspace');
   }
 };
 
@@ -292,7 +307,7 @@ exports.updateWorkspace = async (req, res) => {
     }
 
     const updated = await prisma.workspace.update({
-      where: { workspace_id: workspaceId },
+      where: { workspace_id: access.workspaceId },
       data: updateData,
       include: {
         store: true,
@@ -306,12 +321,7 @@ exports.updateWorkspace = async (req, res) => {
       data: formatWorkspace(updated),
     });
   } catch (error) {
-    console.error('Error updating workspace:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal memperbarui workspace',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal memperbarui workspace');
   }
 };
 
@@ -352,7 +362,7 @@ exports.deleteWorkspace = async (req, res) => {
     }
 
     await prisma.workspace.delete({
-      where: { workspace_id: workspaceId },
+      where: { workspace_id: access.workspaceId },
     });
 
     return res.status(200).json({
@@ -360,11 +370,6 @@ exports.deleteWorkspace = async (req, res) => {
       message: 'Workspace berhasil dihapus secara permanen',
     });
   } catch (error) {
-    console.error('Error deleting workspace:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal menghapus workspace',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal menghapus workspace');
   }
 };

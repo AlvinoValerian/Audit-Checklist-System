@@ -1,5 +1,13 @@
 const prisma = require('../config/prisma');
 const { extractUser } = require('../middlewares/auth.middleware');
+const { toBigIntSafe } = require('../utils/teknisScope');
+const {
+  sendSafeError,
+  assertWorkspaceAccess,
+  resolveScopedWorkspaceContext,
+  assertStoreAccess,
+} = require('../utils/tenantScope');
+const { emitWorkspaceEvent } = require('../utils/realtimeEmitter');
 
 /**
  * Format string waktu "HH:mm" atau Date object menjadi "HH:mm"
@@ -133,8 +141,22 @@ const normalizeRecurrenceLabel = (repeatTime) => {
   return 'Sekali';
 };
 
-const getActiveHolidaysOnDate = async (targetDateStr) => {
+const getActiveHolidaysOnDate = async (targetDateStr, workspaceIds = null) => {
   try {
+    if (Array.isArray(workspaceIds) && workspaceIds.length > 0) {
+      return await prisma.$queryRawUnsafe(
+        `
+        SELECT * FROM store_holiday
+        WHERE deleted_at IS NULL
+          AND status != 'Dibatalkan'
+          AND start_date <= $1::date
+          AND end_date >= $1::date
+          AND workspace_id = ANY($2::bigint[])
+        `,
+        targetDateStr,
+        workspaceIds
+      );
+    }
     return await prisma.$queryRawUnsafe(
       `
       SELECT * FROM store_holiday
@@ -154,6 +176,7 @@ const evaluateHolidayForSchedule = (schedule, targetDateStr, storeHolidays = [])
   if (!schedule) return { isHoliday: false, reason: null };
   const sIdStr = schedule.schedule_id ? schedule.schedule_id.toString() : '';
   const sStoreId = schedule.store_id ? schedule.store_id.toString() : '';
+  const sWorkspaceId = schedule.store?.workspace_id ? schedule.store.workspace_id.toString() : '';
   const sStoreName = (schedule.store?.store_name || '').trim().toLowerCase();
 
   const matchedException = (schedule.schedule_exception || []).find((e) => {
@@ -166,8 +189,12 @@ const evaluateHolidayForSchedule = (schedule, targetDateStr, storeHolidays = [])
 
   const matchedStoreHoliday = (storeHolidays || []).find((h) => {
     const hStoreId = h.store_id ? h.store_id.toString() : '';
+    const hWorkspaceId = h.workspace_id ? h.workspace_id.toString() : '';
     const hStoreName = (h.store_name || '').trim().toLowerCase();
-    const storeMatches = (hStoreId && hStoreId === sStoreId) || (hStoreName && hStoreName === sStoreName);
+    const sameWorkspace = Boolean(hWorkspaceId && sWorkspaceId && hWorkspaceId === sWorkspaceId);
+    const storeMatches =
+      (hStoreId && hStoreId === sStoreId) ||
+      (sameWorkspace && !hStoreId && hStoreName && hStoreName === sStoreName);
     if (!storeMatches) return false;
 
     const lType = h.libur_type || 'full';
@@ -473,28 +500,29 @@ const formatSchedule = (s, todayStoreHolidays = []) => {
 exports.getAllSchedules = async (req, res) => {
   try {
     const user = await extractUser(req);
-    const requestedWsId = req.query.workspaceId || req.headers['x-workspace-id'];
-    const where = {};
-
-    // 1. Logika penentuan workspace:
-    if (user && (user.role === 'Divisi Teknis' || user.role === 'Teknis') && user.workspaceId) {
-      where.store = { workspace_id: BigInt(user.workspaceId) };
-    } else if (requestedWsId && requestedWsId !== 'all') {
-      const cleanWs = BigInt(requestedWsId.toString().replace(/^ws-/, ''));
-      where.store = { workspace_id: cleanWs };
-    } else if (user && user.role === 'Admin' && user.workspaceId) {
-      where.store = { workspace_id: BigInt(user.workspaceId) };
-    } else if (user && user.role === 'Super Admin' && user.rawId) {
-      const cleanSaId = BigInt(user.rawId);
-      where.store = {
-        workspace: { super_admin_id: cleanSaId },
-      };
-    } else if (req.query.superAdminId) {
-      const cleanSaId = BigInt(req.query.superAdminId.toString().replace(/^sa-/, ''));
-      where.store = {
-        workspace: { super_admin_id: cleanSaId },
-      };
+    if (!user) {
+      return res.status(401).json({ status: 'error', message: 'Autentikasi diperlukan.' });
     }
+
+    const requestedWsId = req.query.workspaceId || req.headers['x-workspace-id'];
+    const scope = await resolveScopedWorkspaceContext(user, requestedWsId, {
+      teknisUseSingleDefaultOnAll: true,
+    });
+
+    if (!scope.ok) {
+      return res.status(scope.status).json({ status: 'error', message: scope.message });
+    }
+    if (scope.workspaceIds.length === 0) {
+      return res.status(200).json({ status: 'success', total: 0, data: [] });
+    }
+
+    const storeScopeFilter = scope.prismaWorkspaceWhere.workspace_id
+      ? { workspace_id: scope.prismaWorkspaceWhere.workspace_id }
+      : { workspace: scope.prismaWorkspaceWhere };
+
+    const where = {
+      store: storeScopeFilter,
+    };
 
     // 2. Query ke PostgreSQL
     let schedules = await prisma.schedule.findMany({
@@ -523,7 +551,7 @@ exports.getAllSchedules = async (req, res) => {
     });
 
     const { dateStr: todayWibStr } = getWibDateParts(new Date());
-    const todayStoreHolidays = await getActiveHolidaysOnDate(todayWibStr);
+    const todayStoreHolidays = await getActiveHolidaysOnDate(todayWibStr, scope.workspaceIds);
     const formatted = schedules.map((s) => formatSchedule(s, todayStoreHolidays));
 
     return res.status(200).json({
@@ -532,12 +560,7 @@ exports.getAllSchedules = async (req, res) => {
       data: formatted,
     });
   } catch (error) {
-    console.error('❌ Error in getAllSchedules:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal mengambil daftar jadwal audit dari database.',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal mengambil daftar jadwal audit dari database.');
   }
 };
 
@@ -547,8 +570,18 @@ exports.getAllSchedules = async (req, res) => {
  */
 exports.getScheduleById = async (req, res) => {
   try {
+    const user = await extractUser(req);
+    if (!user) {
+      return res.status(401).json({ status: 'error', message: 'Autentikasi diperlukan.' });
+    }
     const { id } = req.params;
-    const cleanId = BigInt(id.toString().replace(/^sch-/, ''));
+    const cleanId = toBigIntSafe(id, ['sch-']);
+    if (!cleanId) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Format ID jadwal audit tidak valid.',
+      });
+    }
 
     const s = await prisma.schedule.findUnique({
       where: { schedule_id: cleanId },
@@ -578,20 +611,26 @@ exports.getScheduleById = async (req, res) => {
       });
     }
 
+    const access = await assertWorkspaceAccess(user, s.store?.workspace_id);
+    if (!access.ok) {
+      return res.status(access.status === 400 ? 403 : access.status).json({
+        status: 'error',
+        message: access.message || 'Anda tidak memiliki akses ke jadwal milik tenant lain.',
+      });
+    }
+
     const { dateStr: todayWibStr } = getWibDateParts(new Date());
-    const todayStoreHolidays = await getActiveHolidaysOnDate(todayWibStr);
+    const todayStoreHolidays = await getActiveHolidaysOnDate(
+      todayWibStr,
+      s.store?.workspace_id ? [s.store.workspace_id] : null
+    );
 
     return res.status(200).json({
       status: 'success',
       data: formatSchedule(s, todayStoreHolidays),
     });
   } catch (error) {
-    console.error('❌ Error in getScheduleById:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal mengambil detail jadwal audit.',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal mengambil detail jadwal audit.');
   }
 };
 
@@ -602,20 +641,25 @@ exports.getScheduleById = async (req, res) => {
 exports.createSchedule = async (req, res) => {
   try {
     const user = await extractUser(req);
+    if (!user) {
+      return res.status(401).json({ status: 'error', message: 'Autentikasi diperlukan.' });
+    }
     const body = req.body;
-    const rawWsId = req.query.workspaceId || req.headers['x-workspace-id'];
-    let targetWsId = null;
-    if (rawWsId && rawWsId !== 'all') {
-      try {
-        targetWsId = BigInt(rawWsId.toString().replace(/^ws-/, ''));
-      } catch (e) { }
-    } else if (user && user.role === 'Admin' && user.workspaceId) {
-      try {
-        targetWsId = BigInt(user.workspaceId.toString().replace(/^ws-/, ''));
-      } catch (e) { }
+    const rawWsId = (!Array.isArray(body) ? body?.workspaceId : null) || req.query.workspaceId || req.headers['x-workspace-id'];
+
+    const scope = await resolveScopedWorkspaceContext(user, rawWsId, {
+      teknisUseSingleDefaultOnAll: true,
+    });
+    if (!scope.ok) {
+      return res.status(scope.status).json({ status: 'error', message: scope.message });
     }
 
-    // Validasi Workspace: jika workspace dinonaktifkan, hentikan pembuatan jadwal
+    const targetWsId = scope.targetWorkspaceId;
+    const storeScopeFilter = scope.prismaWorkspaceWhere.workspace_id
+      ? { workspace_id: scope.prismaWorkspaceWhere.workspace_id }
+      : { workspace: scope.prismaWorkspaceWhere };
+
+    // Validasi Workspace target jika sudah spesifik
     if (targetWsId) {
       const ws = await prisma.workspace.findUnique({
         where: { workspace_id: targetWsId },
@@ -641,66 +685,88 @@ exports.createSchedule = async (req, res) => {
 
     const createdResults = [];
     const { dateStr: wibTodayStr } = getWibDateParts(new Date());
-    const todayStoreHolidays = await getActiveHolidaysOnDate(wibTodayStr);
+    const todayStoreHolidays = await getActiveHolidaysOnDate(wibTodayStr, scope.workspaceIds);
 
     for (const item of rawItems) {
-      // 1. Resolusi Toko: bisa via storeId atau storeName atau selectedStores
+      // 1. Resolusi Toko strictly inside user's workspace scope
       let storeRecord = null;
       if (item.storeId) {
-        try {
-          storeRecord = await prisma.store.findUnique({
-            where: { store_id: BigInt(item.storeId.toString().replace(/^str-/, '')) },
+        const stCheck = await assertStoreAccess(user, item.storeId);
+        if (!stCheck.ok) {
+          return res.status(stCheck.status).json({
+            status: 'error',
+            message: stCheck.message,
           });
-        } catch (e) { }
+        }
+        storeRecord = stCheck.store;
       }
 
       if (!storeRecord && item.storeName) {
-        if (targetWsId) {
-          storeRecord = await prisma.store.findFirst({
-            where: {
-              store_name: item.storeName.trim(),
-              workspace_id: targetWsId,
-            },
-          });
-        }
-        if (!storeRecord) {
-          storeRecord = await prisma.store.findFirst({
-            where: { store_name: item.storeName.trim() },
-          });
-        }
-      }
-
-      // Fallback ke toko dalam workspace jika belum ada
-      if (!storeRecord && targetWsId) {
         storeRecord = await prisma.store.findFirst({
-          where: { workspace_id: targetWsId },
+          where: {
+            store_name: item.storeName.trim(),
+            ...(targetWsId ? { workspace_id: targetWsId } : storeScopeFilter),
+          },
+          include: { workspace: { select: { workspace_id: true, status: true } } },
         });
       }
 
-      if (!storeRecord) {
-        storeRecord = await prisma.store.findFirst();
+      // Fallback ke toko di workspace tervalidasi (TIDAK PERNAH fallback global lintas tenant)
+      if (!storeRecord && scope.workspaceIds.length > 0) {
+        storeRecord = await prisma.store.findFirst({
+          where: targetWsId ? { workspace_id: targetWsId } : storeScopeFilter,
+          include: { workspace: { select: { workspace_id: true, status: true } } },
+          orderBy: { store_id: 'asc' },
+        });
       }
 
       if (!storeRecord) {
         return res.status(400).json({
           status: 'error',
-          message: 'Toko belum tersedia di database. Harap buat toko terlebih dahulu.',
+          message: 'Toko belum tersedia di workspace ini. Harap buat toko terlebih dahulu.',
         });
       }
 
-      // 2. Resolusi Template: bisa via templateId atau templateName
+      if (
+        storeRecord.workspace &&
+        (storeRecord.workspace.status === 'inactive' || storeRecord.workspace.status === 'Nonaktif')
+      ) {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Workspace toko ini sedang dinonaktifkan. Pembuatan jadwal audit diberhentikan.',
+        });
+      }
+
+      const itemWsId = storeRecord.workspace_id;
+
+      // 2. Resolusi Template secara ketat dalam cakupan workspace yang sah
       let templateRecord = null;
       if (item.templateId) {
-        try {
+        const cleanTplId = toBigIntSafe(item.templateId, ['tpl-']);
+        if (cleanTplId) {
           templateRecord = await prisma.checklist_template.findUnique({
-            where: { template_id: BigInt(item.templateId.toString().replace(/^tpl-/, '')) },
+            where: { template_id: cleanTplId },
+            include: { store: { select: { workspace_id: true } } },
           });
-        } catch (e) { }
+          if (templateRecord) {
+            const tplAccess = await assertWorkspaceAccess(user, templateRecord.store?.workspace_id);
+            if (!tplAccess.ok) {
+              return res.status(tplAccess.status === 400 ? 403 : tplAccess.status).json({
+                status: 'error',
+                message: 'Template checklist yang dipilih berada di luar cakupan workspace Anda.',
+              });
+            }
+          }
+        }
       }
 
       if (!templateRecord && item.templateName) {
         templateRecord = await prisma.checklist_template.findFirst({
-          where: { template_name: item.templateName.trim() },
+          where: {
+            template_name: item.templateName.trim(),
+            store: { workspace_id: itemWsId },
+          },
+          include: { store: { select: { workspace_id: true } } },
         });
       }
 
@@ -714,23 +780,35 @@ exports.createSchedule = async (req, res) => {
       if (!templateRecord) {
         templateRecord = await prisma.checklist_template.findFirst({
           where: {
+            store: { workspace_id: itemWsId },
             OR: [{ status: 'active' }, { status: 'Aktif' }, { status: null }],
           },
+          orderBy: { template_id: 'asc' },
         });
       }
 
       if (!templateRecord) {
         return res.status(400).json({
           status: 'error',
-          message: 'Template checklist aktif belum tersedia. Harap buat atau aktifkan template checklist terlebih dahulu.',
+          message: 'Template checklist aktif belum tersedia pada workspace ini. Harap buat atau aktifkan template checklist terlebih dahulu.',
         });
       }
 
-      // 3. Resolusi Admin: gunakan admin pemilik toko atau admin saat ini
+      // 3. Resolusi Admin strictly dalam workspace toko target
       let adminId = storeRecord.admin_id;
       if (!adminId) {
-        const fallbackAdmin = await prisma.admin.findFirst();
+        const fallbackAdmin = await prisma.admin.findFirst({
+          where: { workspace_id: itemWsId },
+          select: { admin_id: true },
+        });
         adminId = fallbackAdmin?.admin_id;
+      }
+
+      if (!adminId) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Admin penanggung jawab workspace belum tersedia.',
+        });
       }
 
       // 4. Resolusi Waktu & Tanggal (Pastikan Format 24 Jam)
@@ -782,10 +860,13 @@ exports.createSchedule = async (req, res) => {
         },
       });
 
-      // 7. Jika ada auditorName, tautkan ke schedule_staff
+      // 7. Jika ada auditorName, tautkan ke schedule_staff hanya dalam workspace toko target
       if (item.auditorName) {
         const staffMember = await prisma.staff.findFirst({
-          where: { name: { contains: item.auditorName.trim(), mode: 'insensitive' } },
+          where: {
+            name: { contains: item.auditorName.trim(), mode: 'insensitive' },
+            store: { workspace_id: itemWsId },
+          },
         });
         if (staffMember) {
           await prisma.schedule_staff.create({
@@ -801,18 +882,19 @@ exports.createSchedule = async (req, res) => {
       createdResults.push(formatSchedule(scheduleCreated, todayStoreHolidays));
     }
 
+    if (store?.workspace_id) {
+      try {
+        emitWorkspaceEvent(store.workspace_id, 'schedule:updated', { action: 'create' });
+      } catch (e) {}
+    }
+
     return res.status(201).json({
       status: 'success',
       message: `${createdResults.length} jadwal audit berhasil dibuat dan disimpan ke database.`,
       data: createdResults.length === 1 ? createdResults[0] : createdResults,
     });
   } catch (error) {
-    console.error('❌ Error in createSchedule:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal membuat jadwal audit di database.',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal membuat jadwal audit di database.');
   }
 };
 
@@ -822,8 +904,18 @@ exports.createSchedule = async (req, res) => {
  */
 exports.updateSchedule = async (req, res) => {
   try {
+    const user = await extractUser(req);
+    if (!user) {
+      return res.status(401).json({ status: 'error', message: 'Autentikasi diperlukan.' });
+    }
     const { id } = req.params;
-    const cleanId = BigInt(id.toString().replace(/^sch-/, ''));
+    const cleanId = toBigIntSafe(id, ['sch-']);
+    if (!cleanId) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Format ID jadwal audit tidak valid.',
+      });
+    }
     const body = req.body;
 
     const existing = await prisma.schedule.findUnique({
@@ -841,8 +933,19 @@ exports.updateSchedule = async (req, res) => {
       });
     }
 
+    const access = await assertWorkspaceAccess(user, existing.store?.workspace_id);
+    if (!access.ok) {
+      return res.status(access.status === 400 ? 403 : access.status).json({
+        status: 'error',
+        message: access.message || 'Anda tidak memiliki akses untuk mengubah jadwal audit milik tenant lain.',
+      });
+    }
+
     const { dateStr: todayWibStr } = getWibDateParts(new Date());
-    const todayStoreHolidays = await getActiveHolidaysOnDate(todayWibStr);
+    const todayStoreHolidays = await getActiveHolidaysOnDate(
+      todayWibStr,
+      existing.store?.workspace_id ? [existing.store.workspace_id] : null
+    );
 
     // Pengecekan jika jadwal sedang berlangsung saat ini (di jam dan hari pelaksanaan)
     // Jadwal yang sedang berjalan tidak dapat diedit atau dibatalkan/soft-delete
@@ -906,26 +1009,65 @@ exports.updateSchedule = async (req, res) => {
       updateData.deleted_at = null;
     }
 
-    // Resolusi & Update Template Checklist saat edit
+    // Resolusi & Update Toko saat edit (jika diubah) - diselesaikan secara ketat dalam cakupan workspace
+    let resolvedStoreWsId = existing.store?.workspace_id || null;
+    if (body.storeId || body.storeName) {
+      let storeRecord = null;
+      if (body.storeId) {
+        const stCheck = await assertStoreAccess(user, body.storeId);
+        if (!stCheck.ok) {
+          return res.status(stCheck.status).json({
+            status: 'error',
+            message: stCheck.message,
+          });
+        }
+        storeRecord = stCheck.store;
+      } else if (body.storeName && existing.store?.workspace_id) {
+        storeRecord = await prisma.store.findFirst({
+          where: {
+            store_name: body.storeName.trim(),
+            workspace_id: existing.store.workspace_id,
+          },
+        });
+      }
+      if (storeRecord) {
+        updateData.store_id = storeRecord.store_id;
+        resolvedStoreWsId = storeRecord.workspace_id;
+      }
+    }
+
+    // Resolusi & Update Template Checklist saat edit (strictly within user's permitted workspace)
     if (body.templateId || body.templateName || body.template) {
       let targetTemplate = null;
       if (body.templateId) {
-        try {
-          const cleanTplId = BigInt(body.templateId.toString().replace(/^tpl-/, ''));
+        const cleanTplId = toBigIntSafe(body.templateId, ['tpl-']);
+        if (cleanTplId) {
           targetTemplate = await prisma.checklist_template.findUnique({
             where: { template_id: cleanTplId },
+            include: { store: { select: { workspace_id: true } } },
           });
-        } catch (e) { }
+        }
       }
 
-      if (!targetTemplate && (body.templateName || body.template)) {
+      if (!targetTemplate && (body.templateName || body.template) && resolvedStoreWsId) {
         const tplName = (body.templateName || body.template).trim();
         targetTemplate = await prisma.checklist_template.findFirst({
-          where: { template_name: tplName },
+          where: {
+            template_name: tplName,
+            store: { workspace_id: resolvedStoreWsId },
+          },
+          include: { store: { select: { workspace_id: true } } },
         });
       }
 
       if (targetTemplate) {
+        const tplAccess = await assertWorkspaceAccess(user, targetTemplate.store?.workspace_id);
+        if (!tplAccess.ok) {
+          return res.status(tplAccess.status === 400 ? 403 : tplAccess.status).json({
+            status: 'error',
+            message: 'Template checklist tujuan berada di luar lingkup workspace Anda.',
+          });
+        }
         if (targetTemplate.status === 'inactive' || targetTemplate.status === 'Nonaktif') {
           return res.status(400).json({
             status: 'error',
@@ -933,27 +1075,6 @@ exports.updateSchedule = async (req, res) => {
           });
         }
         updateData.template_id = targetTemplate.template_id;
-      }
-    }
-
-    // Resolusi & Update Toko saat edit (jika diubah)
-    if (body.storeId || body.storeName) {
-      let storeRecord = null;
-      if (body.storeId) {
-        try {
-          const cleanStoreId = BigInt(body.storeId.toString().replace(/^str-/, ''));
-          storeRecord = await prisma.store.findUnique({
-            where: { store_id: cleanStoreId },
-          });
-        } catch (e) { }
-      }
-      if (!storeRecord && body.storeName) {
-        storeRecord = await prisma.store.findFirst({
-          where: { store_name: body.storeName.trim() },
-        });
-      }
-      if (storeRecord) {
-        updateData.store_id = storeRecord.store_id;
       }
     }
 
@@ -977,18 +1098,22 @@ exports.updateSchedule = async (req, res) => {
       },
     });
 
+    if (existing.store?.workspace_id) {
+      try {
+        emitWorkspaceEvent(existing.store.workspace_id, 'schedule:updated', {
+          action: 'update',
+          scheduleId: cleanId.toString(),
+        });
+      } catch (e) {}
+    }
+
     return res.status(200).json({
       status: 'success',
       message: 'Jadwal audit berhasil diperbarui.',
       data: formatSchedule(updated, todayStoreHolidays),
     });
   } catch (error) {
-    console.error('❌ Error in updateSchedule:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal memperbarui jadwal audit di database.',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal memperbarui jadwal audit di database.');
   }
 };
 
@@ -998,12 +1123,25 @@ exports.updateSchedule = async (req, res) => {
  */
 exports.deleteSchedule = async (req, res) => {
   try {
+    const user = await extractUser(req);
+    if (!user) {
+      return res.status(401).json({ status: 'error', message: 'Autentikasi diperlukan.' });
+    }
     const { id } = req.params;
-    const cleanId = BigInt(id.toString().replace(/^sch-/, ''));
+    const cleanId = toBigIntSafe(id, ['sch-']);
+    if (!cleanId) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Format ID jadwal audit tidak valid.',
+      });
+    }
     const isPermanent = req.query.permanent === 'true';
 
     const existing = await prisma.schedule.findUnique({
       where: { schedule_id: cleanId },
+      include: {
+        store: { select: { workspace_id: true } },
+      },
     });
 
     if (!existing) {
@@ -1011,6 +1149,23 @@ exports.deleteSchedule = async (req, res) => {
         status: 'error',
         message: 'Jadwal audit tidak ditemukan untuk dihapus.',
       });
+    }
+
+    const access = await assertWorkspaceAccess(user, existing.store?.workspace_id);
+    if (!access.ok) {
+      return res.status(access.status === 400 ? 403 : access.status).json({
+        status: 'error',
+        message: access.message || 'Anda tidak memiliki akses untuk menghapus jadwal audit milik tenant lain.',
+      });
+    }
+
+    if (existing.store?.workspace_id) {
+      try {
+        emitWorkspaceEvent(existing.store.workspace_id, 'schedule:updated', {
+          action: isPermanent ? 'permanent_delete' : 'soft_delete',
+          scheduleId: cleanId.toString(),
+        });
+      } catch (e) {}
     }
 
     if (isPermanent) {
@@ -1044,11 +1199,6 @@ exports.deleteSchedule = async (req, res) => {
       data: formatSchedule(updated),
     });
   } catch (error) {
-    console.error('❌ Error in deleteSchedule:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal membatalkan jadwal audit.',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal membatalkan jadwal audit.');
   }
 };

@@ -1,5 +1,6 @@
 import { AuditReportItem } from "@/types/report";
 import { AuthService } from "@/lib/auth";
+import { apiFetch } from "@/lib/api-client";
 
 export interface ReportFilterParams {
   workspaceId?: string;
@@ -8,6 +9,8 @@ export interface ReportFilterParams {
   month?: string;
   status?: string;
   search?: string;
+  page?: number;
+  limit?: number;
 }
 
 export interface ReportMetaOptions {
@@ -34,17 +37,11 @@ const getAuthHeaders = (): Record<string, string> => {
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
-  if (rawId && !rawId.startsWith("adm-")) {
-    headers["x-super-admin-id"] = rawId;
-    headers["x-user-id"] = rawId;
-  }
-  if (user?.email) {
-    headers["x-user-email"] = user.email;
-  }
   const activeWs = AuthService.getActiveWorkspace();
   if (activeWs?.id) {
     headers["x-workspace-id"] = activeWs.id;
+  } else if (user?.workspaceId) {
+    headers["x-workspace-id"] = user.workspaceId;
   }
   return headers;
 };
@@ -79,6 +76,8 @@ export const ReportService = {
     if (params?.month && params.month !== "Semua Bulan" && params.month !== "Bulan Ini") query.set("month", params.month);
     if (params?.status && params.status !== "Semua Status") query.set("status", params.status);
     if (params?.search) query.set("search", params.search);
+    if (params?.page) query.set("page", String(params.page));
+    if (params?.limit) query.set("limit", String(params.limit));
 
     const qs = query.toString() ? `?${query.toString()}` : "";
     const cacheKey = qs || "all";
@@ -90,7 +89,7 @@ export const ReportService = {
     const fetchPromise = (async () => {
       try {
         const url = `${BACKEND_URL}/api/reports${qs}`;
-        const res = await fetch(url, {
+        const res = await apiFetch(url, {
           headers: getAuthHeaders(),
         });
 
@@ -122,7 +121,7 @@ export const ReportService = {
   async fetchById(id: string): Promise<AuditReportItem | null> {
     try {
       const url = `${BACKEND_URL}/api/reports/${encodeURIComponent(id)}`;
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         headers: getAuthHeaders(),
       });
 
@@ -152,7 +151,7 @@ export const ReportService = {
     const fetchPromise = (async () => {
       try {
         const url = `${BACKEND_URL}/api/reports/meta${qs}`;
-        const res = await fetch(url, {
+        const res = await apiFetch(url, {
           headers: getAuthHeaders(),
         });
 

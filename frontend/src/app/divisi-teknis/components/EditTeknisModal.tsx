@@ -43,6 +43,7 @@ export default function EditTeknisModal({
   user,
   onClose,
   onSubmit,
+  workspaces = [],
   isSubmitting = false,
 }: EditTeknisModalProps) {
   const [fullName, setFullName] = useState("");
@@ -51,6 +52,7 @@ export default function EditTeknisModal({
   const [specialization, setSpecialization] = useState(SPECIALIZATION_PRESETS[0]);
   const [customSpec, setCustomSpec] = useState("");
   const [isCustomSpec, setIsCustomSpec] = useState(false);
+  const [workspaceId, setWorkspaceId] = useState<string>("all");
   const [password, setPassword] = useState("");
   const [status, setStatus] = useState<"Aktif" | "Nonaktif">("Aktif");
   const [showPassword, setShowPassword] = useState(false);
@@ -72,6 +74,7 @@ export default function EditTeknisModal({
         setCustomSpec(user.specialization || "");
       }
 
+      setWorkspaceId(user.workspaceId || "all");
       setPassword("");
       setStatus(user.status || "Aktif");
       setShowPassword(false);
@@ -268,7 +271,7 @@ export default function EditTeknisModal({
             )}
           </div>
 
-          {/* 4. Lingkungan Sandbox Internal (Tanpa Penugasan Workspace Manual) */}
+          {/* 4. Lingkungan Khusus Divisi Teknis (Terisolasi dari Data Umum Milik Orang Lain) */}
           <div className="p-3.5 rounded-2xl bg-sky-50/70 border border-sky-100 flex items-start gap-3">
             <div className="w-8 h-8 rounded-xl bg-sky-500/10 border border-sky-200 text-sky-700 flex items-center justify-center shrink-0 mt-0.5">
               <Building2 className="w-4 h-4" />
@@ -276,14 +279,14 @@ export default function EditTeknisModal({
             <div className="space-y-0.5">
               <div className="flex items-center gap-2">
                 <span className="text-xs font-bold text-slate-800">
-                  Sandbox Internal Divisi Teknis
+                  Lingkungan Khusus Divisi Teknis
                 </span>
                 <span className="px-1.5 py-0.2 rounded bg-sky-100 text-sky-700 text-[10px] font-bold">
-                  Terisolasi
+                  Khusus Teknis
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 leading-relaxed">
-                Akun personil teknis ini otomatis berada dalam lingkungan sandbox internal untuk pengujian sistem secara mandiri, tanpa terhubung atau mempengaruhi data penyewa umum.
+                Data teknis hanya dimiliki oleh divisi teknis dan terisolasi secara mandiri, tidak dicampur dengan data umum milik pengguna atau penyewa lain.
               </p>
             </div>
           </div>

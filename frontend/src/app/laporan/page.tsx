@@ -28,6 +28,7 @@ import { toast } from "sonner";
 import { AuthService } from "@/lib/auth";
 import { WorkspaceService } from "@/services/workspace.service";
 import { Workspace } from "@/types/workspace";
+import { useRealtimeEvents } from "@/hooks/useRealtime";
 import {
   exportReportsToCsv,
   exportSingleReport,
@@ -287,6 +288,15 @@ export default function LaporanPage() {
     await loadReportsData(true, newWsId);
   };
 
+  // Realtime SSE Event Listener: auto-refresh data laporan saat staf submit audit
+  useRealtimeEvents({
+    workspaceId: selectedWorkspaceId,
+    onAuditSubmitted: (data) => {
+      loadReportsData(false, selectedWorkspaceId);
+      toast.info(`Laporan audit baru masuk dari ${data.storeName || "staf"}!`);
+    },
+  });
+
   // Filtered Reports
   const filteredReports = useMemo(() => {
     const currentMonthLabel = getCurrentMonthLabel().toLowerCase();
@@ -357,7 +367,21 @@ export default function LaporanPage() {
     toast.info("Filter telah direset ke default (Bulan Ini, Tidak Mengerjakan & Masalah).");
   };
 
-  // Export handlers
+  // Export & View handlers
+  const handleViewReport = async (row: AuditReportItem) => {
+    setSelectedReportToView(row);
+    if (row.status !== "Tidak Mengerjakan" && (!row.findings || row.findings.length === 0)) {
+      try {
+        const full = await ReportService.fetchById(row.id);
+        if (full) {
+          setSelectedReportToView(full);
+        }
+      } catch (err) {
+        console.warn("Gagal memuat detail lengkap laporan:", err);
+      }
+    }
+  };
+
   const handleExportAll = async () => {
     if (isExportingAll || filteredReports.length === 0) return;
     try {
@@ -935,7 +959,7 @@ export default function LaporanPage() {
                             <div className="inline-flex items-center justify-end gap-1">
                               <button
                                 type="button"
-                                onClick={() => setSelectedReportToView(row)}
+                                onClick={() => handleViewReport(row)}
                                 className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors cursor-pointer"
                                 title="Lihat Detail Laporan"
                               >

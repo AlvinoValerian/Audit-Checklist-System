@@ -1,4 +1,5 @@
 import { AuthService } from "@/lib/auth";
+import { apiFetch } from "@/lib/api-client";
 import { MetricStats } from "@/app/dashboard-monitoring/components/MetricCards";
 
 export interface StoreRankingItem {
@@ -85,14 +86,6 @@ const getAuthHeaders = (): Record<string, string> => {
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
-  if (rawId && !rawId.startsWith("adm-")) {
-    headers["x-super-admin-id"] = rawId;
-    headers["x-user-id"] = rawId;
-  }
-  if (user?.email) {
-    headers["x-user-email"] = user.email;
-  }
   if (activeWs?.id) {
     headers["x-workspace-id"] = activeWs.id;
   } else if (user?.workspaceId) {
@@ -118,7 +111,7 @@ export const DashboardService = {
 
     const endpoint = `${BACKEND_URL}/api/dashboard/monitoring${query.toString() ? `?${query.toString()}` : ""}`;
 
-    const res = await fetch(endpoint, {
+    const res = await apiFetch(endpoint, {
       method: "GET",
       headers: getAuthHeaders(),
       cache: "no-store",

@@ -563,6 +563,7 @@ export default function DivisiTeknisPage() {
         isOpen={isCreateOpen}
         onClose={() => setIsCreateOpen(false)}
         onSubmit={handleCreateTeknis}
+        workspaces={workspaces}
         isSubmitting={isSubmittingCreate}
       />
 
@@ -574,6 +575,7 @@ export default function DivisiTeknisPage() {
           setSelectedUserToEdit(null);
         }}
         onSubmit={handleEditTeknis}
+        workspaces={workspaces}
         isSubmitting={isSubmittingEdit}
       />
 

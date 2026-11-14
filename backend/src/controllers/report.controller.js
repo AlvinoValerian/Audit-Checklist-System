@@ -1,50 +1,21 @@
 const prisma = require('../config/prisma');
 const { extractUser } = require('../middlewares/auth.middleware');
-const { decryptImageData } = require('../utils/imageCrypto');
-const { decryptImage, isEncrypted } = require('../utils/crypto.utils');
+const { decryptAttachmentUrl, hydrateAttachmentUrls } = require('../utils/attachmentCache');
 const { syncExpiredSchedulesToDb } = require('../utils/scheduleSync');
+const { toBigIntSafe } = require('../utils/teknisScope');
+const {
+  resolveScopedWorkspaceContext,
+  assertWorkspaceAccess,
+  sendSafeError,
+} = require('../utils/tenantScope');
 
-/**
- * Helper untuk dekripsi attachment URL yang tersimpan dalam format bytes/encrypted (ENC:v1 atau enc:v1)
- */
-const decryptAttachmentUrl = (file_url) => {
-  if (!file_url) return '';
-  let raw = '';
-  if (Buffer.isBuffer(file_url) || file_url instanceof Uint8Array || Array.isArray(file_url)) {
-    raw = Buffer.from(file_url).toString('utf-8');
-  } else if (typeof file_url === 'string') {
-    if (/^\d+(,\d+)+$/.test(file_url)) {
-      const nums = file_url.split(',').map((n) => parseInt(n, 10));
-      raw = Buffer.from(nums).toString('utf-8');
-    } else {
-      raw = file_url;
-    }
-  } else if (file_url.data && (Array.isArray(file_url.data) || Buffer.isBuffer(file_url.data))) {
-    raw = Buffer.from(file_url.data).toString('utf-8');
+const getResolvedAttachmentUrl = (att) => {
+  if (!att) return '';
+  if (att.attachment_id) {
+    return `/api/attachments/${att.attachment_id.toString()}/image`;
   }
-
-  if (!raw || typeof raw !== 'string') return '';
-  raw = raw.trim();
-
-  if (raw.startsWith('ENC:v1:')) {
-    try {
-      const dec = decryptImageData(raw);
-      if (dec && dec.length > 0) return dec;
-    } catch (e) {
-      console.warn('⚠️ Gagal decrypt ENC:v1:', e.message);
-    }
-  }
-
-  if (raw.startsWith('enc:v1:') || isEncrypted(raw)) {
-    try {
-      const dec = decryptImage(raw);
-      if (dec && dec.length > 0) return dec;
-    } catch (e) {
-      console.warn('⚠️ Gagal decrypt enc:v1:', e.message);
-    }
-  }
-
-  return raw;
+  if (att._decryptedUrl !== undefined) return att._decryptedUrl;
+  return decryptAttachmentUrl(att.file_url);
 };
 
 const formatDateString = (dateObj) => {
@@ -85,7 +56,8 @@ const INDONESIAN_MONTHS = [
 /**
  * Helper format entitas checklist_report ke interface AuditReportItem
  */
-const formatReportItem = (report) => {
+const formatReportItem = (report, options = {}) => {
+  const { summaryOnly = false } = options;
   const schedule = report.schedule || {};
   const store = schedule.store || {};
   const staff = report.staff || {};
@@ -104,24 +76,25 @@ const formatReportItem = (report) => {
   // 1. Ambil temuan dari checklist_answer jika ada
   if (Array.isArray(report.checklist_answer) && report.checklist_answer.length > 0) {
     report.checklist_answer.forEach((ans, idx) => {
-      const task = ans.template_task || {};
-      const cat = task.template_category || {};
       const isIssue = ans.answer === 'no';
       if (isIssue) issueCount++;
+      if (summaryOnly) return;
+
+      const task = ans.template_task || {};
+      const cat = task.template_category || {};
 
       let photoUrl = '';
       let photoCaption = '';
       if (Array.isArray(ans.attachment) && ans.attachment.length > 0) {
-        photoUrl = decryptAttachmentUrl(ans.attachment[0].file_url);
+        photoUrl = getResolvedAttachmentUrl(ans.attachment[0]);
         photoCaption = ans.attachment[0].caption || '';
       } else if (Array.isArray(report.attachment) && report.attachment.length > 0) {
-        // Hanya kaitkan attachment yang memang terhubung secara eksplisit via answer_id
         const taskAtt = report.attachment.find(
           (a) => a.answer_id && ans.answer_id && a.answer_id.toString() === ans.answer_id.toString()
         );
 
         if (taskAtt) {
-          photoUrl = decryptAttachmentUrl(taskAtt.file_url);
+          photoUrl = getResolvedAttachmentUrl(taskAtt);
           photoCaption = taskAtt.caption || '';
         }
       }
@@ -163,6 +136,7 @@ const formatReportItem = (report) => {
 
       const isIssue = Boolean(parsed.hasIssue);
       if (isIssue) issueCount++;
+      if (summaryOnly) return;
 
       const isPhotoRequired = Boolean(parsed.isPhotoRequired ?? parsed.requirePhoto ?? true);
       const priority = isPhotoRequired || parsed.priority === 'High' || parsed.issueSeverity === 'Tinggi' ? 'High' : 'Low';
@@ -177,7 +151,7 @@ const formatReportItem = (report) => {
         priority,
         severity,
         issueNote: parsed.issueDescription || parsed.description || att.caption,
-        photoUrl: decryptAttachmentUrl(att.file_url),
+        photoUrl: getResolvedAttachmentUrl(att),
         photoCaption: parsed.caption || att.caption || `Foto_Audit_${idx + 1}.jpg`,
         photoTimestamp: submitTimeStr,
         recommendation: isIssue ? 'Lakukan perbaikan dan koordinasi dengan Store Manager maksimal 1x24 jam.' : undefined,
@@ -207,14 +181,14 @@ const formatReportItem = (report) => {
   // Ambil tanda tangan digital & foto selfie verifikasi auditor jika ada
   let signatureUrl = '';
   let selfieUrl = '';
-  if (!isNonCompliant && Array.isArray(report.attachment)) {
+  if (!summaryOnly && !isNonCompliant && Array.isArray(report.attachment)) {
     const sig = report.attachment.find((a) => a.file_type === 'signature');
-    if (sig) signatureUrl = decryptAttachmentUrl(sig.file_url);
+    if (sig) signatureUrl = getResolvedAttachmentUrl(sig);
 
     const selfie = report.attachment.find((a) => a.file_type === 'report_photo');
-    if (selfie) selfieUrl = decryptAttachmentUrl(selfie.file_url);
+    if (selfie) selfieUrl = getResolvedAttachmentUrl(selfie);
   }
-  const auditorPhoto = isNonCompliant ? undefined : (selfieUrl || (staff.photo ? decryptAttachmentUrl(staff.photo) : undefined));
+  const auditorPhoto = summaryOnly || isNonCompliant ? undefined : (selfieUrl || (staff.photo ? decryptAttachmentUrl(staff.photo) : undefined));
 
   return {
     id: `rep-${report.report_id.toString()}`,
@@ -231,7 +205,7 @@ const formatReportItem = (report) => {
     complianceScore,
     summaryNote,
     findings,
-    signatureUrl: isNonCompliant ? undefined : (signatureUrl || undefined),
+    signatureUrl: summaryOnly || isNonCompliant ? undefined : (signatureUrl || undefined),
     auditorPhoto,
     workspaceName: workspace.company_name || 'Workspace',
   };
@@ -243,7 +217,7 @@ const formatReportItem = (report) => {
  */
 exports.getAllReports = async (req, res) => {
   try {
-    const user = await extractUser(req);
+    const user = req.user || (await extractUser(req));
     const {
       workspaceId,
       storeName,
@@ -251,35 +225,37 @@ exports.getAllReports = async (req, res) => {
       month,
       status,
       search,
+      page,
+      limit,
     } = req.query;
 
     const requestedWsId = workspaceId || req.headers['x-workspace-id'];
-    const where = {};
-
-    let targetWsId = null;
-
-    // 1. Isolasi Workspace & Hak Akses Role
-    if (requestedWsId && requestedWsId !== 'all') {
-      try {
-        targetWsId = requestedWsId.toString().replace(/^ws-/, '');
-        where.schedule = { store: { workspace_id: BigInt(targetWsId) } };
-      } catch (e) {}
-    } else if (user && (user.role === 'Divisi Teknis' || user.role === 'Teknis') && user.workspaceId) {
-      targetWsId = user.workspaceId.toString().replace(/^ws-/, '');
-      where.schedule = { store: { workspace_id: BigInt(targetWsId) } };
-    } else if (user && user.role === 'Admin' && user.workspaceId) {
-      targetWsId = user.workspaceId.toString().replace(/^ws-/, '');
-      where.schedule = { store: { workspace_id: BigInt(targetWsId) } };
-    } else if (user && user.role === 'Super Admin' && user.rawId) {
-      where.schedule = {
-        store: {
-          workspace: { super_admin_id: BigInt(user.rawId) },
-        },
-      };
+    const scope = await resolveScopedWorkspaceContext(user, requestedWsId, {
+      teknisUseSingleDefaultOnAll: true,
+    });
+    if (!scope.ok) {
+      return res.status(scope.status).json({ status: 'error', message: scope.message });
+    }
+    if (scope.workspaceIds.length === 0) {
+      return res.status(200).json({
+        status: 'success',
+        data: [],
+        meta: { total: 0 },
+      });
     }
 
-    // Auto-sinkronisasi jadwal yang melewati toleransi menjadi record 'tidak_mengerjakan' permanen di database
-    await syncExpiredSchedulesToDb({ workspaceId: targetWsId });
+    const where = {
+      schedule: {
+        store: scope.prismaWorkspaceWhere.workspace_id
+          ? { workspace_id: scope.prismaWorkspaceWhere.workspace_id }
+          : { workspace: scope.prismaWorkspaceWhere },
+      },
+    };
+
+    // Auto-sinkronisasi jadwal yang melewati toleransi untuk workspace dalam lingkup user
+    for (const wsId of scope.workspaceIds) {
+      await syncExpiredSchedulesToDb({ workspaceId: wsId });
+    }
 
     // 2. Filter Store
     if (storeName && storeName !== 'Semua Toko') {
@@ -300,42 +276,55 @@ exports.getAllReports = async (req, res) => {
       };
     }
 
-    // 4. Query PostgreSQL
+    // 4. Query PostgreSQL (hanya metadata teks, hindari join tabel template & blob bytes yang berat)
     const reports = await prisma.checklist_report.findMany({
       where,
-      include: {
+      select: {
+        report_id: true,
+        schedule_id: true,
+        staff_id: true,
+        started_at: true,
+        completed_at: true,
+        created_at: true,
+        status: true,
+        total_questions: true,
         schedule: {
-          include: {
+          select: {
+            title: true,
             store: {
               select: {
                 store_id: true,
                 store_name: true,
                 city: true,
                 address: true,
-                workspace: true,
+                workspace: {
+                  select: { company_name: true },
+                },
               },
             },
-            checklist_template: true,
           },
         },
-        staff: true,
+        staff: {
+          select: {
+            name: true,
+          },
+        },
         attachment: {
-          orderBy: { attachment_id: 'asc' },
+          select: {
+            caption: true,
+            file_type: true,
+          },
         },
         checklist_answer: {
-          include: {
-            template_task: {
-              include: { template_category: true },
-            },
-            attachment: true,
+          select: {
+            answer: true,
           },
-          orderBy: { answer_id: 'asc' },
         },
       },
       orderBy: { created_at: 'desc' },
     });
 
-    let formatted = reports.map(formatReportItem);
+    let formatted = reports.map((r) => formatReportItem(r, { summaryOnly: true }));
 
     // 5. In-Memory Filters (Search, Month, Status)
     if (search && search.trim()) {
@@ -363,20 +352,33 @@ exports.getAllReports = async (req, res) => {
       }
     }
 
+    // 6. Pagination Server-Side (Opsional: kompatibel mundur jika limit tidak diberikan)
+    const total = formatted.length;
+    let paginated = formatted;
+    let pageNum = 1;
+    let limitNum = total;
+    let totalPages = 1;
+
+    if (limit && !isNaN(parseInt(limit, 10)) && parseInt(limit, 10) > 0) {
+      limitNum = parseInt(limit, 10);
+      pageNum = page && !isNaN(parseInt(page, 10)) && parseInt(page, 10) > 0 ? parseInt(page, 10) : 1;
+      totalPages = Math.ceil(total / limitNum) || 1;
+      const startIndex = (pageNum - 1) * limitNum;
+      paginated = formatted.slice(startIndex, startIndex + limitNum);
+    }
+
     return res.status(200).json({
       status: 'success',
-      data: formatted,
+      data: paginated,
       meta: {
-        total: formatted.length,
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages,
       },
     });
   } catch (error) {
-    console.error('❌ Error in getAllReports:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal mengambil data laporan audit dari database.',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal mengambil data laporan audit dari database.');
   }
 };
 
@@ -386,39 +388,34 @@ exports.getAllReports = async (req, res) => {
  */
 exports.getReportMeta = async (req, res) => {
   try {
-    const user = await extractUser(req);
+    const user = req.user || (await extractUser(req));
     const requestedWsId = req.query.workspaceId || req.headers['x-workspace-id'];
-    const where = {};
-    const storeWhere = {};
-    const scheduleWhere = { deleted_at: null, status: { not: 'cancelled' } };
-
-    let targetWsId = null;
-
-    if (requestedWsId && requestedWsId !== 'all') {
-      try {
-        targetWsId = requestedWsId.toString().replace(/^ws-/, '');
-        where.schedule = { store: { workspace_id: BigInt(targetWsId) } };
-        storeWhere.workspace_id = BigInt(targetWsId);
-        scheduleWhere.store = { workspace_id: BigInt(targetWsId) };
-      } catch (e) {}
-    } else if (user && (user.role === 'Divisi Teknis' || user.role === 'Teknis') && user.workspaceId) {
-      targetWsId = user.workspaceId.toString().replace(/^ws-/, '');
-      where.schedule = { store: { workspace_id: BigInt(targetWsId) } };
-      storeWhere.workspace_id = BigInt(targetWsId);
-      scheduleWhere.store = { workspace_id: BigInt(targetWsId) };
-    } else if (user && user.role === 'Admin' && user.workspaceId) {
-      targetWsId = user.workspaceId.toString().replace(/^ws-/, '');
-      where.schedule = { store: { workspace_id: BigInt(targetWsId) } };
-      storeWhere.workspace_id = BigInt(targetWsId);
-      scheduleWhere.store = { workspace_id: BigInt(targetWsId) };
-    } else if (user && user.role === 'Super Admin' && user.rawId) {
-      where.schedule = { store: { workspace: { super_admin_id: BigInt(user.rawId) } } };
-      storeWhere.workspace = { super_admin_id: BigInt(user.rawId) };
-      scheduleWhere.store = { workspace: { super_admin_id: BigInt(user.rawId) } };
+    const scope = await resolveScopedWorkspaceContext(user, requestedWsId, {
+      teknisUseSingleDefaultOnAll: true,
+    });
+    if (!scope.ok) {
+      return res.status(scope.status).json({ status: 'error', message: scope.message });
+    }
+    if (scope.workspaceIds.length === 0) {
+      return res.status(200).json({
+        status: 'success',
+        data: { stores: [], schedules: [], months: [] },
+      });
     }
 
-    // Auto-sinkronisasi jadwal yang melewati toleransi menjadi record 'tidak_mengerjakan' permanen di database
-    await syncExpiredSchedulesToDb({ workspaceId: targetWsId });
+    const storeWhere = scope.prismaWorkspaceWhere.workspace_id
+      ? { workspace_id: scope.prismaWorkspaceWhere.workspace_id }
+      : { workspace: scope.prismaWorkspaceWhere };
+    const where = { schedule: { store: storeWhere } };
+    const scheduleWhere = {
+      deleted_at: null,
+      status: { not: 'cancelled' },
+      store: storeWhere,
+    };
+
+    for (const wsId of scope.workspaceIds) {
+      await syncExpiredSchedulesToDb({ workspaceId: wsId });
+    }
 
     const [dbStores, dbSchedules, reports] = await Promise.all([
       prisma.store.findMany({
@@ -481,12 +478,7 @@ exports.getReportMeta = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('❌ Error in getReportMeta:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal mengambil metadata laporan audit.',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal mengambil metadata laporan audit.');
   }
 };
 
@@ -496,11 +488,18 @@ exports.getReportMeta = async (req, res) => {
  */
 exports.getReportById = async (req, res) => {
   try {
+    const user = req.user || (await extractUser(req));
     const rawId = req.params.id.replace(/^rep-/, '');
 
     // Tangani laporan jadwal yang tidak dikerjakan
     if (rawId.startsWith('uncompleted-')) {
-      const schedId = BigInt(rawId.replace(/^uncompleted-/, ''));
+      const schedId = toBigIntSafe(rawId.replace(/^uncompleted-/, ''), ['sch-']);
+      if (!schedId) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Format ID laporan tidak valid.',
+        });
+      }
       const s = await prisma.schedule.findUnique({
         where: { schedule_id: schedId },
         include: {
@@ -509,69 +508,118 @@ exports.getReportById = async (req, res) => {
           schedule_staff: { include: { staff: true } },
         },
       });
-      if (s) {
-        const assignedStaff = s.schedule_staff?.[0]?.staff;
-        const now = new Date();
-        const wibTimestamp = now.getTime() + 7 * 60 * 60 * 1000;
-        const wibDate = new Date(wibTimestamp);
-        const submitDateStr = `${wibDate.getUTCDate()} ${INDONESIAN_MONTHS[wibDate.getUTCMonth()]} ${wibDate.getUTCFullYear()}`;
-        const submitTimeStr = `${formatTimeString(s.end_time)} WIB`;
-        const monthStr = `${INDONESIAN_MONTHS[wibDate.getUTCMonth()]} ${wibDate.getUTCFullYear()}`;
-
-        return res.status(200).json({
-          status: 'success',
-          data: {
-            id: `rep-uncompleted-${s.schedule_id}`,
-            storeName: s.store?.store_name || 'Outlet Ritel Audit',
-            storeLocation: s.store?.city || s.store?.address || 'Indonesia',
-            scheduleName: s.title || s.checklist_template?.template_name || 'Checklist Operasional Harian',
-            auditorName: '-',
-            auditorRole: '-',
-            submitDate: submitDateStr,
-            submitTime: submitTimeStr,
-            month: monthStr,
-            status: 'Tidak Mengerjakan',
-            issueCount: 0,
-            complianceScore: 0,
-            summaryNote: 'Tugas audit ini ditutup otomatis oleh sistem karena staf melewati batas toleransi keterlambatan 1 jam tanpa penyerahan checklist (Tidak Mengerjakan / Tidak Patuh).',
-            findings: [],
-            signatureUrl: undefined,
-            auditorPhoto: undefined,
-            workspaceName: s.store?.workspace?.company_name || 'Workspace',
-          },
+      if (!s) {
+        return res.status(404).json({
+          status: 'error',
+          message: 'Laporan audit tidak ditemukan.',
         });
       }
+      const wsAccess = await assertWorkspaceAccess(user, s.store?.workspace_id);
+      if (!wsAccess.ok) {
+        return res.status(wsAccess.status).json({
+          status: 'error',
+          message: 'Anda tidak memiliki akses ke laporan milik workspace lain.',
+        });
+      }
+      const now = new Date();
+      const wibTimestamp = now.getTime() + 7 * 60 * 60 * 1000;
+      const wibDate = new Date(wibTimestamp);
+      const submitDateStr = `${wibDate.getUTCDate()} ${INDONESIAN_MONTHS[wibDate.getUTCMonth()]} ${wibDate.getUTCFullYear()}`;
+      const submitTimeStr = `${formatTimeString(s.end_time)} WIB`;
+      const monthStr = `${INDONESIAN_MONTHS[wibDate.getUTCMonth()]} ${wibDate.getUTCFullYear()}`;
+
+      return res.status(200).json({
+        status: 'success',
+        data: {
+          id: `rep-uncompleted-${s.schedule_id}`,
+          storeName: s.store?.store_name || 'Outlet Ritel Audit',
+          storeLocation: s.store?.city || s.store?.address || 'Indonesia',
+          scheduleName: s.title || s.checklist_template?.template_name || 'Checklist Operasional Harian',
+          auditorName: '-',
+          auditorRole: '-',
+          submitDate: submitDateStr,
+          submitTime: submitTimeStr,
+          month: monthStr,
+          status: 'Tidak Mengerjakan',
+          issueCount: 0,
+          complianceScore: 0,
+          summaryNote: 'Tugas audit ini ditutup otomatis oleh sistem karena staf melewati batas toleransi keterlambatan 1 jam tanpa penyerahan checklist (Tidak Mengerjakan / Tidak Patuh).',
+          findings: [],
+          signatureUrl: undefined,
+          auditorPhoto: undefined,
+          workspaceName: s.store?.workspace?.company_name || 'Workspace',
+        },
+      });
     }
 
-    const reportId = BigInt(rawId);
+    const reportId = toBigIntSafe(rawId);
+    if (!reportId) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Format ID laporan tidak valid.',
+      });
+    }
 
     const report = await prisma.checklist_report.findUnique({
       where: { report_id: reportId },
-      include: {
+      select: {
+        report_id: true,
+        schedule_id: true,
+        staff_id: true,
+        started_at: true,
+        completed_at: true,
+        created_at: true,
+        status: true,
+        total_questions: true,
         schedule: {
-          include: {
+          select: {
+            title: true,
             store: {
               select: {
                 store_id: true,
+                workspace_id: true,
                 store_name: true,
                 city: true,
                 address: true,
-                workspace: true,
+                workspace: {
+                  select: { company_name: true },
+                },
               },
             },
-            checklist_template: true,
           },
         },
-        staff: true,
+        staff: {
+          select: {
+            name: true,
+            photo: true,
+          },
+        },
         attachment: {
+          select: {
+            attachment_id: true,
+            report_id: true,
+            answer_id: true,
+            file_type: true,
+            caption: true,
+            updated_at: true,
+          },
           orderBy: { attachment_id: 'asc' },
         },
         checklist_answer: {
-          include: {
+          select: {
+            answer_id: true,
+            answer: true,
+            comment: true,
             template_task: {
-              include: { template_category: true },
+              select: {
+                task_description: true,
+                is_photo_required: true,
+                priority: true,
+                template_category: {
+                  select: { category_name: true },
+                },
+              },
             },
-            attachment: true,
           },
           orderBy: { answer_id: 'asc' },
         },
@@ -585,16 +633,19 @@ exports.getReportById = async (req, res) => {
       });
     }
 
+    const wsAccess = await assertWorkspaceAccess(user, report.schedule?.store?.workspace_id);
+    if (!wsAccess.ok) {
+      return res.status(wsAccess.status).json({
+        status: 'error',
+        message: 'Anda tidak memiliki akses ke laporan milik workspace lain.',
+      });
+    }
+
     return res.status(200).json({
       status: 'success',
-      data: formatReportItem(report),
+      data: formatReportItem(report, { summaryOnly: false }),
     });
   } catch (error) {
-    console.error('❌ Error in getReportById:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal mengambil detail laporan audit.',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal mengambil detail laporan audit.');
   }
 };

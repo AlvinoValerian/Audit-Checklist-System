@@ -27,6 +27,8 @@ import {
 } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import { AuthService, AuthUser } from "@/lib/auth";
+import { apiFetch } from "@/lib/api-client";
+import StaffAuthGuard from "@/components/auth/StaffAuthGuard";
 import { optimizeAndResizeImage, encryptImageData } from "@/lib/image-crypto";
 import DecryptedImage from "@/components/DecryptedImage";
 
@@ -212,82 +214,58 @@ function KonfirmasiContent() {
 
     // Sinkronkan profil akun & detail jadwal realtime langsung dari backend database PostgreSQL
     const syncRealtimeData = async () => {
-      const token = AuthService.getToken();
-      if (token) {
-        try {
-          let meRes: Response | null = await fetch("/api/auth/me", {
-            headers: { Authorization: `Bearer ${token}` },
-            cache: "no-store",
-          });
-          if (!meRes || meRes.status >= 500) {
-            meRes = await fetch("http://127.0.0.1:5000/api/auth/me", {
-              headers: { Authorization: `Bearer ${token}` },
-              cache: "no-store",
-            });
-          }
-          if (meRes && (meRes.status === 401 || meRes.status === 403)) {
-            const errJson = await meRes.json().catch(() => null);
-            toast.error(errJson?.message || "Akun dinonaktifkan atau sesi Anda telah berakhir.");
-            AuthService.logout();
-            router.replace("/login");
+      try {
+        const meRes = await apiFetch("/api/auth/me", {
+          cache: "no-store",
+        });
+        if (meRes.status === 401) {
+          return;
+        }
+        if (meRes.status === 403) {
+          const errJson = await meRes.json().catch(() => null);
+          if (errJson?.code === "ACCOUNT_INACTIVE") {
             return;
           }
-          if (meRes && meRes.ok) {
-            const meJson = await meRes.json();
-            if (meJson.status === "success" && meJson.data?.user) {
-              const freshUser: AuthUser = meJson.data.user;
-              user = freshUser;
-              setCurrentUser(freshUser);
-              AuthService.setCurrentUser(freshUser);
-              if (freshUser.fullName) setManualStaffName((prev) => prev || freshUser.fullName);
-              if (freshUser.position) setManualPosition((prev) => prev || freshUser.position!);
-            }
-          }
-        } catch (e) {
-          console.warn("Gagal menyinkronkan profil user:", e);
+          toast.error(errJson?.message || "Akses ditolak.");
+          return;
         }
+        if (meRes.ok) {
+          const meJson = await meRes.json();
+          if (meJson.status === "success" && meJson.data?.user) {
+            const freshUser: AuthUser = meJson.data.user;
+            user = freshUser;
+            setCurrentUser(freshUser);
+            AuthService.setCurrentUser(freshUser);
+            if (freshUser.fullName) setManualStaffName((prev) => prev || freshUser.fullName);
+            if (freshUser.position) setManualPosition((prev) => prev || freshUser.position!);
+          }
+        }
+      } catch (e) {
+        console.warn("Gagal menyinkronkan profil user:", e);
       }
 
       if (!activeScheduleId) return;
 
       try {
         const headers: Record<string, string> = {};
-        if (token) headers["Authorization"] = `Bearer ${token}`;
-        if (user?.email) headers["x-user-email"] = user.email;
-        if (user?.role) headers["x-user-role"] = user.role;
-        const rawId =
-          user?.rawId ||
-          (user?.id
-            ? user.id.replace(/^staff-/, "").replace(/^sa-/, "").replace(/^adm-/, "")
-            : undefined);
-        if (rawId) headers["x-user-id"] = rawId;
         if (user?.storeId) headers["x-store-id"] = user.storeId.toString();
 
-        let res: Response | null = null;
-        try {
-          res = await fetch(`/api/staff/schedules/${activeScheduleId}`, {
-            headers,
-            cache: "no-store",
-          });
-          if (!res || res.status >= 500) {
-            throw new Error(`HTTP ${res?.status}`);
-          }
-        } catch {
-          res = await fetch(`http://127.0.0.1:5000/api/staff/schedules/${activeScheduleId}`, {
-            headers,
-            cache: "no-store",
-          });
+        const res = await apiFetch(`/api/staff/schedules/${activeScheduleId}`, {
+          headers,
+          cache: "no-store",
+        });
+
+        if (res.status === 401) {
+          return;
         }
 
-        if (res && (res.status === 401 || res.status === 403)) {
+        if (res.status === 403) {
           const errJson = await res.json().catch(() => null);
-          toast.error(errJson?.message || "Akses ditolak atau sesi Anda telah berakhir.");
-          if (res.status === 401) {
-            AuthService.logout();
-            router.replace("/login");
-          } else {
-            router.replace("/jadwal-staff");
+          if (errJson?.code === "ACCOUNT_INACTIVE") {
+            return;
           }
+          toast.error(errJson?.message || "Akses ditolak.");
+          router.replace("/jadwal-staff");
           return;
         }
 
@@ -919,22 +897,9 @@ function KonfirmasiContent() {
     setIsSubmitting(true);
 
     try {
-      const token = AuthService.getToken();
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
       };
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-      if (currentUser?.email) headers["x-user-email"] = currentUser.email;
-      if (currentUser?.role) headers["x-user-role"] = currentUser.role;
-      const rawId =
-        currentUser?.rawId ||
-        (currentUser?.id
-          ? currentUser.id
-              .replace(/^staff-/, "")
-              .replace(/^sa-/, "")
-              .replace(/^adm-/, "")
-          : undefined);
-      if (rawId) headers["x-user-id"] = rawId;
       if (currentUser?.storeId) headers["x-store-id"] = currentUser.storeId.toString();
 
       const answersPayload = questions.map((q) => ({
@@ -979,37 +944,22 @@ function KonfirmasiContent() {
         startedAt: auditData?.startedAt || new Date().toISOString(),
       };
 
-      let res: Response | null = null;
-      try {
-        res = await fetch(`/api/staff/schedules/${targetScheduleId}/submit`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(bodyPayload),
-        });
-      } catch (e) {
-        console.warn("Direct rewrite fetch error, attempting direct backend port:", e);
+      const res = await apiFetch(`/api/staff/schedules/${targetScheduleId}/submit`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(bodyPayload),
+      });
+
+      if (res.status === 401) {
+        return;
       }
 
-      if (!res || res.status >= 500) {
-        try {
-          res = await fetch(
-            `http://127.0.0.1:5000/api/staff/schedules/${targetScheduleId}/submit`,
-            {
-              method: "POST",
-              headers,
-              body: JSON.stringify(bodyPayload),
-            }
-          );
-        } catch (backendErr) {
-          console.warn("Direct backend port fetch error:", backendErr);
-        }
-      }
-
-      if (res && res.status === 401) {
+      if (res.status === 403) {
         const errJson = await res.json().catch(() => null);
-        toast.error(errJson?.message || "Sesi Anda telah berakhir. Silakan login kembali.");
-        AuthService.logout();
-        router.replace("/login");
+        if (errJson?.code === "ACCOUNT_INACTIVE") {
+          return;
+        }
+        toast.error(errJson?.message || "Akses ditolak.");
         return;
       }
 
@@ -1678,17 +1628,19 @@ function KonfirmasiContent() {
 
 export default function KonfirmasiSerahkanPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">
-          <div className="flex items-center gap-2 text-sm">
-            <RotateCcw className="w-4 h-4 animate-spin text-blue-400" />
-            <span>Memuat konfirmasi penyerahan audit...</span>
+    <StaffAuthGuard>
+      <Suspense
+        fallback={
+          <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">
+            <div className="flex items-center gap-2 text-sm">
+              <RotateCcw className="w-4 h-4 animate-spin text-blue-400" />
+              <span>Memuat konfirmasi penyerahan audit...</span>
+            </div>
           </div>
-        </div>
-      }
-    >
-      <KonfirmasiContent />
-    </Suspense>
+        }
+      >
+        <KonfirmasiContent />
+      </Suspense>
+    </StaffAuthGuard>
   );
 }
