@@ -1,5 +1,6 @@
 const prisma = require('../config/prisma');
 const AIService = require('../services/ai.service');
+const AuditContextService = require('../services/audit-context.service');
 const { extractUser } = require('../middlewares/auth.middleware');
 const { isSuperAdminRole, isTeknisRole, isStaffRole, sendSafeError } = require('../utils/tenantScope');
 
@@ -157,7 +158,8 @@ const AIController = {
         context ? `\nKonteks Tambahan Lapangan:\n${context}` : null,
       ].filter(Boolean).join('\n');
 
-      const answer = await AIService.askAI(question.trim(), userContext);
+      // 1. Dapatkan jawaban cerdas dari AI Service (Gemini / Ollama / Fallback)
+      const answer = await AIService.askAI(question.trim(), userContext, user);
 
       const now = new Date();
       const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(

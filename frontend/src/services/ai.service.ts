@@ -182,11 +182,6 @@ export class AIService {
    */
   private static _stripAsterisks(text: string): string {
     if (!text) return "";
-    return text
-      .replace(/^([ \t]*)\*+[ \t]+/gm, "$1• ")
-      .replace(/\*\*([^*]+)\*\*/g, "$1")
-      .replace(/\*([^*]+)\*/g, "$1")
-      .replace(/\*/g, "")
-      .trim();
+    return text.trim();
   }
 }
