@@ -44,6 +44,8 @@ const teknisRoutes = require('./src/routes/teknis.routes');
 const galleryRoutes = require('./src/routes/gallery.routes');
 const reportRoutes = require('./src/routes/report.routes');
 const dashboardRoutes = require('./src/routes/dashboard.routes');
+const paymentRoutes = require('./src/routes/payment.routes');
+const sparkpayRoutes = require('./src/routes/sparkpay.routes');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/ai', aiRoutes);
@@ -70,6 +72,13 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/laporan', reportRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/monitoring', dashboardRoutes);
+app.use('/api/payments', paymentRoutes);
+app.use('/api/payment', paymentRoutes);
+app.use('/api', paymentRoutes);
+
+// SparkPay Gateway (Snap.js Sandbox & Webhooks)
+app.use('/api', sparkpayRoutes);
+app.use('/api/sparkpay', sparkpayRoutes);
 
 // Base Route / Health Check
 app.get('/api/health', (req, res) => {
@@ -86,12 +95,14 @@ const handleApiIndex = (req, res) => {
     status: 'success',
     message: 'Audit Checklist System API Directory',
     available_endpoints: {
-      auth_register: 'http://localhost:5000/api/auth/register',
-      auth_login: 'http://localhost:5000/api/auth/login',
-      workspaces: 'http://localhost:5000/api/workspaces',
-      admins: 'http://localhost:5000/api/admins',
-      health: 'http://localhost:5000/api/health',
-      ai_ask: 'http://localhost:5000/api/ai/ask'
+      auth_register: '/api/auth/register',
+      auth_login: '/api/auth/login',
+      workspaces: '/api/workspaces',
+      admins: '/api/admins',
+      health: '/api/health',
+      payment_links: '/api/payment-links',
+      payment_callback: '/api/payment-callback',
+      ai_ask: '/api/ai/ask'
     }
   });
 };
@@ -103,8 +114,7 @@ app.get('/', (req, res) => {
   res.send('API Audit Checklist System Running');
 });
 
-// Start Server
-app.listen(PORT, () => {
-  console.log(`🚀 Backend server is running on http://localhost:${PORT}`);
+// Start Server (Bind to 0.0.0.0 for public & tunnel connectivity)
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Backend server is running on port ${PORT}`);
 });
-

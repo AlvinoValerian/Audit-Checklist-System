@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "dev": "node --watch --watch-path=src --watch-path=index.js index.js",
-    "start": "node index.js",
+    "postinstall": "prisma generate",
+    "build": "prisma generate",
+    "start": "npx prisma generate && node index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -15,6 +17,7 @@
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.1",
     "@prisma/client": "^7.10.0",
+    "axios": "^1.21.0",
     "bcrypt": "^6.0.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
+import Link from "next/link";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import Header from "@/components/layout/Header";
 import {
@@ -19,6 +20,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ShieldAlert,
+  Zap,
 } from "lucide-react";
 import { TeknisUser, TeknisStats as ITeknisStats } from "@/types/teknis";
 import { Workspace } from "@/types/workspace";
@@ -262,6 +264,14 @@ export default function DivisiTeknisPage() {
               </p>
             </div>
           </div>
+
+          <Link
+            href="/pengaturan?tab=sparkpay"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shrink-0 shadow-xs transition-all"
+          >
+            <Zap className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Sandbox SparkPay (Snap.js)</span>
+          </Link>
         </div>
 
         {/* 1. Statistics Cards */}
