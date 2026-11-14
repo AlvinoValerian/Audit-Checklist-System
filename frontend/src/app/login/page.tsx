@@ -86,7 +86,29 @@ function LoginContent() {
 
       const targetUrl = resolvePostLoginRedirect(user?.role, redirectParam);
       setTimeout(() => {
-        window.location.href = targetUrl;
+        const isStaff =
+          user &&
+          (user.role === "Staff" ||
+           user.role === "Auditor Lapangan" ||
+           user.id?.toString().startsWith("staff-") ||
+           user.role?.toLowerCase().includes("staff") ||
+           user.role?.toLowerCase().includes("auditor"));
+
+        if (isStaff) {
+          window.location.href = "/jadwal-staff";
+        } else if (user && user.role === "Admin") {
+          window.location.href = "/dashboard-monitoring";
+        } else if (user && (user.role === "Divisi Teknis" || user.role === "Teknis")) {
+          window.location.href = "/divisi-teknis";
+        } else {
+          // Super Admin: Jika belum lunas, aktifkan modal pembayaran saat mendarat di workspace
+          try {
+            if (localStorage.getItem("superadmin_paid") !== "true") {
+              localStorage.setItem("show_payment_modal_on_workspace", "true");
+            }
+          } catch {}
+          window.location.href = "/workspace";
+        }
       }, 500);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Terjadi kesalahan saat mencoba login.";

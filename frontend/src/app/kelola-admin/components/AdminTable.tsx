@@ -10,10 +10,12 @@ import {
   Loader2,
 } from "lucide-react";
 import { AdminUser } from "@/types/admin";
+import { Workspace } from "@/types/workspace";
 import ActionButtons from "@/components/ui/ActionButtons";
 
 interface AdminTableProps {
   admins: AdminUser[];
+  workspaces?: Workspace[];
   isLoading?: boolean;
   onAdd?: () => void;
   onEdit?: (admin: AdminUser) => void;
@@ -23,6 +25,7 @@ interface AdminTableProps {
 
 export default function AdminTable({
   admins,
+  workspaces,
   isLoading = false,
   onAdd,
   onEdit,
@@ -39,11 +42,16 @@ export default function AdminTable({
 
   const workspaceOptions = useMemo(() => {
     const set = new Set<string>();
+    if (workspaces && workspaces.length > 0) {
+      workspaces.forEach((w) => {
+        if (w.name) set.add(w.name);
+      });
+    }
     admins.forEach((a) => {
       if (a.workspaceName) set.add(a.workspaceName);
     });
     return Array.from(set);
-  }, [admins]);
+  }, [admins, workspaces]);
 
   // Filter Logic
   const filteredAdmins = useMemo(() => {

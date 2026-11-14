@@ -160,8 +160,8 @@ const teknisRoutes = require('./src/routes/teknis.routes');
 const galleryRoutes = require('./src/routes/gallery.routes');
 const reportRoutes = require('./src/routes/report.routes');
 const dashboardRoutes = require('./src/routes/dashboard.routes');
-const attachmentRoutes = require('./src/routes/attachment.routes');
-const realtimeRoutes = require('./src/routes/realtime.routes');
+const paymentRoutes = require('./src/routes/payment.routes');
+const sparkpayRoutes = require('./src/routes/sparkpay.routes');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/ai', aiRoutes);
@@ -188,10 +188,13 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/laporan', reportRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/monitoring', dashboardRoutes);
-app.use('/api/attachments', attachmentRoutes);
-app.use('/api/attachment', attachmentRoutes);
-app.use('/api/realtime', realtimeRoutes);
-app.use('/api/events', realtimeRoutes);
+app.use('/api/payments', paymentRoutes);
+app.use('/api/payment', paymentRoutes);
+app.use('/api', paymentRoutes);
+
+// SparkPay Gateway (Snap.js Sandbox & Webhooks)
+app.use('/api', sparkpayRoutes);
+app.use('/api/sparkpay', sparkpayRoutes);
 
 // Base Route / Health Check
 app.get('/api/health', (req, res) => {
@@ -206,17 +209,17 @@ app.get('/api/health', (req, res) => {
 const handleApiIndex = (req, res) => {
   res.status(200).json({
     status: 'success',
-    message: 'Audit Checklist System API',
-    ...(isProduction
-      ? {}
-      : {
-          available_endpoints: {
-            auth: '/api/auth',
-            workspaces: '/api/workspaces',
-            admins: '/api/admins',
-            health: '/api/health',
-          },
-        }),
+    message: 'Audit Checklist System API Directory',
+    available_endpoints: {
+      auth_register: '/api/auth/register',
+      auth_login: '/api/auth/login',
+      workspaces: '/api/workspaces',
+      admins: '/api/admins',
+      health: '/api/health',
+      payment_links: '/api/payment-links',
+      payment_callback: '/api/payment-callback',
+      ai_ask: '/api/ai/ask'
+    }
   });
 };
 
@@ -244,8 +247,7 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Start Server
+// Start Server (Bind to 0.0.0.0 for public & tunnel connectivity)
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Backend server is running on http://0.0.0.0:${PORT} (http://localhost:${PORT})`);
+  console.log(`🚀 Backend server is running on port ${PORT}`);
 });
-

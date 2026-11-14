@@ -1,34 +1,75 @@
 const prisma = require('../config/prisma');
 const bcrypt = require('bcrypt');
 const { extractUser } = require('../middlewares/auth.middleware');
-const {
-  TEKNIS_INTERNAL_EMAIL,
-  MAX_TEKNIS_MANUAL_SUPER_ADMINS,
-  isTeknisUser,
-  toBigIntSafe,
-  ensureSuperAdminTeknisColumn,
-  getOrCreateTeknisInternalSuperAdmin,
-  getTeknisWorkspaceWhere,
-  isWorkspaceInTeknisScope,
-  getTeknisManualSuperAdminIdSet,
-} = require('../utils/teknisScope');
-const { findEmailConflict } = require('../utils/emailUniqueness');
-const { isSuperAdminRole, sendSafeError } = require('../utils/tenantScope');
-
-// Pastikan kolom created_by_teknis tersedia sejak startup
-ensureSuperAdminTeknisColumn();
 
 /**
- * Helper ketat untuk menyelesaikan Super Admin ID hanya dari user JWT terverifikasi.
- * Tidak lagi mempercayai header x-super-admin-id, query superAdminId, x-user-email, atau fallback tenant lain.
+ * Helper untuk menyelesaikan Super Admin ID yang valid berdasarkan user / request
  */
-const resolveSuperAdminId = async (_req, user) => {
-  if (!user) return null;
+const resolveSuperAdminId = async (req, user) => {
+  // 1. Jika user teridentifikasi sebagai Super Admin
+  if (user && (user.role === 'Super Admin' || user.role?.includes('Super')) && user.rawId) {
+    try {
+      return BigInt(user.rawId.toString().replace(/^sa-/, ''));
+    } catch (e) {}
+  }
 
-  // Divisi Teknis / Teknis dikunci ke akun Super Admin internal Teknis (Opsi A)
-  if (isTeknisUser(user)) {
-    const systemSa = await getOrCreateTeknisInternalSuperAdmin();
-    return systemSa.super_admin_id;
+  // 1.5. Jika user teridentifikasi sebagai Divisi Teknis
+  if (user && (user.role === 'Divisi Teknis' || user.role === 'Teknis')) {
+    return BigInt(3);
+  }
+
+  // 2. Jika user teridentifikasi sebagai Admin, ambil super_admin_id dari workspacenya
+  if (user && (user.role === 'Admin' || user.id?.toString().startsWith('adm-') || user.workspaceId)) {
+    if (user.workspaceId) {
+      try {
+        const ws = await prisma.workspace.findUnique({
+          where: { workspace_id: BigInt(user.workspaceId) },
+          select: { super_admin_id: true },
+        });
+        if (ws?.super_admin_id) return ws.super_admin_id;
+      } catch (e) {}
+    }
+    if (user.rawId) {
+      try {
+        const adm = await prisma.admin.findUnique({
+          where: { admin_id: BigInt(user.rawId.toString().replace(/^adm-/, '')) },
+          include: { workspace: true },
+        });
+        if (adm?.workspace?.super_admin_id) return adm.workspace.super_admin_id;
+      } catch (e) {}
+    }
+  }
+
+  // 3. Cek dari explicit parameter (query / body / header)
+  const explicitSaId = req.headers['x-super-admin-id'] || req.query.superAdminId || req.body?.superAdminId;
+  if (explicitSaId) {
+    try {
+      const parsed = BigInt(explicitSaId.toString().replace(/^sa-/, ''));
+      const exists = await prisma.super_admin.findUnique({
+        where: { super_admin_id: parsed },
+        select: { super_admin_id: true },
+      });
+      if (exists) return exists.super_admin_id;
+    } catch (e) {}
+  }
+
+  // 4. Resolusi dari email
+  const candidateEmail = user?.email || req.headers['x-user-email'] || req.query.email;
+  if (candidateEmail) {
+    const cleanEmail = candidateEmail.trim().toLowerCase();
+    try {
+      const sa = await prisma.super_admin.findUnique({
+        where: { email: cleanEmail },
+        select: { super_admin_id: true },
+      });
+      if (sa) return sa.super_admin_id;
+
+      const adm = await prisma.admin.findUnique({
+        where: { email: cleanEmail },
+        include: { workspace: true },
+      });
+      if (adm?.workspace?.super_admin_id) return adm.workspace.super_admin_id;
+    } catch (e) {}
   }
 
   // Super Admin terverifikasi
@@ -160,7 +201,11 @@ exports.getAllAdmins = async (req, res) => {
 
     const [admins, superAdmins] = await Promise.all([
       prisma.admin.findMany({
-        where: adminWhere,
+        where: {
+          workspace: {
+            super_admin_id: cleanSaId,
+          },
+        },
         include: {
           workspace: true,
         },

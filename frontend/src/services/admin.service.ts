@@ -108,7 +108,7 @@ export const AdminService = {
         headers: getAuthHeaders(),
         body: JSON.stringify({
           ...adminData,
-          ...(saId ? { superAdminId: saId } : {}),
+          superAdminId: saId,
         }),
       });
     } catch (networkErr: unknown) {

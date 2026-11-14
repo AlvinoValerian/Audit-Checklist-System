@@ -43,10 +43,7 @@ const formatWorkspace = (ws) => {
 };
 
 // GET /api/workspaces
-// Menampilkan workspace:
-// - Divisi Teknis (Opsi A): tersinkronisasi dengan Super Admin internal Teknis + Sandbox Testing
-// - Super Admin hanya melihat workspace miliknya
-// - Admin hanya melihat workspace tempat dia ditugaskan
+// HANYA menampilkan workspace yang berelasi dengan user yang sedang login
 exports.getAllWorkspaces = async (req, res) => {
   try {
     const user = req.user || (await extractUser(req));
@@ -56,20 +53,16 @@ exports.getAllWorkspaces = async (req, res) => {
 
     let where = {};
 
-    if (isTeknisUser(user)) {
-      where = await getTeknisWorkspaceWhere();
-    } else if (isSuperAdminRole(user) && user.rawId) {
-      const saId = toBigIntSafe(user.rawId, ['sa-']);
-      if (!saId) {
-        return res.status(403).json({ status: 'error', message: 'Identitas Super Admin tidak valid.' });
-      }
-      where.super_admin_id = saId;
-    } else if (isAdminRole(user) && user.workspaceId) {
-      const wsId = toBigIntSafe(user.workspaceId, ['ws-']);
-      if (!wsId) {
-        return res.status(403).json({ status: 'error', message: 'Workspace Admin tidak valid.' });
-      }
-      where.workspace_id = wsId;
+    if (user && user.role === 'Super Admin' && user.rawId) {
+      where.super_admin_id = BigInt(user.rawId);
+    } else if (user && (user.role === 'Divisi Teknis' || user.role === 'Teknis')) {
+      // Divisi Teknis memiliki akses ke workspace maintenance / testing internal (super_admin_id: 3)
+      where.super_admin_id = BigInt(3);
+    } else if (user && user.role === 'Admin' && user.workspaceId) {
+      where.workspace_id = BigInt(user.workspaceId);
+    } else if (req.query.superAdminId) {
+      const sId = req.query.superAdminId.toString().replace(/^sa-/, '');
+      where.super_admin_id = BigInt(sId);
     } else {
       return res.status(403).json({ status: 'error', message: 'Akses workspace ditolak.' });
     }
@@ -112,10 +105,16 @@ exports.getAllWorkspaces = async (req, res) => {
 // GET /api/workspaces/:id
 exports.getWorkspaceById = async (req, res) => {
   try {
-    const user = req.user || (await extractUser(req));
-    const access = await assertWorkspaceAccess(user, req.params.id);
-    if (!access.ok) {
-      return res.status(access.status).json({ status: 'error', message: access.message });
+    const { id } = req.params;
+    const user = await extractUser(req);
+    const where = { workspace_id: BigInt(id) };
+
+    if (user && user.role === 'Super Admin' && user.rawId) {
+      where.super_admin_id = BigInt(user.rawId);
+    } else if (user && (user.role === 'Divisi Teknis' || user.role === 'Teknis')) {
+      where.super_admin_id = BigInt(3);
+    } else if (user && user.role === 'Admin' && user.workspaceId) {
+      where.workspace_id = BigInt(user.workspaceId);
     }
 
     const workspace = await prisma.workspace.findUnique({
@@ -171,6 +170,19 @@ exports.createWorkspace = async (req, res) => {
       headquartersAddress,
       status,
     } = req.body;
+
+    const user = await extractUser(req);
+    let targetSuperAdminId = user?.rawId || superAdminId || req.query.superAdminId;
+    if (user && (user.role === 'Divisi Teknis' || user.role === 'Teknis')) {
+      targetSuperAdminId = '3';
+    }
+
+    if (!targetSuperAdminId) {
+      return res.status(401).json({
+        status: 'error',
+        message: 'Otentikasi diperlukan. Akun Super Admin tidak teridentifikasi.',
+      });
+    }
 
     const finalCompanyName = companyName || name;
     if (!finalCompanyName || !finalCompanyName.trim()) {
@@ -236,17 +248,37 @@ exports.createWorkspace = async (req, res) => {
 // PUT /api/workspaces/:id
 exports.updateWorkspace = async (req, res) => {
   try {
-    const user = req.user || (await extractUser(req));
-    if (!user || (!isTeknisUser(user) && !isSuperAdminRole(user))) {
-      return res.status(403).json({
-        status: 'error',
-        message: 'Anda tidak memiliki hak akses untuk mengubah workspace.',
-      });
-    }
+    const { id } = req.params;
+    const user = await extractUser(req);
+    const workspaceId = BigInt(id);
 
-    const access = await assertWorkspaceAccess(user, req.params.id);
-    if (!access.ok) {
-      return res.status(access.status).json({ status: 'error', message: access.message });
+    // Cek kepemilikan workspace jika diakses oleh Super Admin atau Divisi Teknis
+    if (user && user.role === 'Super Admin' && user.rawId) {
+      const existing = await prisma.workspace.findFirst({
+        where: {
+          workspace_id: workspaceId,
+          super_admin_id: BigInt(user.rawId),
+        },
+      });
+      if (!existing) {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Anda tidak memiliki hak akses untuk mengubah workspace ini.',
+        });
+      }
+    } else if (user && (user.role === 'Divisi Teknis' || user.role === 'Teknis')) {
+      const existing = await prisma.workspace.findFirst({
+        where: {
+          workspace_id: workspaceId,
+          super_admin_id: BigInt(3),
+        },
+      });
+      if (!existing) {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Anda tidak memiliki hak akses untuk mengubah workspace ini.',
+        });
+      }
     }
 
     const {
@@ -296,17 +328,37 @@ exports.updateWorkspace = async (req, res) => {
 // DELETE /api/workspaces/:id
 exports.deleteWorkspace = async (req, res) => {
   try {
-    const user = req.user || (await extractUser(req));
-    if (!user || (!isTeknisUser(user) && !isSuperAdminRole(user))) {
-      return res.status(403).json({
-        status: 'error',
-        message: 'Hanya Super Admin atau Divisi Teknis yang dapat menghapus workspace.',
-      });
-    }
+    const { id } = req.params;
+    const user = await extractUser(req);
+    const workspaceId = BigInt(id);
 
-    const access = await assertWorkspaceAccess(user, req.params.id);
-    if (!access.ok) {
-      return res.status(access.status).json({ status: 'error', message: access.message });
+    // Cek kepemilikan workspace
+    if (user && user.role === 'Super Admin' && user.rawId) {
+      const existing = await prisma.workspace.findFirst({
+        where: {
+          workspace_id: workspaceId,
+          super_admin_id: BigInt(user.rawId),
+        },
+      });
+      if (!existing) {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Anda tidak memiliki hak akses untuk menghapus workspace ini.',
+        });
+      }
+    } else if (user && (user.role === 'Divisi Teknis' || user.role === 'Teknis')) {
+      const existing = await prisma.workspace.findFirst({
+        where: {
+          workspace_id: workspaceId,
+          super_admin_id: BigInt(3),
+        },
+      });
+      if (!existing) {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Anda tidak memiliki hak akses untuk menghapus workspace ini.',
+        });
+      }
     }
 
     await prisma.workspace.delete({

@@ -22,6 +22,7 @@ import {
   ArrowLeft,
   Wrench,
   Settings,
+  CreditCard,
 } from "lucide-react";
 import { toast } from "sonner";
 import { AuthService } from "@/lib/auth";
@@ -80,6 +81,7 @@ export default function Sidebar() {
     pathname.startsWith("/laporan") ||
     pathname.startsWith("/tanya-ai") ||
     pathname.startsWith("/divisi-teknis") ||
+    pathname.startsWith("/rekap-pembayaran") ||
     pathname.startsWith("/pengaturan");
 
   // 1. Fitur Super Admin
@@ -152,6 +154,11 @@ export default function Sidebar() {
       name: "Teknis",
       href: "/divisi-teknis",
       icon: Wrench,
+    },
+    {
+      name: "Rekap Pembayaran User",
+      href: "/rekap-pembayaran",
+      icon: CreditCard,
     },
     {
       name: "Pengaturan",

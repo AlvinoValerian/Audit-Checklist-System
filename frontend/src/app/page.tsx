@@ -966,10 +966,10 @@ export default function LandingPage() {
                 {/* Bottom CTA Button */}
                 <div className="mt-8 pt-4">
                   <Link
-                    href="/register"
+                    href={`/register?plan=lite&billing=${isYearly ? "yearly" : "monthly"}`}
                     className="w-full py-3 px-4 rounded-full border-2 border-[#26455E] bg-blue-50/80 group-hover:bg-[#26455E] text-[#26455E] group-hover:text-white text-xs font-bold tracking-wide transition-all duration-300 text-center block shadow-xs group-hover:shadow-[0_4px_18px_rgba(38,69,94,0.35)]"
                   >
-                    Registrasi
+                    Pilih Paket Lite
                   </Link>
                 </div>
               </div>
@@ -1047,10 +1047,10 @@ export default function LandingPage() {
                 {/* Bottom CTA Button */}
                 <div className="mt-8 pt-4">
                   <Link
-                    href="/register"
+                    href={`/register?plan=standard&billing=${isYearly ? "yearly" : "monthly"}`}
                     className="w-full py-3 px-4 rounded-full border-2 border-[#26455E] bg-blue-50/80 group-hover:bg-[#26455E] text-[#26455E] group-hover:text-white text-xs font-bold tracking-wide transition-all duration-300 text-center block shadow-xs group-hover:shadow-[0_4px_18px_rgba(38,69,94,0.35)]"
                   >
-                    Registrasi
+                    Pilih Paket Standard
                   </Link>
                 </div>
               </div>
@@ -1128,10 +1128,10 @@ export default function LandingPage() {
                 {/* Bottom CTA Button */}
                 <div className="mt-8 pt-4">
                   <Link
-                    href="/register"
+                    href={`/register?plan=pro&billing=${isYearly ? "yearly" : "monthly"}`}
                     className="w-full py-3 px-4 rounded-full border-2 border-[#26455E] bg-blue-50/80 group-hover:bg-[#26455E] text-[#26455E] group-hover:text-white text-xs font-bold tracking-wide transition-all duration-300 text-center block shadow-xs group-hover:shadow-[0_4px_18px_rgba(38,69,94,0.35)]"
                   >
-                    Registrasi
+                    Pilih Paket Pro
                   </Link>
                 </div>
               </div>
