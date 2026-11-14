@@ -1,5 +1,6 @@
 import { AuditGalleryLog } from "@/types/gallery";
 import { AuthService } from "@/lib/auth";
+import { apiFetch } from "@/lib/api-client";
 
 export interface GalleryFilterParams {
   workspaceId?: string;
@@ -10,6 +11,8 @@ export interface GalleryFilterParams {
   category?: string;
   onlyIssues?: boolean;
   dateRange?: string;
+  page?: number;
+  limit?: number;
 }
 
 const getBackendUrl = (): string => {
@@ -30,22 +33,17 @@ const getAuthHeaders = (): Record<string, string> => {
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
-  if (rawId && !rawId.startsWith("adm-")) {
-    headers["x-super-admin-id"] = rawId;
-    headers["x-user-id"] = rawId;
-  }
-  if (user?.email) {
-    headers["x-user-email"] = user.email;
-  }
   const activeWs = AuthService.getActiveWorkspace();
   if (activeWs?.id) {
     headers["x-workspace-id"] = activeWs.id;
+  } else if (user?.workspaceId) {
+    headers["x-workspace-id"] = user.workspaceId;
   }
   return headers;
 };
 
 const GALLERY_CACHE_KEY = "audit_pro_gallery_logs_cache";
+const inFlightGalleryFetches = new Map<string, Promise<AuditGalleryLog[]>>();
 
 const encodeSvg = (svg: string) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 
@@ -144,40 +142,55 @@ export const GalleryService = {
   },
 
   async fetchAll(params?: GalleryFilterParams): Promise<AuditGalleryLog[]> {
-    try {
-      const query = new URLSearchParams();
-      if (params?.workspaceId) query.set("workspaceId", params.workspaceId);
-      if (params?.storeName && params.storeName !== "Semua Toko") query.set("storeName", params.storeName);
-      if (params?.storeId && params.storeId !== "Semua Toko") query.set("storeId", params.storeId);
-      if (params?.status && params.status !== "Semua Status") query.set("status", params.status);
-      if (params?.search) query.set("search", params.search);
-      if (params?.category && params.category !== "Semua Kategori") query.set("category", params.category);
-      if (params?.onlyIssues) query.set("onlyIssues", "true");
-      if (params?.dateRange && params.dateRange !== "all") query.set("dateRange", params.dateRange);
+    const query = new URLSearchParams();
+    if (params?.workspaceId) query.set("workspaceId", params.workspaceId);
+    if (params?.storeName && params.storeName !== "Semua Toko") query.set("storeName", params.storeName);
+    if (params?.storeId && params.storeId !== "Semua Toko") query.set("storeId", params.storeId);
+    if (params?.status && params.status !== "Semua Status") query.set("status", params.status);
+    if (params?.search) query.set("search", params.search);
+    if (params?.category && params.category !== "Semua Kategori") query.set("category", params.category);
+    if (params?.onlyIssues) query.set("onlyIssues", "true");
+    if (params?.dateRange && params.dateRange !== "all") query.set("dateRange", params.dateRange);
+    if (params?.page) query.set("page", String(params.page));
+    if (params?.limit) query.set("limit", String(params.limit));
 
-      const qs = query.toString() ? `?${query.toString()}` : "";
-      const url = `${BACKEND_URL}/api/gallery${qs}`;
-      const res = await fetch(url, {
-        headers: getAuthHeaders(),
-      });
+    const qs = query.toString() ? `?${query.toString()}` : "";
+    const cacheKey = qs || "all";
 
-      if (!res.ok) {
-        throw new Error(`HTTP error ${res.status}`);
-      }
-
-      const json = await res.json();
-      if (json && (json.status === "success" || json.success) && Array.isArray(json.data)) {
-        if (typeof window !== "undefined") {
-          try {
-            localStorage.setItem(GALLERY_CACHE_KEY, JSON.stringify(json.data));
-          } catch (e) {}
-        }
-        return json.data;
-      }
-    } catch (err) {
-      console.warn("GalleryService.fetchAll failed, falling back to cache:", err);
+    if (inFlightGalleryFetches.has(cacheKey)) {
+      return inFlightGalleryFetches.get(cacheKey)!;
     }
-    return this.getAll();
+
+    const fetchPromise = (async () => {
+      try {
+        const url = `${BACKEND_URL}/api/gallery${qs}`;
+        const res = await apiFetch(url, {
+          headers: getAuthHeaders(),
+        });
+
+        if (!res.ok) {
+          throw new Error(`HTTP error ${res.status}`);
+        }
+
+        const json = await res.json();
+        if (json && (json.status === "success" || json.success) && Array.isArray(json.data)) {
+          if (typeof window !== "undefined") {
+            try {
+              localStorage.setItem(GALLERY_CACHE_KEY, JSON.stringify(json.data));
+            } catch (e) {}
+          }
+          return json.data;
+        }
+      } catch (err) {
+        console.warn("GalleryService.fetchAll failed, falling back to cache:", err);
+      } finally {
+        inFlightGalleryFetches.delete(cacheKey);
+      }
+      return this.getAll();
+    })();
+
+    inFlightGalleryFetches.set(cacheKey, fetchPromise);
+    return fetchPromise;
   },
 
   async fetchStores(workspaceId?: string): Promise<string[]> {
@@ -186,7 +199,7 @@ export const GalleryService = {
       if (workspaceId) query.set("workspaceId", workspaceId);
       const qs = query.toString() ? `?${query.toString()}` : "";
       const url = `${BACKEND_URL}/api/gallery/stores${qs}`;
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         headers: getAuthHeaders(),
       });
 
@@ -208,7 +221,7 @@ export const GalleryService = {
       if (workspaceId) query.set("workspaceId", workspaceId);
       const qs = query.toString() ? `?${query.toString()}` : "";
       const url = `${BACKEND_URL}/api/gallery/stats${qs}`;
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         headers: getAuthHeaders(),
       });
 

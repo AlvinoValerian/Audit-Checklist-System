@@ -129,6 +129,7 @@ const syncExpiredSchedulesToDb = async ({ storeId, workspaceId, staffId, force =
             select: {
               store_id: true,
               store_name: true,
+              workspace_id: true,
             },
           },
           checklist_template: {
@@ -301,11 +302,16 @@ const syncExpiredSchedulesToDb = async ({ storeId, workspaceId, staffId, force =
         const sIdStr = s.schedule_id.toString();
         const sStoreName = (s.store?.store_name || '').trim().toLowerCase();
         const sStoreId = s.store_id.toString();
+        const sWorkspaceId = s.store?.workspace_id ? s.store.workspace_id.toString() : '';
 
         const matchingHoliday = storeHolidays.find((h) => {
           const hStoreId = h.store_id ? h.store_id.toString() : '';
+          const hWorkspaceId = h.workspace_id ? h.workspace_id.toString() : '';
           const hStoreName = (h.store_name || '').trim().toLowerCase();
-          const storeMatches = (hStoreId && hStoreId === sStoreId) || (hStoreName && hStoreName === sStoreName);
+          const sameWorkspace = Boolean(hWorkspaceId && sWorkspaceId && hWorkspaceId === sWorkspaceId);
+          const storeMatches =
+            (hStoreId && hStoreId === sStoreId) ||
+            (sameWorkspace && !hStoreId && hStoreName && hStoreName === sStoreName);
           if (!storeMatches) return false;
 
           const hStart = formatDateString(h.start_date);
@@ -378,15 +384,23 @@ const syncExpiredSchedulesToDb = async ({ storeId, workspaceId, staffId, force =
           }
         }
 
-        if (!targetStaffId) {
-          const anyStaffRows = await prisma.$queryRawUnsafe(
-            `SELECT staff_id FROM staff WHERE deleted_at IS NULL ORDER BY staff_id ASC LIMIT 1`
+        if (!targetStaffId && s.store?.workspace_id) {
+          const wsStaffRows = await prisma.$queryRawUnsafe(
+            `SELECT st.staff_id
+             FROM staff st
+             JOIN store sto ON st.store_id = sto.store_id
+             WHERE sto.workspace_id = $1 AND st.deleted_at IS NULL
+             ORDER BY st.staff_id ASC
+             LIMIT 1`,
+            s.store.workspace_id
           );
-          if (anyStaffRows && anyStaffRows[0]?.staff_id) {
-            targetStaffId = anyStaffRows[0].staff_id;
+          if (wsStaffRows && wsStaffRows[0]?.staff_id) {
+            targetStaffId = wsStaffRows[0].staff_id;
           } else {
             continue;
           }
+        } else if (!targetStaffId) {
+          continue;
         }
 
         // 5. Hitung butir pertanyaan template

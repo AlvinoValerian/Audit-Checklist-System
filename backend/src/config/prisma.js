@@ -14,7 +14,7 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: 10,
   idleTimeoutMillis: 30000, // Daftarkan koneksi idle mati setelah 30 detik agar selalu fresh
-  connectionTimeoutMillis: 10000, // Batas waktu koneksi maksimal 10 detik agar tidak menggantung
+  connectionTimeoutMillis: 20000, // Batas waktu koneksi maksimal 20 detik untuk koneksi DB remote
   keepAlive: true, // Kirim TCP keepalive agar tidak diputus firewall/router
   keepAliveInitialDelayMillis: 10000,
 });

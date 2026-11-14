@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const cryptoController = require('../controllers/crypto.controller');
+const { requireAuth } = require('../middlewares/auth.middleware');
+
+router.use(requireAuth);
 
 router.post('/encrypt', cryptoController.encryptPayload);
 router.post('/encrypt-image', cryptoController.encryptPayload);

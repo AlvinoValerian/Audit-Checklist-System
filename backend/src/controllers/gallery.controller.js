@@ -1,50 +1,12 @@
 const prisma = require('../config/prisma');
 const { extractUser } = require('../middlewares/auth.middleware');
-const { decryptImageData } = require('../utils/imageCrypto');
-const { decryptImage, encryptImage, isEncrypted } = require('../utils/crypto.utils');
-
-/**
- * Helper untuk dekripsi attachment URL foto galeri (mendukung ENC:v1 dan enc:v1)
- */
-const decryptAttachmentUrl = (file_url) => {
-  if (!file_url) return '';
-  let raw = '';
-  if (Buffer.isBuffer(file_url) || file_url instanceof Uint8Array || Array.isArray(file_url)) {
-    raw = Buffer.from(file_url).toString('utf-8');
-  } else if (typeof file_url === 'string') {
-    if (/^\d+(,\d+)+$/.test(file_url)) {
-      const nums = file_url.split(',').map((n) => parseInt(n, 10));
-      raw = Buffer.from(nums).toString('utf-8');
-    } else {
-      raw = file_url;
-    }
-  } else if (file_url.data && (Array.isArray(file_url.data) || Buffer.isBuffer(file_url.data))) {
-    raw = Buffer.from(file_url.data).toString('utf-8');
-  }
-
-  if (!raw || typeof raw !== 'string') return '';
-  raw = raw.trim();
-
-  if (raw.startsWith('ENC:v1:')) {
-    try {
-      const dec = decryptImageData(raw);
-      if (dec && dec.length > 0) return dec;
-    } catch (e) {
-      console.warn('⚠️ Gagal decrypt ENC:v1 di gallery:', e.message);
-    }
-  }
-
-  if (raw.startsWith('enc:v1:') || isEncrypted(raw)) {
-    try {
-      const dec = decryptImage(raw);
-      if (dec && dec.length > 0) return dec;
-    } catch (e) {
-      console.warn('⚠️ Gagal decrypt enc:v1 di gallery:', e.message);
-    }
-  }
-
-  return raw;
-};
+const { encryptImage } = require('../utils/crypto.utils');
+const { decryptAttachmentUrl, hydrateAttachmentUrls } = require('../utils/attachmentCache');
+const {
+  resolveScopedWorkspaceContext,
+  assertStoreAccess,
+  sendSafeError,
+} = require('../utils/tenantScope');
 
 // Koleksi visual foto inspeksi audit toko ritel berkualitas tinggi
 const GALLERY_SEEDS = [
@@ -325,10 +287,9 @@ ensureGallerySeed();
  * Helper untuk format satu foto attachment ke interface AuditPhoto
  */
 const formatPhoto = (att, report, fallbackIndex) => {
-  let rawUrl = decryptAttachmentUrl(att.file_url);
-
-  // Jika URL di database adalah link dummy broken atau kosong, gunakan gambar ritel valid
-  if (!rawUrl || rawUrl.includes('broken') || rawUrl.trim() === '') {
+  const attIdStr = att.attachment_id ? att.attachment_id.toString() : String(fallbackIndex);
+  let rawUrl = att.attachment_id ? `/api/attachments/${attIdStr}/image` : '';
+  if (!rawUrl) {
     rawUrl = 'https://images.unsplash.com/photo-1578916171728-46686eac8d58?q=80&w=700&auto=format&fit=crop';
   }
 
@@ -477,7 +438,7 @@ const formatGalleryLog = (report) => {
  */
 exports.getAllGalleryLogs = async (req, res) => {
   try {
-    const user = await extractUser(req);
+    const user = req.user || (await extractUser(req));
     const {
       workspaceId,
       storeId,
@@ -487,44 +448,48 @@ exports.getAllGalleryLogs = async (req, res) => {
       category,
       onlyIssues,
       dateRange,
+      page,
+      limit,
     } = req.query;
 
     const requestedWsId = workspaceId || req.headers['x-workspace-id'];
-    const where = {};
-
-    // 1. Isolasi Workspace & Hak Akses Role
-    if (user && (user.role === 'Divisi Teknis' || user.role === 'Teknis') && user.workspaceId) {
-      where.schedule = { store: { workspace_id: BigInt(user.workspaceId) } };
-    } else if (requestedWsId && requestedWsId !== 'all') {
-      try {
-        const cleanWs = BigInt(requestedWsId.toString().replace(/^ws-/, ''));
-        where.schedule = { store: { workspace_id: cleanWs } };
-      } catch (e) {}
-    } else if (user && user.role === 'Admin' && user.workspaceId) {
-      where.schedule = { store: { workspace_id: BigInt(user.workspaceId) } };
-    } else if (user && user.role === 'Super Admin' && user.rawId) {
-      const cleanSaId = BigInt(user.rawId);
-      where.schedule = {
-        store: {
-          workspace: { super_admin_id: cleanSaId },
-        },
-      };
+    const scope = await resolveScopedWorkspaceContext(user, requestedWsId, {
+      teknisUseSingleDefaultOnAll: true,
+    });
+    if (!scope.ok) {
+      return res.status(scope.status).json({ status: 'error', message: scope.message });
+    }
+    if (scope.workspaceIds.length === 0) {
+      return res.status(200).json({
+        status: 'success',
+        data: [],
+        meta: { total: 0, stores: [] },
+      });
     }
 
-    // 2. Filter Store jika diberikan
+    const where = {
+      schedule: {
+        store: scope.prismaWorkspaceWhere.workspace_id
+          ? { workspace_id: scope.prismaWorkspaceWhere.workspace_id }
+          : { workspace: scope.prismaWorkspaceWhere },
+      },
+    };
+
+    // 2. Filter Store jika diberikan (pastikan store berada dalam workspace/tenant user)
     if (storeId && storeId !== 'Semua Toko' && storeId !== 'all') {
-      try {
-        const cleanStoreId = BigInt(storeId.toString().replace(/^st-/, ''));
-        where.schedule = {
-          ...(where.schedule || {}),
-          store_id: cleanStoreId,
-        };
-      } catch (e) {}
+      const stAccess = await assertStoreAccess(user, storeId);
+      if (!stAccess.ok) {
+        return res.status(stAccess.status).json({ status: 'error', message: stAccess.message });
+      }
+      where.schedule = {
+        ...where.schedule,
+        store_id: stAccess.storeId,
+      };
     } else if (storeName && storeName !== 'Semua Toko') {
       where.schedule = {
-        ...(where.schedule || {}),
+        ...where.schedule,
         store: {
-          ...(where.schedule?.store || {}),
+          ...where.schedule.store,
           store_name: { contains: storeName.trim(), mode: 'insensitive' },
         },
       };
@@ -537,34 +502,63 @@ exports.getAllGalleryLogs = async (req, res) => {
 
     const reports = await prisma.checklist_report.findMany({
       where,
-      include: {
+      select: {
+        report_id: true,
+        schedule_id: true,
+        started_at: true,
+        created_at: true,
         schedule: {
-          include: {
+          select: {
+            title: true,
             store: {
-              include: { workspace: true },
+              select: {
+                store_id: true,
+                store_name: true,
+                city: true,
+                address: true,
+                workspace: {
+                  select: { company_name: true },
+                },
+              },
             },
-            checklist_template: true,
           },
         },
-        staff: true,
+        staff: {
+          select: {
+            name: true,
+          },
+        },
         attachment: {
-          include: {
+          where: {
+            file_type: { notIn: ['signature', 'report_photo'] },
+          },
+          select: {
+            attachment_id: true,
+            report_id: true,
+            answer_id: true,
+            file_type: true,
+            caption: true,
+            signer_name: true,
+            created_at: true,
+            updated_at: true,
             checklist_answer: {
-              include: {
+              select: {
+                answer: true,
+                comment: true,
                 template_task: {
-                  include: { template_category: true },
+                  select: {
+                    task_description: true,
+                    is_photo_required: true,
+                    priority: true,
+                    template_category: {
+                      select: { category_name: true },
+                    },
+                  },
                 },
               },
             },
           },
           orderBy: { attachment_id: 'asc' },
-        },
-        checklist_answer: {
-          include: {
-            template_task: {
-              include: { template_category: true },
-            },
-          },
         },
       },
       orderBy: { created_at: 'desc' },
@@ -622,21 +616,34 @@ exports.getAllGalleryLogs = async (req, res) => {
     // Ambil daftar unik seluruh toko yang tersedia untuk filter dropdown
     const availableStores = Array.from(new Set(reports.map((r) => r.schedule?.store?.store_name).filter(Boolean)));
 
+    // Pagination Server-Side (Opsional: kompatibel mundur jika limit tidak diberikan)
+    const total = formatted.length;
+    let paginated = formatted;
+    let pageNum = 1;
+    let limitNum = total;
+    let totalPages = 1;
+
+    if (limit && !isNaN(parseInt(limit, 10)) && parseInt(limit, 10) > 0) {
+      limitNum = parseInt(limit, 10);
+      pageNum = page && !isNaN(parseInt(page, 10)) && parseInt(page, 10) > 0 ? parseInt(page, 10) : 1;
+      totalPages = Math.ceil(total / limitNum) || 1;
+      const startIndex = (pageNum - 1) * limitNum;
+      paginated = formatted.slice(startIndex, startIndex + limitNum);
+    }
+
     return res.status(200).json({
       status: 'success',
-      data: formatted,
+      data: paginated,
       meta: {
-        total: formatted.length,
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages,
         stores: availableStores,
       },
     });
   } catch (error) {
-    console.error('❌ Error in getAllGalleryLogs:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal mengambil galeri foto audit dari database.',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal mengambil galeri foto audit dari database.');
   }
 };
 
@@ -646,21 +653,21 @@ exports.getAllGalleryLogs = async (req, res) => {
  */
 exports.getGalleryStores = async (req, res) => {
   try {
-    const user = await extractUser(req);
+    const user = req.user || (await extractUser(req));
     const requestedWsId = req.query.workspaceId || req.headers['x-workspace-id'];
-    const where = {};
-
-    if (user && (user.role === 'Divisi Teknis' || user.role === 'Teknis') && user.workspaceId) {
-      where.workspace_id = BigInt(user.workspaceId);
-    } else if (requestedWsId && requestedWsId !== 'all') {
-      try {
-        where.workspace_id = BigInt(requestedWsId.toString().replace(/^ws-/, ''));
-      } catch (e) {}
-    } else if (user && user.role === 'Admin' && user.workspaceId) {
-      where.workspace_id = BigInt(user.workspaceId);
-    } else if (user && user.role === 'Super Admin' && user.rawId) {
-      where.workspace = { super_admin_id: BigInt(user.rawId) };
+    const scope = await resolveScopedWorkspaceContext(user, requestedWsId, {
+      teknisUseSingleDefaultOnAll: true,
+    });
+    if (!scope.ok) {
+      return res.status(scope.status).json({ status: 'error', message: scope.message });
     }
+    if (scope.workspaceIds.length === 0) {
+      return res.status(200).json({ status: 'success', data: [] });
+    }
+
+    const where = scope.prismaWorkspaceWhere.workspace_id
+      ? { workspace_id: scope.prismaWorkspaceWhere.workspace_id }
+      : { workspace: scope.prismaWorkspaceWhere };
 
     const stores = await prisma.store.findMany({
       where,
@@ -673,23 +680,43 @@ exports.getGalleryStores = async (req, res) => {
       data: stores.map((s) => s.store_name),
     });
   } catch (error) {
-    console.error('❌ Error in getGalleryStores:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal mengambil daftar toko galeri.',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal mengambil daftar toko galeri.');
   }
 };
 
 /**
  * GET /api/gallery/stats
- * Mengambil ringkasan statistik galeri foto
+ * Mengambil ringkasan statistik galeri foto (terisolasi per tenant/workspace)
  */
 exports.getGalleryStats = async (req, res) => {
   try {
-    const totalReports = await prisma.checklist_report.count();
-    const totalPhotos = await prisma.attachment.count();
+    const user = req.user || (await extractUser(req));
+    const requestedWsId = req.query.workspaceId || req.headers['x-workspace-id'];
+    const scope = await resolveScopedWorkspaceContext(user, requestedWsId, {
+      teknisUseSingleDefaultOnAll: true,
+    });
+    if (!scope.ok) {
+      return res.status(scope.status).json({ status: 'error', message: scope.message });
+    }
+    if (scope.workspaceIds.length === 0) {
+      return res.status(200).json({
+        status: 'success',
+        data: { totalReports: 0, totalPhotos: 0 },
+      });
+    }
+
+    const storeFilter = scope.prismaWorkspaceWhere.workspace_id
+      ? { workspace_id: scope.prismaWorkspaceWhere.workspace_id }
+      : { workspace: scope.prismaWorkspaceWhere };
+
+    const [totalReports, totalPhotos] = await Promise.all([
+      prisma.checklist_report.count({
+        where: { schedule: { store: storeFilter } },
+      }),
+      prisma.attachment.count({
+        where: { checklist_report: { schedule: { store: storeFilter } } },
+      }),
+    ]);
 
     return res.status(200).json({
       status: 'success',
@@ -699,11 +726,6 @@ exports.getGalleryStats = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('❌ Error in getGalleryStats:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal memuat statistik galeri.',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal memuat statistik galeri.');
   }
 };

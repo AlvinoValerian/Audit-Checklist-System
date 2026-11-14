@@ -2,7 +2,6 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   Monitor,
   User,
@@ -19,8 +18,6 @@ import { Toaster, toast } from "sonner";
 import { ApiAuthService } from "@/services/auth.service";
 
 export default function RegisterPage() {
-  const router = useRouter();
-
   const [fullName, setFullName] = useState("");
   const [companyEmail, setCompanyEmail] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
@@ -169,7 +166,7 @@ export default function RegisterPage() {
       );
 
       setTimeout(() => {
-        router.push("/workspace");
+        window.location.href = "/workspace";
       }, 1000);
     } catch (err: unknown) {
       const errorMsg =
@@ -272,6 +269,7 @@ export default function RegisterPage() {
                   placeholder="Hanya huruf (contoh: Budi Santoso)"
                   autoComplete="name"
                   required
+                  suppressHydrationWarning
                   className="w-full h-full pr-4 text-sm text-slate-800 placeholder:text-slate-400 bg-transparent border-none outline-none focus:ring-0"
                 />
               </div>
@@ -298,6 +296,7 @@ export default function RegisterPage() {
                     placeholder="nama@perusahaan.com"
                     autoComplete="email"
                     required
+                    suppressHydrationWarning
                     className="w-full h-full pr-3 text-sm text-slate-800 placeholder:text-slate-400 bg-transparent border-none outline-none focus:ring-0"
                   />
                 </div>
@@ -323,6 +322,7 @@ export default function RegisterPage() {
                     placeholder="0812xxxxxxxx"
                     autoComplete="tel"
                     required
+                    suppressHydrationWarning
                     className="w-full h-full pr-3 text-sm text-slate-800 placeholder:text-slate-400 bg-transparent border-none outline-none focus:ring-0"
                   />
                 </div>
@@ -349,6 +349,7 @@ export default function RegisterPage() {
                   placeholder="Huruf & angka tanpa simbol (PT Retail Jaya)"
                   autoComplete="organization"
                   required
+                  suppressHydrationWarning
                   className="w-full h-full pr-4 text-sm text-slate-800 placeholder:text-slate-400 bg-transparent border-none outline-none focus:ring-0"
                 />
               </div>
@@ -375,12 +376,14 @@ export default function RegisterPage() {
                     placeholder="Min. 8 (Huruf & Angka)"
                     autoComplete="new-password"
                     required
+                    suppressHydrationWarning
                     className="w-full h-full pr-9 text-sm text-slate-800 placeholder:text-slate-400 bg-transparent border-none outline-none focus:ring-0"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
                     aria-label={showPassword ? "Sembunyikan sandi" : "Tampilkan sandi"}
+                    suppressHydrationWarning
                     className="absolute right-3 text-slate-400 hover:text-slate-600 focus:outline-none transition-colors cursor-pointer"
                   >
                     {showPassword ? (
@@ -411,12 +414,14 @@ export default function RegisterPage() {
                     placeholder="Ulangi sandi"
                     autoComplete="new-password"
                     required
+                    suppressHydrationWarning
                     className="w-full h-full pr-9 text-sm text-slate-800 placeholder:text-slate-400 bg-transparent border-none outline-none focus:ring-0"
                   />
                   <button
                     type="button"
                     onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                     aria-label={showConfirmPassword ? "Sembunyikan konfirmasi sandi" : "Tampilkan konfirmasi sandi"}
+                    suppressHydrationWarning
                     className="absolute right-2.5 text-slate-400 hover:text-slate-600 focus:outline-none transition-colors cursor-pointer"
                   >
                     {showConfirmPassword ? (
@@ -445,6 +450,7 @@ export default function RegisterPage() {
                   type="checkbox"
                   checked={agreeTerms}
                   onChange={(e) => setAgreeTerms(e.target.checked)}
+                  suppressHydrationWarning
                   className="w-4 h-4 rounded border-slate-300 text-[#193f53] accent-[#193f53] focus:ring-[#193f53]/20 cursor-pointer shrink-0"
                 />
                 <span>
@@ -464,6 +470,7 @@ export default function RegisterPage() {
             <button
               type="submit"
               disabled={isLoading}
+              suppressHydrationWarning
               className="w-full mt-3.5 h-10.5 bg-[#193f53] hover:bg-[#143343] active:bg-[#0f2835] text-white font-semibold text-sm rounded-lg transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-75 active:scale-[0.99]"
             >
               {isLoading && <Loader2 className="w-4 h-4 animate-spin" />}

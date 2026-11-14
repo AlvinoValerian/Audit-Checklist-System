@@ -32,6 +32,8 @@ import {
 } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import { AuthService, AuthUser } from "@/lib/auth";
+import { apiFetch } from "@/lib/api-client";
+import StaffAuthGuard from "@/components/auth/StaffAuthGuard";
 import { optimizeAndResizeImage, encryptImageData } from "@/lib/image-crypto";
 import DecryptedImage from "@/components/DecryptedImage";
 
@@ -188,39 +190,25 @@ function PengerjaanContent() {
       setLoadError(null);
       const todayStr = getTodayWibDateStr();
       try {
-        const token = AuthService.getToken();
         const headers: Record<string, string> = {};
-        if (token) headers["Authorization"] = `Bearer ${token}`;
-        if (user?.email) headers["x-user-email"] = user.email;
-        if (user?.role) headers["x-user-role"] = user.role;
-        const rawId =
-          user?.rawId ||
-          (user?.id
-            ? user.id.replace(/^staff-/, "").replace(/^sa-/, "").replace(/^adm-/, "")
-            : undefined);
-        if (rawId) headers["x-user-id"] = rawId;
         if (user?.storeId) headers["x-store-id"] = user.storeId.toString();
 
-        let res: Response | null = null;
-        try {
-          res = await fetch(`/api/staff/schedules/${scheduleId}`, { headers, cache: "no-store" });
-          if (!res || res.status >= 500) throw new Error(`Fetch /api/staff/schedules status: ${res?.status}`);
-        } catch {
-          res = await fetch(`http://127.0.0.1:5000/api/staff/schedules/${scheduleId}`, {
-            headers,
-            cache: "no-store",
-          });
+        const res = await apiFetch(`/api/staff/schedules/${scheduleId}`, {
+          headers,
+          cache: "no-store",
+        });
+
+        if (res.status === 401) {
+          return;
         }
 
-        if (res && (res.status === 401 || res.status === 403)) {
+        if (res.status === 403) {
           const errJson = await res.json().catch(() => null);
-          toast.error(errJson?.message || "Akses ditolak atau sesi Anda telah berakhir.");
-          if (res.status === 401) {
-            AuthService.logout();
-            router.replace("/login");
-          } else {
-            router.replace("/jadwal-staff");
+          if (errJson?.code === "ACCOUNT_INACTIVE") {
+            return;
           }
+          toast.error(errJson?.message || "Akses ditolak.");
+          router.replace("/jadwal-staff");
           return;
         }
 
@@ -1637,17 +1625,19 @@ function PengerjaanContent() {
 
 export default function PengerjaanChecklistPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="fixed inset-0 flex items-center justify-center bg-slate-900 text-white">
-          <div className="flex items-center gap-2 text-sm font-semibold">
-            <RotateCcw className="w-4 h-4 animate-spin text-blue-400" />
-            <span>Memuat lembar pengerjaan audit...</span>
+    <StaffAuthGuard>
+      <Suspense
+        fallback={
+          <div className="fixed inset-0 flex items-center justify-center bg-slate-900 text-white">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <RotateCcw className="w-4 h-4 animate-spin text-blue-400" />
+              <span>Memuat lembar pengerjaan audit...</span>
+            </div>
           </div>
-        </div>
-      }
-    >
-      <PengerjaanContent />
-    </Suspense>
+        }
+      >
+        <PengerjaanContent />
+      </Suspense>
+    </StaffAuthGuard>
   );
 }

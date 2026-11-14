@@ -1,6 +1,9 @@
+const crypto = require('crypto');
 const prisma = require('../config/prisma');
 const bcrypt = require('bcrypt');
-const { extractUser } = require('../middlewares/auth.middleware');
+const { findEmailConflict } = require('../utils/emailUniqueness');
+const { toBigIntSafe, isWorkspaceInTeknisScope } = require('../utils/teknisScope');
+const { sendSafeError } = require('../utils/tenantScope');
 
 /**
  * Self-healing: Pastikan kolom untuk divisi teknis selalu tersedia di PostgreSQL
@@ -23,7 +26,8 @@ const getOrCreateTeknisWorkspace = async () => {
   });
 
   if (!systemSa) {
-    const hashed = await bcrypt.hash('TeknisSandbox123!', 10);
+    const randomPassword = crypto.randomBytes(24).toString('hex');
+    const hashed = await bcrypt.hash(randomPassword, 10);
     systemSa = await prisma.super_admin.create({
       data: {
         name: 'System Divisi Teknis',
@@ -61,13 +65,15 @@ const ensureTeknisColumns = async () => {
     `);
 
     const sandboxWs = await getOrCreateTeknisWorkspace();
-    // Pastikan seluruh user divisi teknis terhubung ke workspace sandbox internal ini
-    await prisma.$executeRawUnsafe(`
-      UPDATE admin 
-      SET workspace_id = ${sandboxWs.workspace_id}
-      WHERE (role = 'Divisi Teknis' OR role = 'Teknis') 
-        AND workspace_id != ${sandboxWs.workspace_id};
-    `);
+    // Pastikan seluruh user divisi teknis berada di workspace internal teknis (terisolasi dari data umum penyewa lain)
+    await prisma.$executeRawUnsafe(
+      `UPDATE admin
+       SET workspace_id = $1
+       WHERE (role = 'Divisi Teknis' OR role = 'Teknis')
+         AND workspace_id != $2`,
+      sandboxWs.workspace_id,
+      sandboxWs.workspace_id
+    );
   } catch (err) {
     console.warn('⚠️ [ensureTeknisColumns]:', err.message);
   }
@@ -90,7 +96,7 @@ const formatTeknis = (row) => {
     role: 'Divisi Teknis',
     specialization: row.specialization || 'IT Support & System',
     workspaceId: row.workspace_id ? row.workspace_id.toString() : null,
-    workspaceName: 'Divisi Teknis - Sandbox Testing',
+    workspaceName: row.workspace?.company_name || row.workspace_company_name || 'Divisi Teknis - Sandbox Testing',
     status: isInactive ? 'Nonaktif' : 'Aktif',
     rawStatus: row.status || 'active',
     deletedAt: row.deleted_at ? new Date(row.deleted_at).toISOString().split('T')[0] : undefined,
@@ -107,20 +113,25 @@ const formatTeknis = (row) => {
 
 /**
  * GET /api/teknis
- * Mengambil seluruh user dengan role "Divisi Teknis"
+ * Mengambil seluruh user dengan role "Divisi Teknis" menggunakan query berparameter
  */
 exports.getAllTeknis = async (req, res) => {
   try {
-    const user = await extractUser(req);
     const { workspaceId, status, search } = req.query;
 
     const whereConditions = [`(a.role = 'Divisi Teknis' OR a.role = 'Teknis')`];
+    const params = [];
 
     if (workspaceId && workspaceId !== 'all') {
-      try {
-        const cleanWsId = BigInt(workspaceId.toString().replace(/^ws-/, ''));
-        whereConditions.push(`a.workspace_id = ${cleanWsId}`);
-      } catch (e) {}
+      const cleanWsId = toBigIntSafe(workspaceId, ['ws-']);
+      if (!cleanWsId || !(await isWorkspaceInTeknisScope(cleanWsId))) {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Akses workspace ditolak.',
+        });
+      }
+      params.push(cleanWsId);
+      whereConditions.push(`a.workspace_id = $${params.length}`);
     }
 
     if (status && status !== 'Semua') {
@@ -131,15 +142,20 @@ exports.getAllTeknis = async (req, res) => {
       }
     }
 
-    if (search && search.trim()) {
-      const cleanSearch = search.trim().toLowerCase();
-      whereConditions.push(`(LOWER(a.name) LIKE '%${cleanSearch}%' OR LOWER(a.email) LIKE '%${cleanSearch}%' OR LOWER(COALESCE(a.specialization, '')) LIKE '%${cleanSearch}%')`);
+    if (search && String(search).trim()) {
+      const pattern = `%${String(search).trim().toLowerCase()}%`;
+      params.push(pattern);
+      const pIdx = params.length;
+      whereConditions.push(
+        `(LOWER(a.name) LIKE $${pIdx} OR LOWER(a.email) LIKE $${pIdx} OR LOWER(COALESCE(a.specialization, '')) LIKE $${pIdx})`
+      );
     }
 
     const whereClause = whereConditions.join(' AND ');
 
-    const rows = await prisma.$queryRawUnsafe(`
-      SELECT 
+    const rows = await prisma.$queryRawUnsafe(
+      `
+      SELECT
         a.admin_id,
         a.workspace_id,
         a.email,
@@ -157,7 +173,9 @@ exports.getAllTeknis = async (req, res) => {
       LEFT JOIN workspace w ON a.workspace_id = w.workspace_id
       WHERE ${whereClause}
       ORDER BY a.created_at DESC
-    `);
+      `,
+      ...params
+    );
 
     const formatted = rows.map((r) =>
       formatTeknis({
@@ -171,12 +189,7 @@ exports.getAllTeknis = async (req, res) => {
       data: formatted,
     });
   } catch (error) {
-    console.error('❌ Error in getAllTeknis:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal mengambil data user divisi teknis dari database.',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal mengambil data user divisi teknis dari database.');
   }
 };
 
@@ -187,7 +200,7 @@ exports.getAllTeknis = async (req, res) => {
 exports.getTeknisStats = async (req, res) => {
   try {
     const rows = await prisma.$queryRawUnsafe(`
-      SELECT 
+      SELECT
         COUNT(*)::int as total,
         COUNT(CASE WHEN status = 'active' OR status = 'Aktif' THEN 1 END)::int as active,
         COUNT(CASE WHEN status = 'inactive' OR status = 'Nonaktif' THEN 1 END)::int as inactive
@@ -211,12 +224,7 @@ exports.getTeknisStats = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('❌ Error in getTeknisStats:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal memuat statistik divisi teknis.',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal memuat statistik divisi teknis.');
   }
 };
 
@@ -225,11 +233,17 @@ exports.getTeknisStats = async (req, res) => {
  */
 exports.getTeknisById = async (req, res) => {
   try {
-    const { id } = req.params;
-    const cleanId = BigInt(id.toString().replace(/^tek-/, ''));
+    const cleanId = toBigIntSafe(req.params.id, ['tek-', 'adm-']);
+    if (!cleanId) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Format ID user teknis tidak valid.',
+      });
+    }
 
-    const rows = await prisma.$queryRawUnsafe(`
-      SELECT 
+    const rows = await prisma.$queryRawUnsafe(
+      `
+      SELECT
         a.admin_id,
         a.workspace_id,
         a.email,
@@ -245,9 +259,11 @@ exports.getTeknisById = async (req, res) => {
         w.company_name as workspace_company_name
       FROM admin a
       LEFT JOIN workspace w ON a.workspace_id = w.workspace_id
-      WHERE a.admin_id = ${cleanId} AND (a.role = 'Divisi Teknis' OR a.role = 'Teknis')
+      WHERE a.admin_id = $1 AND (a.role = 'Divisi Teknis' OR a.role = 'Teknis')
       LIMIT 1
-    `);
+      `,
+      cleanId
+    );
 
     if (!rows || rows.length === 0) {
       return res.status(404).json({
@@ -265,18 +281,13 @@ exports.getTeknisById = async (req, res) => {
       }),
     });
   } catch (error) {
-    console.error('❌ Error in getTeknisById:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal mengambil detail user teknis.',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal mengambil detail user teknis.');
   }
 };
 
 /**
  * POST /api/teknis
- * Menambahkan user teknis baru
+ * Menambahkan user teknis baru (query berparameter penuh & password wajib)
  */
 exports.createTeknis = async (req, res) => {
   try {
@@ -285,8 +296,7 @@ exports.createTeknis = async (req, res) => {
       email,
       phone,
       specialization = 'IT Support & System',
-      workspaceId,
-      password = 'Password123',
+      password,
       status = 'Aktif',
     } = req.body;
 
@@ -318,26 +328,27 @@ exports.createTeknis = async (req, res) => {
       return res.status(400).json({ status: 'error', message: 'Nomor telepon hanya boleh berisi angka.' });
     }
 
-    if (!password || password.length < 8) {
-      return res.status(400).json({ status: 'error', message: 'Kata sandi minimal 8 karakter.' });
+    if (!password || String(password).length < 8) {
+      return res.status(400).json({ status: 'error', message: 'Kata sandi wajib diisi minimal 8 karakter.' });
     }
 
-    // Cek duplikasi email di admin dan super_admin
-    const existing = await prisma.admin.findUnique({ where: { email: rawEmail } });
-    if (existing) {
+    // Cek duplikasi email lintas tabel admin, super_admin, dan staff
+    const emailConflict = await findEmailConflict(rawEmail);
+    if (emailConflict) {
       return res.status(409).json({
         status: 'error',
         message: 'Email sudah terdaftar di sistem. Gunakan email lain.',
       });
     }
 
-    // Resolusi Workspace Sandbox Internal Khusus Divisi Teknis
+    // Resolusi Workspace Internal Khusus Divisi Teknis (Terisolasi dari data penyewa umum)
     const sandboxWs = await getOrCreateTeknisWorkspace();
     const targetWsId = sandboxWs.workspace_id;
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(String(password), 10);
 
-    const inserted = await prisma.$queryRawUnsafe(`
+    const inserted = await prisma.$queryRawUnsafe(
+      `
       INSERT INTO admin (
         workspace_id,
         email,
@@ -349,23 +360,20 @@ exports.createTeknis = async (req, res) => {
         specialization,
         created_at,
         updated_at
-      ) VALUES (
-        ${targetWsId},
-        '${rawEmail}',
-        '${rawName}',
-        '${hashedPassword}',
-        '${rawStatus}',
-        'Divisi Teknis',
-        '${rawPhone}',
-        '${rawSpec}',
-        NOW(),
-        NOW()
-      )
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
       RETURNING *;
-    `);
+      `,
+      targetWsId,
+      rawEmail,
+      rawName,
+      hashedPassword,
+      rawStatus,
+      'Divisi Teknis',
+      rawPhone || null,
+      rawSpec
+    );
 
     const createdRecord = inserted[0];
-
     const ws = await prisma.workspace.findUnique({ where: { workspace_id: targetWsId } });
 
     return res.status(201).json({
@@ -377,29 +385,26 @@ exports.createTeknis = async (req, res) => {
       }),
     });
   } catch (error) {
-    console.error('❌ Error creating user teknis:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal membuat user teknis baru di database.',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal membuat user teknis baru di database.');
   }
 };
 
 /**
  * PUT /api/teknis/:id
- * Mengupdate data user teknis
+ * Mengupdate data user teknis (parameterized SQL & validasi role teknis)
  */
 exports.updateTeknis = async (req, res) => {
   try {
-    const { id } = req.params;
-    const cleanId = BigInt(id.toString().replace(/^tek-/, ''));
+    const cleanId = toBigIntSafe(req.params.id, ['tek-', 'adm-']);
+    if (!cleanId) {
+      return res.status(400).json({ status: 'error', message: 'Format ID user teknis tidak valid.' });
+    }
 
     const existing = await prisma.admin.findUnique({
       where: { admin_id: cleanId },
     });
 
-    if (!existing) {
+    if (!existing || (existing.role !== 'Divisi Teknis' && existing.role !== 'Teknis')) {
       return res.status(404).json({
         status: 'error',
         message: 'User teknis tidak ditemukan.',
@@ -416,64 +421,89 @@ exports.updateTeknis = async (req, res) => {
       password,
     } = req.body;
 
-    const updateFields = [];
+    const setClauses = [];
+    const params = [];
+    const pushParam = (col, val) => {
+      params.push(val);
+      setClauses.push(`${col} = $${params.length}`);
+    };
 
     if (fullName && fullName.trim()) {
-      updateFields.push(`name = '${fullName.trim()}'`);
+      pushParam('name', fullName.trim());
     }
 
     if (email && email.trim()) {
       const cleanEmail = email.trim().toLowerCase();
-      // Pastikan email tidak bentrok dengan user lain
-      const duplicate = await prisma.admin.findFirst({
-        where: {
-          email: cleanEmail,
-          NOT: { admin_id: cleanId },
-        },
-      });
+      const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+      if (!emailRegex.test(cleanEmail)) {
+        return res.status(400).json({ status: 'error', message: 'Format email tidak valid.' });
+      }
+      const duplicate = await findEmailConflict(cleanEmail, { adminId: cleanId });
       if (duplicate) {
         return res.status(409).json({
           status: 'error',
           message: 'Email sudah digunakan oleh akun lain.',
         });
       }
-      updateFields.push(`email = '${cleanEmail}'`);
+      pushParam('email', cleanEmail);
     }
 
     if (phone !== undefined) {
-      updateFields.push(`phone = '${(phone || '').trim()}'`);
+      const trimmedPhone = (phone || '').trim();
+      if (trimmedPhone && trimmedPhone !== '-' && !/^\d+$/.test(trimmedPhone)) {
+        return res.status(400).json({ status: 'error', message: 'Nomor telepon hanya boleh berisi angka.' });
+      }
+      pushParam('phone', trimmedPhone || null);
     }
 
     if (specialization !== undefined) {
-      updateFields.push(`specialization = '${(specialization || 'IT Support').trim()}'`);
+      pushParam('specialization', (specialization || 'IT Support').trim());
+    }
+
+    if (workspaceId !== undefined) {
+      if (workspaceId && workspaceId !== 'all') {
+        const cleanWs = toBigIntSafe(workspaceId, ['ws-']);
+        if (!cleanWs || !(await isWorkspaceInTeknisScope(cleanWs))) {
+          return res.status(403).json({
+            status: 'error',
+            message: 'Workspace harus berada di dalam lingkungan Sandbox Teknis.',
+          });
+        }
+        pushParam('workspace_id', cleanWs);
+      } else {
+        const sandboxWs = await getOrCreateTeknisWorkspace();
+        pushParam('workspace_id', sandboxWs.workspace_id);
+      }
     }
 
     if (status !== undefined) {
       const rawStatus = status === 'Nonaktif' || status === 'inactive' ? 'inactive' : 'active';
-      updateFields.push(`status = '${rawStatus}'`);
+      pushParam('status', rawStatus);
+      if (rawStatus === 'inactive') {
+        setClauses.push(`token_version = COALESCE(token_version, 0) + 1`);
+      }
     }
 
-    if (password && password.trim()) {
-      if (password.length < 8) {
+    if (password && String(password).trim()) {
+      if (String(password).trim().length < 8) {
         return res.status(400).json({
           status: 'error',
           message: 'Kata sandi baru minimal 8 karakter.',
         });
       }
-      const hashed = await bcrypt.hash(password.trim(), 10);
-      updateFields.push(`password = '${hashed}'`);
+      const hashed = await bcrypt.hash(String(password).trim(), 10);
+      pushParam('password', hashed);
+      setClauses.push(`token_version = COALESCE(token_version, 0) + 1`);
     }
 
-    updateFields.push(`updated_at = NOW()`);
+    setClauses.push(`updated_at = NOW()`);
+    params.push(cleanId);
+    const idIdx = params.length;
 
-    const updateSql = `
-      UPDATE admin 
-      SET ${updateFields.join(', ')}
-      WHERE admin_id = ${cleanId}
-      RETURNING *;
-    `;
-
-    const updatedRows = await prisma.$queryRawUnsafe(updateSql);
+    const updatedRows = await prisma.$queryRawUnsafe(
+      `UPDATE admin SET ${setClauses.join(', ')} WHERE admin_id = $${idIdx} RETURNING *;`,
+      ...params
+    );
     const updated = updatedRows[0];
 
     const ws = updated.workspace_id
@@ -489,34 +519,32 @@ exports.updateTeknis = async (req, res) => {
       }),
     });
   } catch (error) {
-    console.error('❌ Error updating teknis:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal memperbarui data user teknis.',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal memperbarui data user teknis.');
   }
 };
 
 /**
- * DELETE /api/teknis/:id (Soft Delete)
+ * DELETE /api/teknis/:id (Soft Delete + token revocation)
  */
 exports.deleteTeknis = async (req, res) => {
   try {
-    const { id } = req.params;
-    const cleanId = BigInt(id.toString().replace(/^tek-/, ''));
+    const cleanId = toBigIntSafe(req.params.id, ['tek-', 'adm-']);
+    if (!cleanId) {
+      return res.status(400).json({ status: 'error', message: 'Format ID user teknis tidak valid.' });
+    }
 
     const existing = await prisma.admin.findUnique({ where: { admin_id: cleanId } });
-    if (!existing) {
+    if (!existing || (existing.role !== 'Divisi Teknis' && existing.role !== 'Teknis')) {
       return res.status(404).json({ status: 'error', message: 'User teknis tidak ditemukan.' });
     }
 
-    const updatedRows = await prisma.$queryRawUnsafe(`
-      UPDATE admin 
-      SET status = 'inactive', deleted_at = NOW(), updated_at = NOW()
-      WHERE admin_id = ${cleanId}
-      RETURNING *;
-    `);
+    const updatedRows = await prisma.$queryRawUnsafe(
+      `UPDATE admin
+       SET status = 'inactive', deleted_at = NOW(), token_version = COALESCE(token_version, 0) + 1, updated_at = NOW()
+       WHERE admin_id = $1
+       RETURNING *;`,
+      cleanId
+    );
 
     const updated = updatedRows[0];
 
@@ -526,12 +554,7 @@ exports.deleteTeknis = async (req, res) => {
       data: formatTeknis(updated),
     });
   } catch (error) {
-    console.error('❌ Error in deleteTeknis:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal menonaktifkan user teknis.',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal menonaktifkan user teknis.');
   }
 };
 
@@ -540,20 +563,23 @@ exports.deleteTeknis = async (req, res) => {
  */
 exports.restoreTeknis = async (req, res) => {
   try {
-    const { id } = req.params;
-    const cleanId = BigInt(id.toString().replace(/^tek-/, ''));
+    const cleanId = toBigIntSafe(req.params.id, ['tek-', 'adm-']);
+    if (!cleanId) {
+      return res.status(400).json({ status: 'error', message: 'Format ID user teknis tidak valid.' });
+    }
 
     const existing = await prisma.admin.findUnique({ where: { admin_id: cleanId } });
-    if (!existing) {
+    if (!existing || (existing.role !== 'Divisi Teknis' && existing.role !== 'Teknis')) {
       return res.status(404).json({ status: 'error', message: 'User teknis tidak ditemukan.' });
     }
 
-    const updatedRows = await prisma.$queryRawUnsafe(`
-      UPDATE admin 
-      SET status = 'active', deleted_at = NULL, updated_at = NOW()
-      WHERE admin_id = ${cleanId}
-      RETURNING *;
-    `);
+    const updatedRows = await prisma.$queryRawUnsafe(
+      `UPDATE admin
+       SET status = 'active', deleted_at = NULL, updated_at = NOW()
+       WHERE admin_id = $1
+       RETURNING *;`,
+      cleanId
+    );
 
     const updated = updatedRows[0];
 
@@ -563,11 +589,6 @@ exports.restoreTeknis = async (req, res) => {
       data: formatTeknis(updated),
     });
   } catch (error) {
-    console.error('❌ Error in restoreTeknis:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal mengaktifkan kembali user teknis.',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal mengaktifkan kembali user teknis.');
   }
 };

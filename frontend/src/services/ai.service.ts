@@ -1,5 +1,6 @@
 import { ChatMessage } from "@/types/ai";
 import { AuthService } from "@/lib/auth";
+import { apiFetch } from "@/lib/api-client";
 
 export const INITIAL_CHAT_MESSAGES: ChatMessage[] = [];
 
@@ -37,9 +38,6 @@ export class AIService {
       "Content-Type": "application/json",
     };
     if (token) headers["Authorization"] = `Bearer ${token}`;
-    if (currentUser?.id) headers["x-user-id"] = currentUser.id;
-    if (currentUser?.email) headers["x-user-email"] = currentUser.email.toLowerCase().trim();
-    if (currentUser?.role) headers["x-user-role"] = currentUser.role;
     const wsId = activeWs?.id || currentUser?.workspaceId;
     if (wsId) headers["x-workspace-id"] = wsId;
 
@@ -47,29 +45,11 @@ export class AIService {
   }
 
   /**
-   * Fetch resilien dengan auto-fallback:
-   * 1. Coba lewat proxy relative URL (Next.js rewrites)
-   * 2. Jika Next.js proxy gagal/timeout (status 500), otomatis fallback langsung ke backend Express (http://127.0.0.1:5000)
+   * Wrapper fetch standar melalui same-origin Next.js proxy + apiFetch
    */
   private static async _fetchApi(path: string, options: RequestInit): Promise<Response> {
     const fullPath = `${BACKEND_URL}${path}`;
-    try {
-      const response = await fetch(fullPath, options);
-      if (response.ok) return response;
-
-      // Jika Next.js dev server proxy mengalami 500 internal server error pada rewrite:
-      if (response.status === 500 && !fullPath.startsWith("http")) {
-        console.warn("⚠️ Next.js rewrite proxy 500, beralih langsung ke Express port 5000...");
-        return await fetch(`http://127.0.0.1:5000${path}`, options);
-      }
-      return response;
-    } catch (err) {
-      if (!fullPath.startsWith("http")) {
-        console.warn("⚠️ Proxy tidak merespon, mencoba koneksi langsung ke Express port 5000...", err);
-        return await fetch(`http://127.0.0.1:5000${path}`, options);
-      }
-      throw err;
-    }
+    return await apiFetch(fullPath, options);
   }
 
   /**

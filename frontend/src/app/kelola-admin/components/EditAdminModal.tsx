@@ -18,6 +18,7 @@ interface EditAdminModalProps {
     email: string;
     role: AdminRole;
     workspaceName: string;
+    companyName?: string;
     status: "Aktif" | "Nonaktif";
     password?: string;
   }) => void;
@@ -38,6 +39,7 @@ export default function EditAdminModal({
     email: "",
     role: "Admin" as AdminRole,
     workspaceName: "",
+    companyName: "",
     status: "Aktif" as "Aktif" | "Nonaktif",
     newPassword: "",
     confirmNewPassword: "",
@@ -64,6 +66,7 @@ export default function EditAdminModal({
         email: admin.email || "",
         role: admin.role || "Admin",
         workspaceName: admin.workspaceName || "",
+        companyName: admin.companyName || "",
         status: admin.status || "Aktif",
         newPassword: "",
         confirmNewPassword: "",
@@ -90,13 +93,25 @@ export default function EditAdminModal({
       return;
     }
 
+    if (showPasswordSection && formData.newPassword) {
+      if (formData.newPassword.length < 8) {
+        toast.error("Password baru minimal 8 karakter!");
+        return;
+      }
+      if (formData.newPassword !== formData.confirmNewPassword) {
+        toast.error("Konfirmasi password baru tidak cocok!");
+        return;
+      }
+    }
+
     if (isSuperAdmin) {
       onSubmit({
         fullName: formData.fullName.trim(),
         email: formData.email.trim(),
         role: "Super Admin", // Role Super Admin tidak bisa berubah
         workspaceName: admin.workspaceName || "All Workspaces (Central)", // Workspace Super Admin tidak bisa berubah
-        status: formData.status,
+        companyName: formData.companyName.trim() || undefined,
+        status: "Aktif",
         password: showPasswordSection && formData.newPassword ? formData.newPassword : undefined,
       });
       return;
@@ -111,17 +126,6 @@ export default function EditAdminModal({
     if (chosenWs && chosenWs.status === "Nonaktif" && chosenWs.name !== admin.workspaceName) {
       toast.error("Workspace yang dipilih berstatus Nonaktif dan tidak dapat dipilih!");
       return;
-    }
-
-    if (showPasswordSection && formData.newPassword) {
-      if (formData.newPassword.length < 8) {
-        toast.error("Password baru minimal 8 karakter!");
-        return;
-      }
-      if (formData.newPassword !== formData.confirmNewPassword) {
-        toast.error("Konfirmasi password baru tidak cocok!");
-        return;
-      }
     }
 
     onSubmit({
@@ -258,28 +262,58 @@ export default function EditAdminModal({
           </div>
         </div>
 
+        {/* Nama Perusahaan / Unit (khusus Super Admin) */}
+        {isSuperAdmin && (
+          <div>
+            <label className="block text-xs font-semibold text-slate-800 mb-1.5">
+              Nama Perusahaan / Unit
+            </label>
+            <input
+              type="text"
+              disabled={isSubmitting}
+              placeholder="Contoh: Divisi Audit Regional / Unit Partner"
+              value={formData.companyName}
+              onChange={(e) =>
+                setFormData({ ...formData, companyName: e.target.value })
+              }
+              className="w-full px-3.5 py-2.5 text-xs sm:text-sm bg-white border border-slate-200 rounded-lg outline-none focus:border-[#193f53] focus:ring-1 focus:ring-[#193f53]/20 disabled:bg-slate-50 disabled:opacity-70 transition-all placeholder:text-slate-400 text-slate-800"
+            />
+          </div>
+        )}
+
         {/* Status Akun */}
         <div>
           <label className="block text-xs font-semibold text-slate-800 mb-1.5">
             Status Akun
           </label>
-          <div className="relative">
-            <select
-              disabled={isSubmitting}
-              value={formData.status}
-              onChange={(e) =>
-                setFormData({
-                  ...formData,
-                  status: e.target.value as "Aktif" | "Nonaktif",
-                })
-              }
-              className="w-full appearance-none px-3.5 py-2.5 pr-10 text-xs sm:text-sm bg-white border border-slate-200 rounded-lg outline-none focus:border-[#193f53] focus:ring-1 focus:ring-[#193f53]/20 disabled:bg-slate-50 disabled:opacity-70 transition-all text-slate-800 cursor-pointer"
-            >
-              <option value="Aktif">Aktif</option>
-              <option value="Nonaktif">Nonaktif</option>
-            </select>
-            <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-          </div>
+          {isSuperAdmin ? (
+            <input
+              type="text"
+              value="Aktif (Permanen)"
+              readOnly
+              disabled
+              title="Akun Super Admin selalu berstatus aktif dan bersifat permanen"
+              className="w-full px-3.5 py-2.5 text-xs sm:text-sm bg-slate-100 border border-slate-200 rounded-lg text-emerald-700 font-semibold cursor-not-allowed select-none"
+            />
+          ) : (
+            <div className="relative">
+              <select
+                disabled={isSubmitting}
+                value={formData.status}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    status: e.target.value as "Aktif" | "Nonaktif",
+                  })
+                }
+                className="w-full appearance-none px-3.5 py-2.5 pr-10 text-xs sm:text-sm bg-white border border-slate-200 rounded-lg outline-none focus:border-[#193f53] focus:ring-1 focus:ring-[#193f53]/20 disabled:bg-slate-50 disabled:opacity-70 transition-all text-slate-800 cursor-pointer"
+              >
+                <option value="Aktif">Aktif</option>
+                <option value="Nonaktif">Nonaktif</option>
+              </select>
+              <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            </div>
+          )}
         </div>
 
         {/* Toggle Ganti Password */}

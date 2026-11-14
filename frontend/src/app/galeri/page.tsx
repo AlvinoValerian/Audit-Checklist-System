@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import Header from "@/components/layout/Header";
 import {
@@ -99,6 +99,16 @@ export default function GaleriPage() {
     }
   }, [selectedWorkspaceId]);
 
+  const loadDataRef = useRef(loadData);
+  useEffect(() => {
+    loadDataRef.current = loadData;
+  }, [loadData]);
+
+  const selectedWsIdRef = useRef(selectedWorkspaceId);
+  useEffect(() => {
+    selectedWsIdRef.current = selectedWorkspaceId;
+  }, [selectedWorkspaceId]);
+
   useEffect(() => {
     const init = async () => {
       setIsLoading(true);
@@ -136,17 +146,17 @@ export default function GaleriPage() {
 
       setSelectedWorkspaceId(targetWsId);
       setCurrentWorkspaceName(targetWsName);
-      loadData(true, targetWsId);
+      loadDataRef.current(true, targetWsId);
     };
 
     init();
 
     const handleWsChange = () => {
       const activeWs = AuthService.getActiveWorkspace();
-      if (activeWs?.id) {
+      if (activeWs?.id && activeWs.id !== selectedWsIdRef.current) {
         setSelectedWorkspaceId(activeWs.id);
         setCurrentWorkspaceName(activeWs.name);
-        loadData(true, activeWs.id);
+        loadDataRef.current(true, activeWs.id);
       }
     };
 
@@ -154,7 +164,7 @@ export default function GaleriPage() {
     return () => {
       window.removeEventListener("workspace-changed", handleWsChange);
     };
-  }, [loadData]);
+  }, []);
 
   const handleWorkspaceChange = async (newWsId: string) => {
     const chosen = workspaces.find((w) => w.id === newWsId);

@@ -1,9 +1,43 @@
 const prisma = require('../config/prisma');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const { encryptImageData, decryptImageData } = require('../utils/imageCrypto');
+const { encryptImageData } = require('../utils/imageCrypto');
+const { findEmailConflict } = require('../utils/emailUniqueness');
+const {
+  AUTH_COOKIE_NAME,
+  getJwtSecret,
+  ensureTokenVersionColumns,
+  getRecordTokenVersion,
+  bumpTokenVersion,
+  extractUser,
+} = require('../middlewares/auth.middleware');
+const { sendSafeError, isStaffRole, isSuperAdminRole } = require('../utils/tenantScope');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'audit_checklist_system_jwt_secret_key_2024';
+const DASHBOARD_JWT_EXPIRES_IN = '4h';
+const DASHBOARD_COOKIE_MAX_AGE_MS = 4 * 60 * 60 * 1000;
+const STAFF_JWT_EXPIRES_IN = '12h';
+const STAFF_COOKIE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+
+const setAuthCookie = (req, res, token, maxAgeMs) => {
+  const isHttps = Boolean(req.secure || req.headers['x-forwarded-proto'] === 'https');
+  res.cookie(AUTH_COOKIE_NAME, token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+    secure: isHttps,
+    maxAge: maxAgeMs,
+  });
+};
+
+const clearAuthCookie = (req, res) => {
+  const isHttps = Boolean(req.secure || req.headers['x-forwarded-proto'] === 'https');
+  res.clearCookie(AUTH_COOKIE_NAME, {
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+    secure: isHttps,
+  });
+};
 
 /**
  * Helper untuk mengambil kolom tambahan staff (position, deleted_at)
@@ -12,7 +46,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'audit_checklist_system_jwt_secret_
 const getStaffExtra = async (staffId) => {
   try {
     const rows = await prisma.$queryRawUnsafe(
-      `SELECT position, deleted_at FROM staff WHERE staff_id = $1 LIMIT 1`,
+      `SELECT position, deleted_at, COALESCE(token_version, 0) AS token_version FROM staff WHERE staff_id = $1 LIMIT 1`,
       staffId
     );
     return rows && rows[0] ? rows[0] : {};
@@ -47,6 +81,8 @@ const formatAuthSuperAdmin = (sa, token) => {
  */
 exports.register = async (req, res) => {
   try {
+    await ensureTokenVersionColumns();
+
     console.log('📥 [POST /api/auth/register] Menerima data pendaftaran:', {
       ...req.body,
       password: req.body.password ? '******' : undefined,
@@ -168,13 +204,10 @@ exports.register = async (req, res) => {
       });
     }
 
-    // Cek duplikasi email di tabel super_admin dan admin
-    const [existingSuperAdmin, existingAdmin] = await Promise.all([
-      prisma.super_admin.findUnique({ where: { email: rawEmail } }),
-      prisma.admin.findUnique({ where: { email: rawEmail } }),
-    ]);
+    // Cek duplikasi email lintas tabel super_admin, admin, dan staff
+    const emailConflict = await findEmailConflict(rawEmail);
 
-    if (existingSuperAdmin || existingAdmin) {
+    if (emailConflict) {
       return res.status(400).json({
         status: 'error',
         message: `Email "${rawEmail}" sudah terdaftar. Silakan gunakan email lain atau masuk ke akun Anda.`,
@@ -217,18 +250,22 @@ exports.register = async (req, res) => {
       console.warn('⚠️ Gagal membuat default workspace otomatis (namun Super Admin tetap berhasil dibuat):', wsErr.message);
     }
 
-    // 3. Generate token JWT
+    const dbTv = await getRecordTokenVersion('super_admin', 'super_admin_id', newSuperAdmin.super_admin_id);
+
+    // 3. Generate token JWT + set HttpOnly cookie
     const token = jwt.sign(
       {
         id: `sa-${newSuperAdmin.super_admin_id.toString()}`,
         rawId: newSuperAdmin.super_admin_id.toString(),
         email: newSuperAdmin.email,
         role: 'Super Admin',
+        tv: dbTv,
       },
-      JWT_SECRET,
-      { expiresIn: '7d' }
+      getJwtSecret(),
+      { expiresIn: DASHBOARD_JWT_EXPIRES_IN }
     );
 
+    setAuthCookie(req, res, token, DASHBOARD_COOKIE_MAX_AGE_MS);
     const formattedData = formatAuthSuperAdmin(newSuperAdmin, token);
 
     return res.status(201).json({
@@ -245,21 +282,18 @@ exports.register = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('❌ Error in register controller:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Terjadi kesalahan pada server saat memproses registrasi.',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Terjadi kesalahan pada server saat memproses registrasi.');
   }
 };
 
 /**
  * POST /api/auth/login
- * Login kredensial untuk Super Admin atau Admin workspace
+ * Login kredensial untuk Super Admin, Admin, Divisi Teknis, atau Staff
  */
 exports.login = async (req, res) => {
   try {
+    await ensureTokenVersionColumns();
+
     const { email, password } = req.body;
 
     if (!email || !password) {
@@ -271,10 +305,27 @@ exports.login = async (req, res) => {
 
     const cleanEmail = email.trim().toLowerCase();
 
-    // 1. Cek di tabel super_admin terlebih dahulu
-    const superAdmin = await prisma.super_admin.findUnique({
-      where: { email: cleanEmail },
-    });
+    // 1. Jalankan pencarian user di tabel super_admin, admin, dan staff secara paralel
+    const [superAdmin, admin, staff] = await Promise.all([
+      prisma.super_admin.findUnique({
+        where: { email: cleanEmail },
+      }),
+      prisma.admin.findUnique({
+        where: { email: cleanEmail },
+        include: { workspace: true },
+      }),
+      prisma.staff.findUnique({
+        where: { email: cleanEmail },
+        include: {
+          store: {
+            include: {
+              workspace: true,
+            },
+          },
+          admin: true,
+        },
+      }),
+    ]);
 
     if (superAdmin) {
       const isMatch = await bcrypt.compare(password, superAdmin.password);
@@ -285,16 +336,20 @@ exports.login = async (req, res) => {
         });
       }
 
+      const dbTv = await getRecordTokenVersion('super_admin', 'super_admin_id', superAdmin.super_admin_id);
       const token = jwt.sign(
         {
           id: `sa-${superAdmin.super_admin_id.toString()}`,
           rawId: superAdmin.super_admin_id.toString(),
           email: superAdmin.email,
           role: 'Super Admin',
+          tv: dbTv,
         },
-        JWT_SECRET,
-        { expiresIn: '7d' }
+        getJwtSecret(),
+        { expiresIn: DASHBOARD_JWT_EXPIRES_IN }
       );
+
+      setAuthCookie(req, res, token, DASHBOARD_COOKIE_MAX_AGE_MS);
 
       return res.status(200).json({
         status: 'success',
@@ -303,14 +358,9 @@ exports.login = async (req, res) => {
       });
     }
 
-    // 2. Jika bukan super admin, cek di tabel admin
-    const admin = await prisma.admin.findUnique({
-      where: { email: cleanEmail },
-      include: { workspace: true },
-    });
-
+    // 2. Cek akun admin / divisi teknis
     if (admin) {
-      if (admin.status === 'inactive') {
+      if (admin.status === 'inactive' || admin.status === 'Nonaktif' || admin.deleted_at) {
         return res.status(403).json({
           status: 'error',
           message: 'Akun Anda berstatus Nonaktif. Hubungi Super Admin untuk mengaktifkan kembali.',
@@ -325,16 +375,8 @@ exports.login = async (req, res) => {
         });
       }
 
-      // Ambil role sebenarnya dari database (mendukung Divisi Teknis)
-      let userRole = 'Admin';
-      try {
-        const roleRes = await prisma.$queryRaw`SELECT role FROM admin WHERE admin_id = ${admin.admin_id} LIMIT 1`;
-        if (roleRes && roleRes[0]?.role) {
-          userRole = roleRes[0].role;
-        }
-      } catch (e) {
-        userRole = admin.role || 'Admin';
-      }
+      const userRole = admin.role || 'Admin';
+      const dbTv = await getRecordTokenVersion('admin', 'admin_id', admin.admin_id);
 
       const token = jwt.sign(
         {
@@ -343,10 +385,13 @@ exports.login = async (req, res) => {
           email: admin.email,
           role: userRole,
           workspaceId: admin.workspace_id.toString(),
+          tv: dbTv,
         },
-        JWT_SECRET,
-        { expiresIn: '7d' }
+        getJwtSecret(),
+        { expiresIn: DASHBOARD_JWT_EXPIRES_IN }
       );
+
+      setAuthCookie(req, res, token, DASHBOARD_COOKIE_MAX_AGE_MS);
 
       return res.status(200).json({
         status: 'success',
@@ -368,19 +413,6 @@ exports.login = async (req, res) => {
       });
     }
 
-    // 3. Jika bukan Super Admin dan bukan Admin, cek di tabel staff
-    const staff = await prisma.staff.findUnique({
-      where: { email: cleanEmail },
-      include: {
-        store: {
-          include: {
-            workspace: true,
-          },
-        },
-        admin: true,
-      },
-    });
-
     if (staff) {
       const extra = await getStaffExtra(staff.staff_id);
       if (extra.deleted_at || staff.status === 'inactive' || staff.status === 'Nonaktif') {
@@ -395,6 +427,18 @@ exports.login = async (req, res) => {
         isMatch = await bcrypt.compare(password, staff.password);
       } else {
         isMatch = staff.password === password;
+        if (isMatch) {
+          // Tingkatkan otomatis sandi plaintext warisan menjadi hash bcrypt setelah verifikasi sukses
+          try {
+            const upgradedHash = await bcrypt.hash(password, 10);
+            await prisma.staff.update({
+              where: { staff_id: staff.staff_id },
+              data: { password: upgradedHash },
+            });
+          } catch (upgradeErr) {
+            console.warn('⚠️ Gagal upgrade hash password staff:', upgradeErr.message);
+          }
+        }
       }
 
       if (!isMatch) {
@@ -407,6 +451,8 @@ exports.login = async (req, res) => {
       const staffPosition = extra.position || 'Auditor Lapangan';
       const storeCode = staff.store ? `ST-${staff.store.store_id.toString()}` : 'ST-01';
       const storeIdStr = staff.store_id ? staff.store_id.toString() : null;
+      const dbTv = Number(extra.token_version ?? 0);
+
       const token = jwt.sign(
         {
           id: `staff-${staff.staff_id.toString()}`,
@@ -416,10 +462,13 @@ exports.login = async (req, res) => {
           position: staffPosition,
           storeId: storeIdStr,
           workspaceId: staff.store?.workspace_id?.toString() || staff.admin?.workspace_id?.toString() || '',
+          tv: dbTv,
         },
-        JWT_SECRET,
-        { expiresIn: '7d' }
+        getJwtSecret(),
+        { expiresIn: STAFF_JWT_EXPIRES_IN }
       );
+
+      setAuthCookie(req, res, token, STAFF_COOKIE_MAX_AGE_MS);
 
       return res.status(200).json({
         status: 'success',
@@ -453,35 +502,129 @@ exports.login = async (req, res) => {
       message: 'Email tidak ditemukan. Pastikan email terdaftar atau lakukan pendaftaran terlebih dahulu.',
     });
   } catch (error) {
-    console.error('❌ Error in login controller:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Terjadi kesalahan pada server saat memproses login.',
-      error: error.message,
+    return sendSafeError(res, error, 'Terjadi kesalahan pada server saat memproses login.');
+  }
+};
+
+/**
+ * POST /api/auth/logout
+ * Memutus sesi aktif dengan menaikkan token_version user di DB dan menghapus cookie HttpOnly
+ */
+exports.logout = async (req, res) => {
+  try {
+    const user = await extractUser(req);
+    if (user) {
+      await bumpTokenVersion(user);
+    }
+    clearAuthCookie(req, res);
+    return res.status(200).json({
+      status: 'success',
+      message: 'Berhasil keluar dari sesi.',
+    });
+  } catch (error) {
+    clearAuthCookie(req, res);
+    return res.status(200).json({
+      status: 'success',
+      message: 'Sesi lokal dibersihkan.',
     });
   }
 };
 
 /**
- * GET /api/auth/me
- * Mendapatkan info user yang sedang login dari Bearer Token
+ * POST /api/auth/refresh
+ * Memperpanjang masa berlaku token & HttpOnly cookie untuk sesi aktif
  */
-exports.getMe = async (req, res) => {
+exports.refresh = async (req, res) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const user = req.user || (await extractUser(req));
+    if (!user) {
       return res.status(401).json({
         status: 'error',
-        message: 'Token otentikasi tidak ditemukan.',
+        message: 'Sesi tidak valid atau telah kedaluwarsa.',
       });
     }
 
-    const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const isStaff = isStaffRole(user);
+    const expiresIn = isStaff ? STAFF_JWT_EXPIRES_IN : DASHBOARD_JWT_EXPIRES_IN;
+    const maxAgeMs = isStaff ? STAFF_COOKIE_MAX_AGE_MS : DASHBOARD_COOKIE_MAX_AGE_MS;
 
-    if (decoded.role === 'Super Admin') {
+    const payload = isSuperAdminRole(user)
+      ? {
+          id: `sa-${user.rawId}`,
+          rawId: user.rawId,
+          email: user.email,
+          role: 'Super Admin',
+          tv: user.tokenVersion ?? 0,
+        }
+      : isStaff
+        ? {
+            id: `staff-${user.rawId}`,
+            rawId: user.rawId,
+            email: user.email,
+            role: 'Staff',
+            position: user.position || 'Auditor Lapangan',
+            storeId: user.storeId || null,
+            workspaceId: user.workspaceId || '',
+            tv: user.tokenVersion ?? 0,
+          }
+        : {
+            id: String(user.rawId),
+            rawId: user.rawId,
+            email: user.email,
+            role: user.role,
+            workspaceId: user.workspaceId || '',
+            tv: user.tokenVersion ?? 0,
+          };
+
+    const newToken = jwt.sign(payload, getJwtSecret(), { expiresIn });
+    setAuthCookie(req, res, newToken, maxAgeMs);
+
+    return res.status(200).json({
+      status: 'success',
+      message: 'Sesi berhasil diperpanjang.',
+      data: {
+        token: newToken,
+        user: {
+          id: user.id,
+          rawId: user.rawId,
+          fullName: user.fullName,
+          email: user.email,
+          role: user.role,
+          workspaceId: user.workspaceId || '',
+          storeId: user.storeId || undefined,
+          storeName: user.storeName || undefined,
+          position: user.position || undefined,
+          status: user.status === 'inactive' || user.status === 'Nonaktif' ? 'Nonaktif' : 'Aktif',
+        },
+      },
+    });
+  } catch (error) {
+    return sendSafeError(res, error, 'Gagal memperpanjang sesi pengguna.');
+  }
+};
+
+/**
+ * GET /api/auth/me
+ * Mendapatkan info user yang sedang login (terverifikasi dari JWT Bearer atau HttpOnly cookie)
+ */
+exports.getMe = async (req, res) => {
+  try {
+    const authUser = req.user || (await extractUser(req));
+    if (!authUser) {
+      return res.status(401).json({
+        status: 'error',
+        message: 'Token otentikasi tidak ditemukan atau tidak valid.',
+      });
+    }
+
+    const token =
+      req.headers.authorization?.startsWith('Bearer ')
+        ? req.headers.authorization.split(' ')[1]
+        : req.cookies?.[AUTH_COOKIE_NAME] || '';
+
+    if (authUser.role === 'Super Admin') {
       const sa = await prisma.super_admin.findUnique({
-        where: { super_admin_id: BigInt(decoded.rawId) },
+        where: { super_admin_id: BigInt(authUser.rawId) },
       });
       if (!sa) {
         return res.status(404).json({ status: 'error', message: 'User tidak ditemukan' });
@@ -492,10 +635,9 @@ exports.getMe = async (req, res) => {
       });
     }
 
-    if (decoded.role === 'Staff') {
-      const cleanStaffId = decoded.rawId || decoded.id?.toString().replace(/^staff-/, '');
+    if (isStaffRole(authUser)) {
       const st = await prisma.staff.findUnique({
-        where: { staff_id: BigInt(cleanStaffId) },
+        where: { staff_id: BigInt(authUser.rawId) },
         include: {
           store: {
             include: { workspace: true },
@@ -507,8 +649,10 @@ exports.getMe = async (req, res) => {
       }
       const extra = await getStaffExtra(st.staff_id);
       if (extra.deleted_at || st.status === 'inactive' || st.status === 'Nonaktif') {
+        clearAuthCookie(req, res);
         return res.status(403).json({
           status: 'error',
+          code: 'ACCOUNT_INACTIVE',
           message: 'Akun staf Anda berstatus Nonaktif atau telah dihapus.',
         });
       }
@@ -539,14 +683,22 @@ exports.getMe = async (req, res) => {
     }
 
     const adm = await prisma.admin.findUnique({
-      where: { admin_id: BigInt(decoded.rawId) },
+      where: { admin_id: BigInt(authUser.rawId) },
       include: { workspace: true },
     });
     if (!adm) {
       return res.status(404).json({ status: 'error', message: 'User tidak ditemukan' });
     }
+    if (adm.status === 'inactive' || adm.status === 'Nonaktif' || adm.deleted_at) {
+      clearAuthCookie(req, res);
+      return res.status(403).json({
+        status: 'error',
+        code: 'ACCOUNT_INACTIVE',
+        message: 'Akun Anda berstatus Nonaktif atau telah dinonaktifkan.',
+      });
+    }
 
-    let userRole = decoded.role || 'Admin';
+    let userRole = authUser.role || 'Admin';
     try {
       const roleRes = await prisma.$queryRaw`SELECT role FROM admin WHERE admin_id = ${adm.admin_id} LIMIT 1`;
       if (roleRes && roleRes[0]?.role) {
@@ -575,350 +727,178 @@ exports.getMe = async (req, res) => {
     return res.status(401).json({
       status: 'error',
       message: 'Sesi login telah kedaluwarsa atau token tidak valid.',
-      error: error.message,
     });
   }
 };
 
 /**
  * PUT /api/auth/profile
- * Memperbarui nama dan/atau foto profil pengguna yang sedang login
+ * Memperbarui nama dan/atau foto profil pengguna yang sedang login (mutlak dari req.user)
  */
 exports.updateProfile = async (req, res) => {
   try {
+    const authUser = req.user || (await extractUser(req));
+    if (!authUser || !authUser.rawId) {
+      return res.status(401).json({
+        status: 'error',
+        message: 'Autentikasi diperlukan untuk memperbarui profil.',
+      });
+    }
+
     const { name, profilePicture } = req.body;
-    const authHeader = req.headers.authorization;
-    const superAdminIdHeader = req.headers['x-super-admin-id'];
-    const userIdHeader = req.headers['x-user-id'];
-    const userEmailHeader = req.headers['x-user-email'];
-    const userRoleHeader = req.headers['x-user-role'];
+    const cleanNumericId = BigInt(authUser.rawId);
 
-    let rawId = null;
-    let email = null;
-    let role = userRoleHeader || null;
-
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      try {
-        const token = authHeader.split(' ')[1];
-        const decoded = jwt.verify(token, JWT_SECRET);
-        rawId = decoded.rawId || decoded.id;
-        email = decoded.email;
-        if (decoded.role) role = decoded.role;
-      } catch (err) {
-        // Fallback ke headers
-      }
-    }
-
-    if (!rawId) {
-      rawId = superAdminIdHeader || userIdHeader;
-    }
-    if (!email && userEmailHeader) {
-      email = userEmailHeader;
-    }
-
-    // Normalisasi role dari prefix jika ada
-    if (typeof rawId === 'string') {
-      if (rawId.startsWith('staff-')) {
-        role = 'Staff';
-        rawId = rawId.replace(/^staff-/, '');
-      } else if (rawId.startsWith('sa-')) {
-        role = 'Super Admin';
-        rawId = rawId.replace(/^sa-/, '');
-      } else if (rawId.startsWith('adm-')) {
-        role = 'Admin';
-        rawId = rawId.replace(/^adm-/, '');
-      }
-    }
-
-    const cleanNumericId = rawId && !isNaN(Number(rawId)) ? BigInt(rawId.toString().replace(/\D/g, '')) : null;
-
-    // 1. JIKA ROLE ADALAH STAFF (atau login domain staf)
-    if (role === 'Staff' || (email && email.includes('@gacoan.com')) || (email && email.includes('@dikichi.com')) || (email && email.includes('@baksogacoan.com'))) {
-      let staff = null;
-      if (cleanNumericId) {
-        staff = await prisma.staff.findUnique({
-          where: { staff_id: cleanNumericId },
-          include: { store: { include: { workspace: true } } },
-        });
-      }
-      if (!staff && email) {
-        staff = await prisma.staff.findUnique({
-          where: { email: email.trim().toLowerCase() },
-          include: { store: { include: { workspace: true } } },
-        });
-      }
-
-      if (staff) {
-        const currentExtra = await getStaffExtra(staff.staff_id);
-        if (currentExtra.deleted_at || staff.status === 'inactive' || staff.status === 'Nonaktif') {
-          return res.status(403).json({
-            status: 'error',
-            message: 'Akun staf Anda berstatus Nonaktif atau telah dihapus.',
-          });
-        }
-        const updateData = {};
-        if (typeof name === 'string' && name.trim()) {
-          updateData.name = name.trim();
-        }
-        if (profilePicture !== undefined) {
-          if (!profilePicture) {
-            updateData.photo = null;
-          } else if (profilePicture.startsWith('ENC:v1:') || profilePicture.startsWith('enc:v1:')) {
-            updateData.photo = profilePicture;
-          } else {
-            updateData.photo = encryptImageData(profilePicture);
-          }
-        }
-
-        const updatedStaff = await prisma.staff.update({
-          where: { staff_id: staff.staff_id },
-          data: updateData,
-          include: {
-            store: { include: { workspace: true } },
-          },
-        });
-        const updatedExtra = await getStaffExtra(updatedStaff.staff_id);
-
-        return res.status(200).json({
-          status: 'success',
-          message: 'Profil Staf berhasil diperbarui.',
-          data: {
-            fullName: updatedStaff.name,
-            profilePicture: updatedStaff.photo,
-            user: {
-              id: `staff-${updatedStaff.staff_id.toString()}`,
-              rawId: updatedStaff.staff_id.toString(),
-              fullName: updatedStaff.name,
-              email: updatedStaff.email,
-              phone: updatedStaff.phone_number || '-',
-              role: 'Staff',
-              position: updatedExtra.position || 'Auditor Lapangan',
-              storeId: updatedStaff.store_id ? updatedStaff.store_id.toString() : null,
-              storeName: updatedStaff.store ? updatedStaff.store.store_name : 'Toko Cabang',
-              storeLocation: updatedStaff.store ? (updatedStaff.store.address || updatedStaff.store.city || 'Cabang') : 'Cabang',
-              storeAddress: updatedStaff.store?.address || updatedStaff.store?.city || '-',
-              storeCode: updatedStaff.store ? `ST-${updatedStaff.store.store_id.toString()}` : 'ST-01',
-              workspaceId: updatedStaff.store?.workspace_id?.toString() || '',
-              workspaceName: updatedStaff.store?.workspace?.company_name || 'Workspace',
-              status: updatedStaff.status === 'inactive' || updatedStaff.status === 'Nonaktif' ? 'Nonaktif' : 'Aktif',
-              profilePicture: updatedStaff.photo || null,
-            },
-          },
-        });
-      }
-    }
-
-    // 2. JIKA ROLE ADALAH SUPER ADMIN
-    if (role === 'Super Admin' || superAdminIdHeader) {
-      let sa = null;
-      if (cleanNumericId) {
-        sa = await prisma.super_admin.findUnique({
-          where: { super_admin_id: cleanNumericId },
-        });
-      }
-      if (!sa && email) {
-        sa = await prisma.super_admin.findUnique({
-          where: { email: email.trim().toLowerCase() },
-        });
-      }
-
-      if (sa) {
-        const updateData = {};
-        if (typeof name === 'string' && name.trim()) {
-          updateData.name = name.trim();
-        }
-        if (profilePicture !== undefined) {
-          if (!profilePicture) {
-            updateData.profile_picture = null;
-          } else if (profilePicture.startsWith('ENC:v1:') || profilePicture.startsWith('enc:v1:')) {
-            updateData.profile_picture = profilePicture;
-          } else {
-            updateData.profile_picture = encryptImageData(profilePicture);
-          }
-        }
-
-        const updatedSa = await prisma.super_admin.update({
-          where: { super_admin_id: sa.super_admin_id },
-          data: updateData,
-        });
-
-        return res.status(200).json({
-          status: 'success',
-          message: 'Profil Super Admin berhasil diperbarui.',
-          data: {
-            fullName: updatedSa.name,
-            profilePicture: updatedSa.profile_picture,
-          },
-        });
-      }
-    }
-
-    // 3. JIKA ROLE ADALAH ADMIN
-    if (role === 'Admin' || role === 'Divisi Teknis' || role === 'Store Manager' || role === 'Area Manager') {
-      let adm = null;
-      if (cleanNumericId) {
-        adm = await prisma.admin.findUnique({
-          where: { admin_id: cleanNumericId },
-        });
-      }
-      if (!adm && email) {
-        adm = await prisma.admin.findUnique({
-          where: { email: email.trim().toLowerCase() },
-        });
-      }
-
-      if (adm) {
-        const updateData = {};
-        if (typeof name === 'string' && name.trim()) {
-          updateData.name = name.trim();
-        }
-        if (profilePicture !== undefined) {
-          if (!profilePicture) {
-            updateData.profile_picture = null;
-          } else if (profilePicture.startsWith('ENC:v1:') || profilePicture.startsWith('enc:v1:')) {
-            updateData.profile_picture = profilePicture;
-          } else {
-            updateData.profile_picture = encryptImageData(profilePicture);
-          }
-        }
-
-        const updatedAdm = await prisma.admin.update({
-          where: { admin_id: adm.admin_id },
-          data: updateData,
-        });
-
-        return res.status(200).json({
-          status: 'success',
-          message: 'Profil Admin berhasil diperbarui.',
-          data: {
-            fullName: updatedAdm.name,
-            profilePicture: updatedAdm.profile_picture,
-          },
-        });
-      }
-    }
-
-    // 4. FALLBACK UMUM: Cari berdasarkan EMAIL (karena email unik di setiap tabel)
-    if (email) {
-      const cleanEmail = email.trim().toLowerCase();
-
-      // Cek tabel staff
-      const staffByEmail = await prisma.staff.findUnique({
-        where: { email: cleanEmail },
+    // 1. STAFF
+    if (isStaffRole(authUser)) {
+      const staff = await prisma.staff.findUnique({
+        where: { staff_id: cleanNumericId },
         include: { store: { include: { workspace: true } } },
       });
-      if (staffByEmail) {
-        const currentExtra = await getStaffExtra(staffByEmail.staff_id);
-        if (currentExtra.deleted_at || staffByEmail.status === 'inactive' || staffByEmail.status === 'Nonaktif') {
-          return res.status(403).json({
-            status: 'error',
-            message: 'Akun staf Anda berstatus Nonaktif atau telah dihapus.',
-          });
-        }
-        const updateData = {};
-        if (typeof name === 'string' && name.trim()) updateData.name = name.trim();
-        if (profilePicture !== undefined) {
-          updateData.photo = !profilePicture ? null : (profilePicture.startsWith('ENC:v1:') || profilePicture.startsWith('enc:v1:')) ? profilePicture : encryptImageData(profilePicture);
-        }
+      if (!staff) {
+        return res.status(404).json({ status: 'error', message: 'Staff tidak ditemukan.' });
+      }
 
-        const updatedStaff = await prisma.staff.update({
-          where: { staff_id: staffByEmail.staff_id },
-          data: updateData,
-          include: { store: { include: { workspace: true } } },
+      const currentExtra = await getStaffExtra(staff.staff_id);
+      if (currentExtra.deleted_at || staff.status === 'inactive' || staff.status === 'Nonaktif') {
+        return res.status(403).json({
+          status: 'error',
+          code: 'ACCOUNT_INACTIVE',
+          message: 'Akun staf Anda berstatus Nonaktif atau telah dihapus.',
         });
-        const updatedExtra = await getStaffExtra(updatedStaff.staff_id);
+      }
 
-        return res.status(200).json({
-          status: 'success',
-          message: 'Profil Staf berhasil diperbarui.',
-          data: {
+      const updateData = {};
+      if (typeof name === 'string' && name.trim()) {
+        updateData.name = name.trim();
+      }
+      if (profilePicture !== undefined) {
+        if (!profilePicture) {
+          updateData.photo = null;
+        } else if (profilePicture.startsWith('ENC:v1:') || profilePicture.startsWith('enc:v1:')) {
+          updateData.photo = profilePicture;
+        } else {
+          updateData.photo = encryptImageData(profilePicture);
+        }
+      }
+
+      const updatedStaff = await prisma.staff.update({
+        where: { staff_id: staff.staff_id },
+        data: updateData,
+        include: {
+          store: { include: { workspace: true } },
+        },
+      });
+      const updatedExtra = await getStaffExtra(updatedStaff.staff_id);
+
+      return res.status(200).json({
+        status: 'success',
+        message: 'Profil Staf berhasil diperbarui.',
+        data: {
+          fullName: updatedStaff.name,
+          profilePicture: updatedStaff.photo,
+          user: {
+            id: `staff-${updatedStaff.staff_id.toString()}`,
+            rawId: updatedStaff.staff_id.toString(),
             fullName: updatedStaff.name,
-            profilePicture: updatedStaff.photo,
-            user: {
-              id: `staff-${updatedStaff.staff_id.toString()}`,
-              rawId: updatedStaff.staff_id.toString(),
-              fullName: updatedStaff.name,
-              email: updatedStaff.email,
-              phone: updatedStaff.phone_number || '-',
-              role: 'Staff',
-              position: updatedExtra.position || 'Auditor Lapangan',
-              storeId: updatedStaff.store_id ? updatedStaff.store_id.toString() : null,
-              storeName: updatedStaff.store ? updatedStaff.store.store_name : 'Toko Cabang',
-              storeLocation: updatedStaff.store ? (updatedStaff.store.address || updatedStaff.store.city || 'Cabang') : 'Cabang',
-              storeAddress: updatedStaff.store?.address || updatedStaff.store?.city || '-',
-              storeCode: updatedStaff.store ? `ST-${updatedStaff.store.store_id.toString()}` : 'ST-01',
-              workspaceId: updatedStaff.store?.workspace_id?.toString() || '',
-              workspaceName: updatedStaff.store?.workspace?.company_name || 'Workspace',
-              status: updatedStaff.status === 'inactive' || updatedStaff.status === 'Nonaktif' ? 'Nonaktif' : 'Aktif',
-              profilePicture: updatedStaff.photo || null,
-            },
+            email: updatedStaff.email,
+            phone: updatedStaff.phone_number || '-',
+            role: 'Staff',
+            position: updatedExtra.position || 'Auditor Lapangan',
+            storeId: updatedStaff.store_id ? updatedStaff.store_id.toString() : null,
+            storeName: updatedStaff.store ? updatedStaff.store.store_name : 'Toko Cabang',
+            storeLocation: updatedStaff.store ? (updatedStaff.store.address || updatedStaff.store.city || 'Cabang') : 'Cabang',
+            storeAddress: updatedStaff.store?.address || updatedStaff.store?.city || '-',
+            storeCode: updatedStaff.store ? `ST-${updatedStaff.store.store_id.toString()}` : 'ST-01',
+            workspaceId: updatedStaff.store?.workspace_id?.toString() || '',
+            workspaceName: updatedStaff.store?.workspace?.company_name || 'Workspace',
+            status: updatedStaff.status === 'inactive' || updatedStaff.status === 'Nonaktif' ? 'Nonaktif' : 'Aktif',
+            profilePicture: updatedStaff.photo || null,
           },
-        });
+        },
+      });
+    }
+
+    // 2. SUPER ADMIN
+    if (isSuperAdminRole(authUser)) {
+      const sa = await prisma.super_admin.findUnique({
+        where: { super_admin_id: cleanNumericId },
+      });
+      if (!sa) {
+        return res.status(404).json({ status: 'error', message: 'Super Admin tidak ditemukan.' });
       }
 
-      // Cek tabel admin
-      const admByEmail = await prisma.admin.findUnique({
-        where: { email: cleanEmail },
-      });
-      if (admByEmail) {
-        const updateData = {};
-        if (typeof name === 'string' && name.trim()) updateData.name = name.trim();
-        if (profilePicture !== undefined) {
-          updateData.profile_picture = !profilePicture ? null : (profilePicture.startsWith('ENC:v1:') || profilePicture.startsWith('enc:v1:')) ? profilePicture : encryptImageData(profilePicture);
+      const updateData = {};
+      if (typeof name === 'string' && name.trim()) {
+        updateData.name = name.trim();
+      }
+      if (profilePicture !== undefined) {
+        if (!profilePicture) {
+          updateData.profile_picture = null;
+        } else if (profilePicture.startsWith('ENC:v1:') || profilePicture.startsWith('enc:v1:')) {
+          updateData.profile_picture = profilePicture;
+        } else {
+          updateData.profile_picture = encryptImageData(profilePicture);
         }
-
-        const updatedAdm = await prisma.admin.update({
-          where: { admin_id: admByEmail.admin_id },
-          data: updateData,
-        });
-
-        return res.status(200).json({
-          status: 'success',
-          message: 'Profil Admin berhasil diperbarui.',
-          data: {
-            fullName: updatedAdm.name,
-            profilePicture: updatedAdm.profile_picture,
-          },
-        });
       }
 
-      // Cek tabel super_admin
-      const saByEmail = await prisma.super_admin.findUnique({
-        where: { email: cleanEmail },
+      const updatedSa = await prisma.super_admin.update({
+        where: { super_admin_id: sa.super_admin_id },
+        data: updateData,
       });
-      if (saByEmail) {
-        const updateData = {};
-        if (typeof name === 'string' && name.trim()) updateData.name = name.trim();
-        if (profilePicture !== undefined) {
-          updateData.profile_picture = !profilePicture ? null : (profilePicture.startsWith('ENC:v1:') || profilePicture.startsWith('enc:v1:')) ? profilePicture : encryptImageData(profilePicture);
-        }
 
-        const updatedSa = await prisma.super_admin.update({
-          where: { super_admin_id: saByEmail.super_admin_id },
-          data: updateData,
-        });
+      return res.status(200).json({
+        status: 'success',
+        message: 'Profil Super Admin berhasil diperbarui.',
+        data: {
+          fullName: updatedSa.name,
+          profilePicture: updatedSa.profile_picture,
+        },
+      });
+    }
 
-        return res.status(200).json({
-          status: 'success',
-          message: 'Profil Super Admin berhasil diperbarui.',
-          data: {
-            fullName: updatedSa.name,
-            profilePicture: updatedSa.profile_picture,
-          },
-        });
+    // 3. ADMIN / DIVISI TEKNIS
+    const adm = await prisma.admin.findUnique({
+      where: { admin_id: cleanNumericId },
+    });
+    if (!adm) {
+      return res.status(404).json({ status: 'error', message: 'Admin tidak ditemukan.' });
+    }
+    if (adm.status === 'inactive' || adm.status === 'Nonaktif' || adm.deleted_at) {
+      return res.status(403).json({
+        status: 'error',
+        code: 'ACCOUNT_INACTIVE',
+        message: 'Akun Admin berstatus Nonaktif.',
+      });
+    }
+
+    const updateData = {};
+    if (typeof name === 'string' && name.trim()) {
+      updateData.name = name.trim();
+    }
+    if (profilePicture !== undefined) {
+      if (!profilePicture) {
+        updateData.profile_picture = null;
+      } else if (profilePicture.startsWith('ENC:v1:') || profilePicture.startsWith('enc:v1:')) {
+        updateData.profile_picture = profilePicture;
+      } else {
+        updateData.profile_picture = encryptImageData(profilePicture);
       }
     }
 
-    return res.status(404).json({
-      status: 'error',
-      message: 'Pengguna tidak ditemukan untuk memperbarui profil.',
+    const updatedAdm = await prisma.admin.update({
+      where: { admin_id: adm.admin_id },
+      data: updateData,
+    });
+
+    return res.status(200).json({
+      status: 'success',
+      message: 'Profil Admin berhasil diperbarui.',
+      data: {
+        fullName: updatedAdm.name,
+        profilePicture: updatedAdm.profile_picture,
+      },
     });
   } catch (error) {
-    console.error('❌ Error updating profile:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal memperbarui profil pengguna di server.',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal memperbarui profil pengguna di server.');
   }
 };

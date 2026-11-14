@@ -254,9 +254,21 @@ export default function AdminTable({
 
                     {/* 4. ROLE */}
                     <td className={`px-5 py-3.5 ${isSoftDeleted ? "opacity-40 grayscale" : ""}`}>
-                      <span className="inline-block px-2.5 py-0.5 bg-slate-100 text-slate-600 text-[10px] font-semibold rounded-md">
-                        {adm.role}
-                      </span>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="inline-block px-2.5 py-0.5 bg-slate-100 text-slate-600 text-[10px] font-semibold rounded-md">
+                          {adm.role}
+                        </span>
+                        {adm.isSystemTeknis && (
+                          <span className="inline-block px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-semibold rounded-md">
+                            Sistem Teknis
+                          </span>
+                        )}
+                        {adm.isManualSuperAdmin && (
+                          <span className="inline-block px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-semibold rounded-md">
+                            Manual Teknis
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     {/* 5. STATUS */}

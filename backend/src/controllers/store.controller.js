@@ -1,6 +1,21 @@
+const crypto = require('crypto');
+const bcrypt = require('bcrypt');
 const prisma = require('../config/prisma');
 const { extractUser } = require('../middlewares/auth.middleware');
 const { encryptImage, decryptImage, isEncrypted } = require('../utils/crypto.utils');
+const {
+  isTeknisUser,
+  toBigIntSafe,
+  getTeknisWorkspaceWhere,
+  isWorkspaceInTeknisScope,
+  resolveTeknisTargetWorkspaceId,
+} = require('../utils/teknisScope');
+const {
+  assertWorkspaceAccess,
+  resolveScopedWorkspaceContext,
+  assertStoreAccess,
+  sendSafeError,
+} = require('../utils/tenantScope');
 
 // Koleksi visual gerai toko ritel/kuliner modern sebagai visualisasi gerai yang valid
 const STORE_FALLBACK_IMAGES = [
@@ -101,32 +116,25 @@ const formatStore = (s) => {
  */
 exports.getAllStores = async (req, res) => {
   try {
-    const user = await extractUser(req);
+    const user = req.user || (await extractUser(req));
     const requestedWsId = req.query.workspaceId || req.headers['x-workspace-id'];
-    const where = {};
 
-    // 1. Logika penentuan workspace:
-    if (user && (user.role === 'Divisi Teknis' || user.role === 'Teknis') && user.workspaceId) {
-      // Divisi Teknis: Terisolasi mutlak ke sandbox internal untuk testing
-      where.workspace_id = BigInt(user.workspaceId);
-    } else if (requestedWsId && requestedWsId !== 'all') {
-      const cleanWs = BigInt(requestedWsId.toString().replace(/^ws-/, ''));
-      where.workspace_id = cleanWs;
-    } else if (user && user.role === 'Admin' && user.workspaceId) {
-      // Jika Admin biasa: batasi mutlak ke workspace miliknya
-      where.workspace_id = BigInt(user.workspaceId);
-    } else if (user && user.role === 'Super Admin' && user.rawId) {
-      // Jika Super Admin tanpa filter workspace spesifik: tampilkan seluruh toko di bawah perusahaannya
-      const cleanSaId = BigInt(user.rawId);
-      where.workspace = {
-        super_admin_id: cleanSaId,
-      };
-    } else if (req.query.superAdminId) {
-      const cleanSaId = BigInt(req.query.superAdminId.toString().replace(/^sa-/, ''));
-      where.workspace = {
-        super_admin_id: cleanSaId,
-      };
+    const scope = await resolveScopedWorkspaceContext(user, requestedWsId, {
+      teknisUseSingleDefaultOnAll: true,
+    });
+    if (!scope.ok) {
+      return res.status(scope.status).json({
+        status: 'error',
+        message: scope.message,
+      });
     }
+    if (scope.workspaceIds.length === 0) {
+      return res.status(200).json({ status: 'success', total: 0, data: [] });
+    }
+
+    const where = scope.prismaWorkspaceWhere.workspace_id
+      ? { workspace_id: scope.prismaWorkspaceWhere.workspace_id }
+      : { workspace: scope.prismaWorkspaceWhere };
 
     // 2. Filter Status jika diberikan
     if (req.query.status && req.query.status !== 'Semua') {
@@ -178,12 +186,7 @@ exports.getAllStores = async (req, res) => {
       data: formatted,
     });
   } catch (error) {
-    console.error('❌ Error in getAllStores:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal mengambil data toko dari database',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal mengambil data toko dari database');
   }
 };
 
@@ -193,11 +196,17 @@ exports.getAllStores = async (req, res) => {
  */
 exports.getStoreById = async (req, res) => {
   try {
-    const { id } = req.params;
-    const cleanId = BigInt(id.toString().replace(/^toko-/, ''));
+    const user = req.user || (await extractUser(req));
+    const storeAccess = await assertStoreAccess(user, req.params.id);
+    if (!storeAccess.ok) {
+      return res.status(storeAccess.status).json({
+        status: 'error',
+        message: storeAccess.message,
+      });
+    }
 
     const s = await prisma.store.findUnique({
-      where: { store_id: cleanId },
+      where: { store_id: storeAccess.storeId },
       include: {
         workspace: true,
         admin: true,
@@ -216,12 +225,7 @@ exports.getStoreById = async (req, res) => {
       data: formatStore(s),
     });
   } catch (error) {
-    console.error('❌ Error in getStoreById:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal memuat detail toko',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal memuat detail toko');
   }
 };
 
@@ -231,7 +235,7 @@ exports.getStoreById = async (req, res) => {
  */
 exports.createStore = async (req, res) => {
   try {
-    const user = await extractUser(req);
+    const user = req.user || (await extractUser(req));
     const {
       name,
       storeName,
@@ -261,55 +265,103 @@ exports.createStore = async (req, res) => {
       });
     }
 
-    // Tentukan Workspace ID tujuan
-    let targetWsId =
-      (user && (user.role === 'Divisi Teknis' || user.role === 'Teknis') && user.workspaceId)
-        ? user.workspaceId
-        : (workspaceId ||
-           (user && user.workspaceId ? user.workspaceId : null) ||
-           req.headers['x-workspace-id']);
+    // Tentukan Workspace ID tujuan secara ketat di dalam lingkup akun
+    let cleanWsId = null;
 
-    if (!targetWsId && workspace) {
-      const foundWs = await prisma.workspace.findFirst({
-        where: { company_name: workspace.trim() },
-      });
-      if (foundWs) {
-        targetWsId = foundWs.workspace_id.toString();
-      }
-    }
-
-    if (!targetWsId) {
-      if (user && user.rawId) {
-        const firstWs = await prisma.workspace.findFirst({
-          where: { super_admin_id: BigInt(user.rawId) },
+    if (isTeknisUser(user)) {
+      const explicitWs = workspaceId || req.headers['x-workspace-id'] || req.query.workspaceId;
+      if (explicitWs && explicitWs !== 'all') {
+        const parsedWs = toBigIntSafe(explicitWs, ['ws-']);
+        if (!parsedWs || !(await isWorkspaceInTeknisScope(parsedWs))) {
+          return res.status(403).json({
+            status: 'error',
+            message: 'Anda tidak memiliki akses untuk menambah toko di workspace tenant lain.',
+          });
+        }
+        cleanWsId = parsedWs;
+      } else if (workspace) {
+        const teknisWhere = await getTeknisWorkspaceWhere();
+        const foundWs = await prisma.workspace.findFirst({
+          where: {
+            AND: [{ company_name: workspace.trim() }, teknisWhere],
+          },
+          select: { workspace_id: true },
         });
-        if (firstWs) targetWsId = firstWs.workspace_id.toString();
+        if (!foundWs) {
+          return res.status(403).json({
+            status: 'error',
+            message: 'Workspace yang dipilih berada di luar lingkup Divisi Teknis.',
+          });
+        }
+        cleanWsId = foundWs.workspace_id;
+      } else {
+        cleanWsId = await resolveTeknisTargetWorkspaceId(null, user.workspaceId);
+      }
+    } else {
+      const scope = await resolveScopedWorkspaceContext(
+        user,
+        workspaceId || req.headers['x-workspace-id'] || req.query.workspaceId
+      );
+      if (!scope.ok) {
+        return res.status(scope.status).json({ status: 'error', message: scope.message });
+      }
+      if (!workspaceId && workspace) {
+        const foundWs = await prisma.workspace.findFirst({
+          where: {
+            AND: [{ company_name: workspace.trim() }, scope.prismaWorkspaceWhere],
+          },
+          select: { workspace_id: true },
+        });
+        if (!foundWs) {
+          return res.status(403).json({
+            status: 'error',
+            message: 'Workspace yang dipilih tidak ditemukan dalam lingkup akun Anda.',
+          });
+        }
+        cleanWsId = foundWs.workspace_id;
+      } else {
+        cleanWsId = scope.targetWorkspaceId;
       }
     }
 
-    if (!targetWsId) {
+    if (!cleanWsId) {
       return res.status(400).json({
         status: 'error',
         message: 'ID Workspace tidak ditemukan. Silakan pilih workspace terlebih dahulu.',
       });
     }
 
-    const cleanWsId = BigInt(targetWsId.toString().replace(/^ws-/, ''));
+    const wsAccess = await assertWorkspaceAccess(user, cleanWsId);
+    if (!wsAccess.ok) {
+      return res.status(wsAccess.status).json({ status: 'error', message: wsAccess.message });
+    }
 
-    // Validasi Workspace: jika workspace dinonaktifkan, hentikan penambahan toko
-    const targetWs = await prisma.workspace.findUnique({
-      where: { workspace_id: cleanWsId },
-      select: { status: true },
-    });
-    if (targetWs && (targetWs.status === 'inactive' || targetWs.status === 'Nonaktif')) {
+    const targetWs = wsAccess.workspace;
+    if (targetWs.status === 'inactive' || targetWs.status === 'Nonaktif') {
       return res.status(403).json({
         status: 'error',
         message: 'Workspace ini sedang dinonaktifkan. Seluruh sistem operasional dan penambahan toko diberhentikan.',
       });
     }
 
-    // Pastikan ada Admin yang terhubung ke workspace ini
-    let assignedAdminId = adminId ? BigInt(adminId.toString().replace(/^adm-/, '')) : null;
+    // Pastikan Admin penanggung jawab toko memang berada pada workspace yang sama
+    let assignedAdminId = null;
+    if (adminId) {
+      const parsedAdminId = toBigIntSafe(adminId, ['adm-']);
+      if (parsedAdminId) {
+        const admOwner = await prisma.admin.findFirst({
+          where: { admin_id: parsedAdminId, workspace_id: cleanWsId },
+          select: { admin_id: true },
+        });
+        if (!admOwner) {
+          return res.status(403).json({
+            status: 'error',
+            message: 'Admin penanggung jawab tidak berada dalam workspace ini.',
+          });
+        }
+        assignedAdminId = admOwner.admin_id;
+      }
+    }
 
     if (!assignedAdminId) {
       const existingAdmin = await prisma.admin.findFirst({
@@ -319,12 +371,14 @@ exports.createStore = async (req, res) => {
       if (existingAdmin) {
         assignedAdminId = existingAdmin.admin_id;
       } else {
+        const wsIdStr = cleanWsId.toString();
+        const randomHash = await bcrypt.hash(crypto.randomBytes(24).toString('hex'), 10);
         const createdAdmin = await prisma.admin.create({
           data: {
             workspace_id: cleanWsId,
-            name: `Admin Operasional ${targetWsId}`,
-            email: `admin.ops.ws${targetWsId}_${Date.now()}@auditcorp.com`,
-            password: 'default_admin_pass',
+            name: `Admin Operasional ${wsIdStr}`,
+            email: `admin.ops.ws${wsIdStr}_${Date.now()}@auditcorp.com`,
+            password: randomHash,
             status: 'active',
           },
         });
@@ -373,12 +427,7 @@ exports.createStore = async (req, res) => {
       data: formatStore(newStore),
     });
   } catch (error) {
-    console.error('❌ Error creating store:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal menambahkan toko ke database',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal menambahkan toko ke database');
   }
 };
 
@@ -388,19 +437,15 @@ exports.createStore = async (req, res) => {
  */
 exports.updateStore = async (req, res) => {
   try {
-    const { id } = req.params;
-    const cleanId = BigInt(id.toString().replace(/^toko-/, ''));
-
-    const existingStore = await prisma.store.findUnique({
-      where: { store_id: cleanId },
-    });
-
-    if (!existingStore) {
-      return res.status(404).json({
+    const user = req.user || (await extractUser(req));
+    const storeAccess = await assertStoreAccess(user, req.params.id);
+    if (!storeAccess.ok) {
+      return res.status(storeAccess.status).json({
         status: 'error',
-        message: 'Data toko yang akan diubah tidak ditemukan.',
+        message: storeAccess.message,
       });
     }
+    const cleanId = storeAccess.storeId;
 
     const {
       name,
@@ -483,12 +528,7 @@ exports.updateStore = async (req, res) => {
       data: formatStore(updatedStore),
     });
   } catch (error) {
-    console.error('❌ Error updating store:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal memperbarui data toko di database',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal memperbarui data toko di database');
   }
 };
 
@@ -498,20 +538,17 @@ exports.updateStore = async (req, res) => {
  */
 exports.deleteStore = async (req, res) => {
   try {
-    const { id } = req.params;
-    const cleanId = BigInt(id.toString().replace(/^toko-/, ''));
-    const isPermanent = req.query.permanent === 'true';
-
-    const existingStore = await prisma.store.findUnique({
-      where: { store_id: cleanId },
-    });
-
-    if (!existingStore) {
-      return res.status(404).json({
+    const user = req.user || (await extractUser(req));
+    const storeAccess = await assertStoreAccess(user, req.params.id);
+    if (!storeAccess.ok) {
+      return res.status(storeAccess.status).json({
         status: 'error',
-        message: 'Toko tidak ditemukan.',
+        message: storeAccess.message,
       });
     }
+    const cleanId = storeAccess.storeId;
+    const existingStore = storeAccess.store;
+    const isPermanent = req.query.permanent === 'true';
 
     if (isPermanent) {
       await prisma.store.delete({
@@ -546,11 +583,6 @@ exports.deleteStore = async (req, res) => {
       data: formatStore(updated),
     });
   } catch (error) {
-    console.error('❌ Error deleting store:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal menghapus toko dari database',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal menghapus toko dari database');
   }
 };

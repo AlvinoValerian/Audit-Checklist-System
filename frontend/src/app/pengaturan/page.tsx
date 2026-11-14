@@ -20,6 +20,7 @@ import {
   Eye,
 } from "lucide-react";
 import { toast } from "sonner";
+import { apiFetch } from "@/lib/api-client";
 
 export default function PengaturanPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -30,15 +31,15 @@ export default function PengaturanPage() {
   const handleTestConnection = async () => {
     setIsRefreshing(true);
     try {
-      const res = await fetch("http://localhost:5000/api/health");
-      const json = await res.json();
+      const res = await apiFetch("/api/health");
+      await res.json().catch(() => null);
       if (res.ok) {
         toast.success("Koneksi server backend & database PostgreSQL berjalan normal!");
       } else {
         toast.error("Respons server tidak sesuai harapan.");
       }
     } catch {
-      toast.error("Gagal terhubung ke backend server (http://localhost:5000).");
+      toast.error("Gagal terhubung ke backend server.");
     } finally {
       setIsRefreshing(false);
     }
@@ -213,7 +214,7 @@ export default function PengaturanPage() {
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/60 flex items-center justify-between">
                 <div>
                   <span className="text-slate-400 block text-[10px]">Protokol Enkripsi Media</span>
-                  <span className="font-semibold text-slate-800">AES-256-CBC</span>
+                  <span className="font-semibold text-slate-800">AES-256-GCM</span>
                 </div>
                 <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600">
                   <Lock className="w-3 h-3" />
@@ -224,7 +225,7 @@ export default function PengaturanPage() {
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/60 flex items-center justify-between">
                 <div>
                   <span className="text-slate-400 block text-[10px]">Masa Sesi JWT Token</span>
-                  <span className="font-semibold text-slate-800">7 Hari</span>
+                  <span className="font-semibold text-slate-800">30 Menit Idle (Maks. 4 Jam per Sesi)</span>
                 </div>
                 <span className="text-[11px] font-mono text-slate-500">HS256</span>
               </div>

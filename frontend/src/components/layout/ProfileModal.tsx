@@ -131,23 +131,27 @@ export default function ProfileModal({
         return;
       }
 
-      // Tampilkan foto hasil resize di preview lokal dan perbarui avatar di TopBar
-      setAvatar(resizedBase64);
-      onUpdateProfile?.({ avatar: resizedBase64 });
-
       // 2. Enkripsi foto hasil resize menggunakan algoritma AES-256-GCM
       const encrypted = await CryptoService.encryptImage(resizedBase64);
-      if (typeof window !== "undefined") {
-        localStorage.setItem("audit_pro_avatar", encrypted);
-      }
-      setIsEncryptedAvatar(true);
 
       // 3. Simpan foto hasil resize yang telah terenkripsi ke database server
       await ApiAuthService.updateProfile({ profilePicture: encrypted });
+
+      // 4. Perbarui preview lokal, TopBar, dan storage setelah penyimpanan ke database berhasil
+      if (typeof window !== "undefined") {
+        localStorage.setItem("audit_pro_avatar", encrypted);
+      }
+      setAvatar(resizedBase64);
+      setIsEncryptedAvatar(true);
+      onUpdateProfile?.({ avatar: resizedBase64 });
+
       toast.success("Foto profil berhasil di-resize, dienkripsi (AES-256) & disimpan!", { id: "profile-upload" });
     } catch (err) {
       console.warn("Gagal memproses foto profil:", err);
-      toast.error("Terjadi kesalahan saat memproses foto profil.", { id: "profile-upload" });
+      toast.error(
+        err instanceof Error ? err.message : "Terjadi kesalahan saat memproses foto profil.",
+        { id: "profile-upload" }
+      );
     } finally {
       e.target.value = "";
     }
@@ -156,16 +160,23 @@ export default function ProfileModal({
   // Handle removing uploaded photo
   const handleRemovePhoto = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    setAvatar(null);
-    setIsEncryptedAvatar(false);
-    if (typeof window !== "undefined") {
-      localStorage.removeItem("audit_pro_avatar");
-    }
-    onUpdateProfile?.({ avatar: null });
+    try {
+      // Hapus foto profil dari database server terlebih dahulu
+      await ApiAuthService.updateProfile({ profilePicture: null });
 
-    // Hapus foto profil dari database server
-    await ApiAuthService.updateProfile({ profilePicture: null });
-    toast.success("Foto profil berhasil dihapus");
+      setAvatar(null);
+      setIsEncryptedAvatar(false);
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("audit_pro_avatar");
+      }
+      onUpdateProfile?.({ avatar: null });
+      toast.success("Foto profil berhasil dihapus");
+    } catch (err) {
+      console.warn("Gagal menghapus foto profil:", err);
+      toast.error(
+        err instanceof Error ? err.message : "Gagal menghapus foto profil dari database."
+      );
+    }
   };
 
   // Handle saving edited admin name
@@ -176,22 +187,29 @@ export default function ProfileModal({
       return;
     }
 
-    setCurrentName(trimmed);
-    setIsEditingName(false);
+    try {
+      // Simpan nama baru ke database server terlebih dahulu
+      await ApiAuthService.updateProfile({ name: trimmed });
 
-    if (typeof window !== "undefined") {
-      localStorage.setItem("audit_pro_admin_name", trimmed);
-      const currentUser = AuthService.getCurrentUser();
-      if (currentUser) {
-        AuthService.setCurrentUser({ ...currentUser, fullName: trimmed });
+      setCurrentName(trimmed);
+      setIsEditingName(false);
+
+      if (typeof window !== "undefined") {
+        localStorage.setItem("audit_pro_admin_name", trimmed);
+        const currentUser = AuthService.getCurrentUser();
+        if (currentUser) {
+          AuthService.setCurrentUser({ ...currentUser, fullName: trimmed });
+        }
       }
+
+      onUpdateProfile?.({ name: trimmed });
+      toast.success("Nama admin berhasil disimpan!");
+    } catch (err) {
+      console.warn("Gagal menyimpan nama profil:", err);
+      toast.error(
+        err instanceof Error ? err.message : "Gagal menyimpan nama profil ke database."
+      );
     }
-
-    onUpdateProfile?.({ name: trimmed });
-
-    // Simpan nama baru ke database server
-    await ApiAuthService.updateProfile({ name: trimmed });
-    toast.success("Nama admin berhasil disimpan!");
   };
 
   if (!isOpen) return null;
