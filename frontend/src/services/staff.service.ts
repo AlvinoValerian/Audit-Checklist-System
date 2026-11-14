@@ -1,5 +1,6 @@
 import { StaffUser, StaffStats, StaffStatus } from "@/types/staff";
 import { AuthService } from "@/lib/auth";
+import { apiFetch } from "@/lib/api-client";
 
 const getBackendUrl = (): string => {
   if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
@@ -22,14 +23,6 @@ const getAuthHeaders = (): Record<string, string> => {
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
-  if (rawId && !rawId.startsWith("adm-")) {
-    headers["x-super-admin-id"] = rawId;
-    headers["x-user-id"] = rawId;
-  }
-  if (user?.email) {
-    headers["x-user-email"] = user.email;
-  }
   if (activeWs?.id) {
     headers["x-workspace-id"] = activeWs.id;
   } else if (user?.workspaceId) {
@@ -56,7 +49,7 @@ export const StaffService = {
       }
 
       const queryParam = params.toString() ? `?${params.toString()}` : "";
-      const res = await fetch(`${BACKEND_URL}/api/staff${queryParam}`, {
+      const res = await apiFetch(`${BACKEND_URL}/api/staff${queryParam}`, {
         method: "GET",
         headers: getAuthHeaders(),
         cache: "no-store",
@@ -120,7 +113,7 @@ export const StaffService = {
    */
   async getByIdAsync(id: string): Promise<StaffUser | null> {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/staff/${id}`, {
+      const res = await apiFetch(`${BACKEND_URL}/api/staff/${id}`, {
         method: "GET",
         headers: getAuthHeaders(),
       });
@@ -144,9 +137,10 @@ export const StaffService = {
    * Menambahkan staf baru ke backend PostgreSQL
    */
   async createAsync(staff: Omit<StaffUser, "id">): Promise<StaffUser> {
+    const activeWs = AuthService.getActiveWorkspace();
+    let res: Response;
     try {
-      const activeWs = AuthService.getActiveWorkspace();
-      const res = await fetch(`${BACKEND_URL}/api/staff`, {
+      res = await apiFetch(`${BACKEND_URL}/api/staff`, {
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify({
@@ -154,28 +148,28 @@ export const StaffService = {
           workspaceId: staff.workspaceId || activeWs?.id,
         }),
       });
-
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => null);
-        throw new Error(errJson?.message || `HTTP ${res.status}: Gagal menambahkan staf`);
-      }
-
-      const json = await res.json();
-      const createdStaff: StaffUser = json.data;
-
-      // Update local cache
-      const list = this.getAll();
-      const updated = [createdStaff, ...list.filter((s) => s.id !== createdStaff.id)];
-      StaffService.cachedStaffs = updated;
-      if (typeof window !== "undefined") {
-        localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(updated));
-      }
-
-      return createdStaff;
     } catch (err) {
       console.warn("⚠️ Backend error, falling back to local creation:", err);
       return this.create(staff);
     }
+
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => null);
+      throw new Error(errJson?.message || `HTTP ${res.status}: Gagal menambahkan staf`);
+    }
+
+    const json = await res.json();
+    const createdStaff: StaffUser = json.data;
+
+    // Update local cache
+    const list = this.getAll();
+    const updated = [createdStaff, ...list.filter((s) => s.id !== createdStaff.id)];
+    StaffService.cachedStaffs = updated;
+    if (typeof window !== "undefined") {
+      localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(updated));
+    }
+
+    return createdStaff;
   },
 
   create(staff: Omit<StaffUser, "id">): StaffUser {
@@ -196,41 +190,42 @@ export const StaffService = {
    * Memperbarui data staf di backend PostgreSQL
    */
   async updateAsync(id: string, data: Partial<StaffUser>): Promise<StaffUser> {
+    let res: Response;
     try {
-      const res = await fetch(`${BACKEND_URL}/api/staff/${id}`, {
+      res = await apiFetch(`${BACKEND_URL}/api/staff/${id}`, {
         method: "PUT",
         headers: getAuthHeaders(),
         body: JSON.stringify(data),
       });
-
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => null);
-        throw new Error(errJson?.message || `HTTP ${res.status}: Gagal memperbarui staf`);
-      }
-
-      const json = await res.json();
-      const updatedStaff: StaffUser = json.data;
-
-      // Update cache
-      const list = this.getAll();
-      const idx = list.findIndex((s) => s.id === id);
-      if (idx !== -1) {
-        list[idx] = updatedStaff;
-      } else {
-        list.unshift(updatedStaff);
-      }
-      StaffService.cachedStaffs = [...list];
-      if (typeof window !== "undefined") {
-        localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(list));
-      }
-
-      return updatedStaff;
     } catch (err) {
       console.warn("⚠️ Backend error, falling back to local update:", err);
       const fallback = this.update(id, data);
       if (!fallback) throw err;
       return fallback;
     }
+
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => null);
+      throw new Error(errJson?.message || `HTTP ${res.status}: Gagal memperbarui staf`);
+    }
+
+    const json = await res.json();
+    const updatedStaff: StaffUser = json.data;
+
+    // Update cache
+    const list = this.getAll();
+    const idx = list.findIndex((s) => s.id === id);
+    if (idx !== -1) {
+      list[idx] = updatedStaff;
+    } else {
+      list.unshift(updatedStaff);
+    }
+    StaffService.cachedStaffs = [...list];
+    if (typeof window !== "undefined") {
+      localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(list));
+    }
+
+    return updatedStaff;
   },
 
   update(id: string, data: Partial<StaffUser>): StaffUser | null {
@@ -252,7 +247,7 @@ export const StaffService = {
    */
   async restoreAsync(id: string): Promise<StaffUser> {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/staff/${id}/restore`, {
+      const res = await apiFetch(`${BACKEND_URL}/api/staff/${id}/restore`, {
         method: "PATCH",
         headers: getAuthHeaders(),
       });
@@ -289,7 +284,7 @@ export const StaffService = {
    */
   async toggleStatusAsync(id: string): Promise<StaffUser> {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/staff/${id}/status`, {
+      const res = await apiFetch(`${BACKEND_URL}/api/staff/${id}/status`, {
         method: "PATCH",
         headers: getAuthHeaders(),
       });
@@ -335,7 +330,7 @@ export const StaffService = {
   async deleteAsync(id: string, permanent: boolean = false): Promise<boolean> {
     try {
       const queryParam = permanent ? "?permanent=true" : "";
-      const res = await fetch(`${BACKEND_URL}/api/staff/${id}${queryParam}`, {
+      const res = await apiFetch(`${BACKEND_URL}/api/staff/${id}${queryParam}`, {
         method: "DELETE",
         headers: getAuthHeaders(),
       });

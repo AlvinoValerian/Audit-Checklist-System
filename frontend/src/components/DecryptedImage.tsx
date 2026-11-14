@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { decryptImageData } from "@/lib/image-crypto";
+import { AuthService } from "@/lib/auth";
 
 interface DecryptedImageProps extends React.ImgHTMLAttributes<HTMLImageElement> {
   src?: string;
@@ -28,8 +29,26 @@ export default function DecryptedImage({
       return;
     }
 
-    if (src.startsWith("data:") || src.startsWith("http") || src.startsWith("/")) {
+    if (src.startsWith("data:")) {
       setDecryptedSrc(src);
+      setLoading(false);
+      return;
+    }
+
+    if (src.startsWith("http") || src.startsWith("/")) {
+      let finalSrc = src;
+      if (src.includes("/api/attachment") && !src.includes("token=")) {
+        try {
+          const token = AuthService.getToken();
+          if (token) {
+            const sep = finalSrc.includes("?") ? "&" : "?";
+            finalSrc = `${finalSrc}${sep}token=${encodeURIComponent(token)}`;
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+      setDecryptedSrc(finalSrc);
       setLoading(false);
       return;
     }

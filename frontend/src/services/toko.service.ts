@@ -1,5 +1,6 @@
 import { StoreItem, StoreStats, StoreStatus } from "@/types/toko";
 import { AuthService } from "@/lib/auth";
+import { apiFetch } from "@/lib/api-client";
 
 const getBackendUrl = (): string => {
   if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
@@ -24,14 +25,6 @@ const getAuthHeaders = (): Record<string, string> => {
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
-  if (rawId && !rawId.startsWith("adm-")) {
-    headers["x-super-admin-id"] = rawId;
-    headers["x-user-id"] = rawId;
-  }
-  if (user?.email) {
-    headers["x-user-email"] = user.email;
-  }
   if (activeWs?.id) {
     headers["x-workspace-id"] = activeWs.id;
   } else if (user?.workspaceId) {
@@ -84,15 +77,18 @@ export const TokoService = {
           params.append("workspaceId", targetWsId);
         }
 
-        const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
-        if (rawId && !rawId.startsWith("adm-")) {
-          params.append("superAdminId", rawId);
+        const isSuperAdmin = user?.role === "Super Admin";
+        const saRawId = isSuperAdmin
+          ? user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined)
+          : undefined;
+        if (isSuperAdmin && saRawId) {
+          params.append("superAdminId", saRawId);
         } else if (user?.email) {
           params.append("email", user.email);
         }
 
         const queryString = params.toString() ? `?${params.toString()}` : "";
-        const res = await fetch(`${BACKEND_URL}/api/stores${queryString}`, {
+        const res = await apiFetch(`${BACKEND_URL}/api/stores${queryString}`, {
           method: "GET",
           headers: getAuthHeaders(),
           cache: "no-store",
@@ -145,7 +141,7 @@ export const TokoService = {
 
   async getByIdAsync(id: string): Promise<StoreItem | undefined> {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/stores/${id}`, {
+      const res = await apiFetch(`${BACKEND_URL}/api/stores/${id}`, {
         method: "GET",
         headers: getAuthHeaders(),
       });
@@ -178,7 +174,7 @@ export const TokoService = {
 
     let res: Response;
     try {
-      res = await fetch(`${BACKEND_URL}/api/stores`, {
+      res = await apiFetch(`${BACKEND_URL}/api/stores`, {
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify({
@@ -198,7 +194,7 @@ export const TokoService = {
       });
     } catch (networkErr: unknown) {
       console.error("Network error on POST /api/stores:", networkErr);
-      throw new Error("Tidak dapat terhubung ke server backend (http://localhost:5000). Pastikan server backend sedang aktif.");
+      throw new Error("Tidak dapat terhubung ke server backend. Pastikan server backend sedang aktif.");
     }
 
     const json = await res.json().catch(() => ({}));
@@ -217,7 +213,7 @@ export const TokoService = {
   async updateAsync(id: string, data: Partial<StoreItem>): Promise<StoreItem> {
     let res: Response;
     try {
-      res = await fetch(`${BACKEND_URL}/api/stores/${id}`, {
+      res = await apiFetch(`${BACKEND_URL}/api/stores/${id}`, {
         method: "PUT",
         headers: getAuthHeaders(),
         body: JSON.stringify({
@@ -235,7 +231,7 @@ export const TokoService = {
       });
     } catch (networkErr: unknown) {
       console.error("Network error on PUT /api/stores:", networkErr);
-      throw new Error("Tidak dapat terhubung ke server backend (http://localhost:5000). Pastikan server backend sedang aktif.");
+      throw new Error("Tidak dapat terhubung ke server backend. Pastikan server backend sedang aktif.");
     }
 
     const json = await res.json().catch(() => ({}));
@@ -254,13 +250,13 @@ export const TokoService = {
   async deleteAsync(id: string, permanent: boolean = false): Promise<boolean> {
     let res: Response;
     try {
-      res = await fetch(`${BACKEND_URL}/api/stores/${id}?permanent=${permanent ? "true" : "false"}`, {
+      res = await apiFetch(`${BACKEND_URL}/api/stores/${id}?permanent=${permanent ? "true" : "false"}`, {
         method: "DELETE",
         headers: getAuthHeaders(),
       });
     } catch (networkErr: unknown) {
       console.error("Network error on DELETE /api/stores:", networkErr);
-      throw new Error("Tidak dapat terhubung ke server backend (http://localhost:5000). Pastikan server backend sedang aktif.");
+      throw new Error("Tidak dapat terhubung ke server backend. Pastikan server backend sedang aktif.");
     }
 
     const json = await res.json().catch(() => ({}));

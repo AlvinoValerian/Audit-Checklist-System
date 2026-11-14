@@ -1,6 +1,7 @@
 const prisma = require('../config/prisma');
 const { extractUser } = require('../middlewares/auth.middleware');
 const { syncExpiredSchedulesToDb } = require('../utils/scheduleSync');
+const { resolveScopedWorkspaceContext, assertWorkspaceAccess, sendSafeError } = require('../utils/tenantScope');
 
 const INDONESIAN_MONTHS = [
   'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
@@ -17,7 +18,7 @@ const INDONESIAN_MONTHS = [
  */
 exports.getMonitoringStats = async (req, res) => {
   try {
-    const user = await extractUser(req);
+    const user = req.user || (await extractUser(req));
     const {
       workspaceId,
       storeName,
@@ -28,57 +29,34 @@ exports.getMonitoringStats = async (req, res) => {
     } = req.query;
 
     const requestedWsId = workspaceId || req.headers['x-workspace-id'];
-    let targetWsId = null;
 
-    // 1. ISOLASI TOTAL: Dashboard monitoring WAJIB untuk SATU workspace saja (tidak bisa semua workspace)
-    if (requestedWsId && requestedWsId !== 'all') {
-      try {
-        targetWsId = requestedWsId.toString().replace(/^ws-/, '');
-      } catch (e) {}
-    }
-
-    if (!targetWsId && user && user.workspaceId) {
-      targetWsId = user.workspaceId.toString().replace(/^ws-/, '');
-    }
-
-    // Jika Super Admin belum mengirimkan workspaceId spesifik, ambil workspace aktif pertama miliknya
-    if (!targetWsId && user && user.role === 'Super Admin' && user.rawId) {
-      const firstActiveWs = await prisma.workspace.findFirst({
-        where: {
-          super_admin_id: BigInt(user.rawId),
-          status: 'active',
-        },
-        orderBy: { workspace_id: 'asc' },
+    // 1. ISOLASI TOTAL: Dashboard monitoring WAJIB untuk SATU workspace yang sah milik akun user
+    const scope = await resolveScopedWorkspaceContext(user, requestedWsId, {
+      teknisUseSingleDefaultOnAll: true,
+    });
+    if (!scope.ok) {
+      return res.status(scope.status).json({
+        status: 'error',
+        message: scope.message,
       });
-      if (firstActiveWs) {
-        targetWsId = firstActiveWs.workspace_id.toString();
-      } else {
-        const anyWs = await prisma.workspace.findFirst({
-          where: { super_admin_id: BigInt(user.rawId) },
-          orderBy: { workspace_id: 'asc' },
-        });
-        if (anyWs) targetWsId = anyWs.workspace_id.toString();
-      }
     }
 
-    // Fallback jika masih kosong
-    if (!targetWsId) {
-      const fallbackWs = await prisma.workspace.findFirst({
-        orderBy: { workspace_id: 'asc' },
-      });
-      if (fallbackWs) {
-        targetWsId = fallbackWs.workspace_id.toString();
-      }
-    }
-
-    if (!targetWsId) {
+    const cleanWsId = scope.targetWorkspaceId;
+    if (!cleanWsId) {
       return res.status(404).json({
         status: 'error',
         message: 'Tidak ada workspace yang ditemukan untuk monitoring.',
       });
     }
 
-    const cleanWsId = BigInt(targetWsId);
+    const wsAccess = await assertWorkspaceAccess(user, cleanWsId);
+    if (!wsAccess.ok) {
+      return res.status(wsAccess.status).json({
+        status: 'error',
+        message: wsAccess.message,
+      });
+    }
+
     const storeWhere = { status: 'active', workspace_id: cleanWsId };
     const reportWhere = { schedule: { store: { workspace_id: cleanWsId } } };
 
@@ -110,13 +88,18 @@ exports.getMonitoringStats = async (req, res) => {
 
     const storeNamesList = allStores.map((s) => s.store_name);
 
-    // 4. Query data seluruh laporan audit
+    // 4. Query data seluruh laporan audit (tanpa kolom blob store_picture / file_url)
     const reports = await prisma.checklist_report.findMany({
       where: reportWhere,
       include: {
         schedule: {
           include: {
-            store: true,
+            store: {
+              select: {
+                store_id: true,
+                store_name: true,
+              },
+            },
           },
         },
         checklist_answer: {
@@ -124,7 +107,12 @@ exports.getMonitoringStats = async (req, res) => {
             template_task: true,
           },
         },
-        attachment: true,
+        attachment: {
+          select: {
+            attachment_id: true,
+            caption: true,
+          },
+        },
       },
       orderBy: { created_at: 'desc' },
     });
@@ -442,11 +430,6 @@ exports.getMonitoringStats = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('❌ Error in getMonitoringStats:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal mengambil data dashboard monitoring.',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal mengambil data dashboard monitoring.');
   }
 };

@@ -10,10 +10,11 @@ import EditAdminModal from "./components/EditAdminModal";
 import DeleteAdminModal from "./components/DeleteAdminModal";
 import { AdminService } from "@/services/admin.service";
 import { WorkspaceService } from "@/services/workspace.service";
+import { AuthService } from "@/lib/auth";
 import { AdminUser, AdminStatsData, AdminRole } from "@/types/admin";
 import { Workspace } from "@/types/workspace";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { Loader2, ShieldCheck } from "lucide-react";
 
 export default function KelolaAdminPage() {
   const [admins, setAdmins] = useState<AdminUser[]>([]);
@@ -21,6 +22,11 @@ export default function KelolaAdminPage() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [backendStatus, setBackendStatus] = useState<"connected" | "disconnected" | "connecting">("connecting");
+  const [isDivisiTeknis, setIsDivisiTeknis] = useState<boolean>(false);
+  const [manualSuperAdminMeta, setManualSuperAdminMeta] = useState<{ count: number; max: number }>({
+    count: 0,
+    max: 2,
+  });
   const [stats, setStats] = useState<AdminStatsData>({
     totalAdmins: 0,
     activeAdmins: 0,
@@ -64,6 +70,22 @@ export default function KelolaAdminPage() {
       setWorkspaces(wsList);
       setBackendStatus("connected");
 
+      const currentUser = AuthService.getCurrentUser();
+      const roleIsTeknis =
+        currentUser?.role === "Divisi Teknis" ||
+        currentUser?.role === "Teknis" ||
+        Boolean(AdminService.lastMeta?.isTeknis);
+      setIsDivisiTeknis(roleIsTeknis);
+
+      if (roleIsTeknis) {
+        const metaCount = AdminService.lastMeta?.manualSuperAdminCount;
+        const fallbackCount = adminList.filter((a) => a.role === "Super Admin").length;
+        setManualSuperAdminMeta({
+          count: typeof metaCount === "number" ? metaCount : fallbackCount,
+          max: AdminService.lastMeta?.maxManualSuperAdmins ?? 2,
+        });
+      }
+
       const calculatedStats = AdminService.getStats(adminList);
       setStats({
         ...calculatedStats,
@@ -87,14 +109,26 @@ export default function KelolaAdminPage() {
 
   // 1. Initial Load & Window Focus Auto-Refresh
   useEffect(() => {
+    const syncAuthRole = () => {
+      const currentUser = AuthService.getCurrentUser();
+      setIsDivisiTeknis(
+        currentUser?.role === "Divisi Teknis" || currentUser?.role === "Teknis"
+      );
+    };
+    syncAuthRole();
     refreshData();
 
     const handleFocus = () => {
+      syncAuthRole();
       refreshData({ silent: true });
     };
 
     window.addEventListener("focus", handleFocus);
-    return () => window.removeEventListener("focus", handleFocus);
+    window.addEventListener("auth-changed", syncAuthRole);
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("auth-changed", syncAuthRole);
+    };
   }, []);
 
   // 2. Background Auto-Refresh / Reconnect Polling setiap 5 detik
@@ -132,6 +166,7 @@ export default function KelolaAdminPage() {
     email: string;
     role: "Admin" | "Super Admin" | "Staff";
     workspaceName: string;
+    companyName?: string;
     status: "Aktif" | "Nonaktif";
     password?: string;
   }) => {
@@ -142,10 +177,15 @@ export default function KelolaAdminPage() {
         email: formData.email,
         role: formData.role || "Admin",
         workspaceName: formData.workspaceName,
+        companyName: formData.companyName,
         status: formData.status || "Aktif",
         password: formData.password || "password123",
       });
-      toast.success(`Akun admin "${formData.fullName}" berhasil disimpan ke database!`);
+      toast.success(
+        formData.role === "Super Admin"
+          ? `Akun Super Admin "${formData.fullName}" berhasil disimpan ke database!`
+          : `Akun admin "${formData.fullName}" berhasil disimpan ke database!`
+      );
       setIsCreateModalOpen(false);
       await refreshData();
     } catch (err: unknown) {
@@ -161,6 +201,7 @@ export default function KelolaAdminPage() {
     email: string;
     role: AdminRole;
     workspaceName: string;
+    companyName?: string;
     status: "Aktif" | "Nonaktif";
     password?: string;
   }) => {
@@ -173,6 +214,7 @@ export default function KelolaAdminPage() {
         email: formData.email,
         role: formData.role || selectedAdminToEdit.role,
         workspaceName: formData.workspaceName,
+        companyName: formData.companyName,
         status: formData.status,
         password: formData.password,
       });
@@ -233,6 +275,27 @@ export default function KelolaAdminPage() {
 
       <AdminStats stats={stats} />
 
+      {isDivisiTeknis && (
+        <div className="mb-4 bg-white border border-slate-200 rounded-xl px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-2xs">
+          <div className="flex items-center gap-2.5 text-xs text-slate-700">
+            <ShieldCheck className="w-4 h-4 text-[#193f53] shrink-0" />
+            <span>
+              <strong className="font-semibold text-slate-900">Mode Divisi Teknis:</strong>{" "}
+              Anda dapat membuat akun <strong className="font-semibold">Super Admin</strong> manual secara langsung melalui tombol <strong className="font-semibold">Tambah Admin</strong>.
+            </span>
+          </div>
+          <span
+            className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold shrink-0 ${
+              manualSuperAdminMeta.count >= manualSuperAdminMeta.max
+                ? "bg-amber-50 text-amber-700 border border-amber-200"
+                : "bg-sky-50 text-sky-700 border border-sky-200"
+            }`}
+          >
+            Kuota Super Admin: {manualSuperAdminMeta.count}/{manualSuperAdminMeta.max}
+          </span>
+        </div>
+      )}
+
       <AdminTable
         admins={admins}
         workspaces={workspaces}
@@ -246,6 +309,9 @@ export default function KelolaAdminPage() {
       <CreateAdminModal
         isOpen={isCreateModalOpen}
         isSubmitting={isSubmitting}
+        isDivisiTeknis={isDivisiTeknis}
+        manualSuperAdminCount={manualSuperAdminMeta.count}
+        maxManualSuperAdmins={manualSuperAdminMeta.max}
         onClose={() => {
           if (!isSubmitting) setIsCreateModalOpen(false);
         }}

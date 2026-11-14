@@ -1,5 +1,6 @@
 import { Holiday, HolidayStatus } from "@/types/holiday";
 import { AuthService } from "@/lib/auth";
+import { apiFetch } from "@/lib/api-client";
 
 const getBackendUrl = (): string => {
   if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
@@ -22,14 +23,6 @@ const getAuthHeaders = (): Record<string, string> => {
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
-  if (rawId && !rawId.startsWith("adm-")) {
-    headers["x-super-admin-id"] = rawId;
-    headers["x-user-id"] = rawId;
-  }
-  if (user?.email) {
-    headers["x-user-email"] = user.email;
-  }
   if (activeWs?.id) {
     headers["x-workspace-id"] = activeWs.id;
   } else if (user?.workspaceId) {
@@ -88,7 +81,7 @@ export const HolidayService = {
         headers["x-workspace-id"] = targetWsId;
       }
 
-      const res = await fetch(`${BACKEND_URL}/api/holidays${queryParam}`, {
+      const res = await apiFetch(`${BACKEND_URL}/api/holidays${queryParam}`, {
         method: "GET",
         headers,
         cache: "no-store",
@@ -155,7 +148,7 @@ export const HolidayService = {
       status: computedStatus,
     };
 
-    const res = await fetch(`${BACKEND_URL}/api/holidays`, {
+    const res = await apiFetch(`${BACKEND_URL}/api/holidays`, {
       method: "POST",
       headers: getAuthHeaders(),
       body: JSON.stringify(payload),
@@ -196,7 +189,7 @@ export const HolidayService = {
       };
     });
 
-    const res = await fetch(`${BACKEND_URL}/api/holidays`, {
+    const res = await apiFetch(`${BACKEND_URL}/api/holidays`, {
       method: "POST",
       headers: getAuthHeaders(),
       body: JSON.stringify({ holidays: payloadItems }),
@@ -224,7 +217,7 @@ export const HolidayService = {
    * Memperbarui jadwal libur toko
    */
   async updateAsync(id: string, data: Partial<Holiday>): Promise<Holiday> {
-    const res = await fetch(`${BACKEND_URL}/api/holidays/${id}`, {
+    const res = await apiFetch(`${BACKEND_URL}/api/holidays/${id}`, {
       method: "PUT",
       headers: getAuthHeaders(),
       body: JSON.stringify(data),
@@ -254,7 +247,7 @@ export const HolidayService = {
    * Memulihkan libur toko yang dibatalkan
    */
   async restoreAsync(id: string): Promise<Holiday> {
-    const res = await fetch(`${BACKEND_URL}/api/holidays/${id}/restore`, {
+    const res = await apiFetch(`${BACKEND_URL}/api/holidays/${id}/restore`, {
       method: "PATCH",
       headers: getAuthHeaders(),
     });
@@ -283,7 +276,7 @@ export const HolidayService = {
    * Membatalkan / Soft-Delete jadwal libur toko
    */
   async deleteAsync(id: string, permanent: boolean = false): Promise<boolean> {
-    const res = await fetch(`${BACKEND_URL}/api/holidays/${id}${permanent ? "?permanent=true" : ""}`, {
+    const res = await apiFetch(`${BACKEND_URL}/api/holidays/${id}${permanent ? "?permanent=true" : ""}`, {
       method: "DELETE",
       headers: getAuthHeaders(),
     });

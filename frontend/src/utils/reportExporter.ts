@@ -42,7 +42,22 @@ function sanitizeFileNamePart(val: string): string {
  */
 async function resolveImageSrc(src?: string): Promise<string> {
   if (!src) return "";
-  if (src.startsWith("data:") || src.startsWith("http") || src.startsWith("/")) {
+  if (src.startsWith("data:")) {
+    return src;
+  }
+  if (src.startsWith("/") || src.startsWith("http")) {
+    if (src.includes("/api/attachment") && !src.includes("token=")) {
+      try {
+        const { AuthService } = await import("@/lib/auth");
+        const token = AuthService.getToken();
+        if (token) {
+          const sep = src.includes("?") ? "&" : "?";
+          return `${src}${sep}token=${encodeURIComponent(token)}`;
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
     return src;
   }
   if (src.startsWith("ENC:v1:")) {
@@ -1717,8 +1732,24 @@ async function loadBase64Image(
  * - Tanda tangan dan foto diambil 100% dari database riil (tanpa tanda tangan palsu buatan).
  */
 export async function generateIndividualPdfBlob(
-  report: AuditReportItem
+  reportInput: AuditReportItem
 ): Promise<{ blob: Blob; fileName: string }> {
+  let report = reportInput;
+  const isNonCompliant = report.status === "Tidak Mengerjakan";
+
+  // Jika laporan belum memuat rincian butir temuan (progressive loading), ambil data lengkap
+  if (!isNonCompliant && (!report.findings || report.findings.length === 0) && report.id) {
+    try {
+      const { ReportService } = await import("@/services/report.service");
+      const full = await ReportService.fetchById(report.id);
+      if (full) {
+        report = full;
+      }
+    } catch (e) {
+      console.warn("Gagal memuat detail lengkap untuk ekspor PDF:", e);
+    }
+  }
+
   const cleanStore = sanitizeFileNamePart(report.storeName || "Toko");
   const cleanDate = sanitizeFileNamePart(report.submitDate || "Tanggal");
   const fileName = `Laporan_Audit_${cleanStore}_${cleanDate}.pdf`;
@@ -1728,7 +1759,6 @@ export async function generateIndividualPdfBlob(
   let currentY = 14;
 
   const docNumber = `AUD/RPT/${(report.submitDate || "2026").replace(/[^0-9]/g, "").slice(-4) || "2026"}/${(report.id || "001").replace(/[^a-zA-Z0-9]/g, "").slice(0, 8).toUpperCase()}`;
-  const isNonCompliant = report.status === "Tidak Mengerjakan";
 
   // Filter & data pelaksana
   const displayAuditorName = isNonCompliant ? "-" : (report.auditorName && report.auditorName !== "-" ? report.auditorName : "-");

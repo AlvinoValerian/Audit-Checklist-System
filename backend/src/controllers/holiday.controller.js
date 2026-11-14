@@ -1,5 +1,12 @@
 const prisma = require('../config/prisma');
 const { extractUser } = require('../middlewares/auth.middleware');
+const { toBigIntSafe } = require('../utils/teknisScope');
+const {
+  resolveScopedWorkspaceContext,
+  assertWorkspaceAccess,
+  assertStoreAccess,
+  sendSafeError,
+} = require('../utils/tenantScope');
 
 /**
  * Pastikan tabel store_holiday selalu tersedia di PostgreSQL
@@ -108,25 +115,34 @@ exports.getAllHolidays = async (req, res) => {
   try {
     await ensureHolidayTable();
 
-    const user = await extractUser(req);
+    const user = req.user || (await extractUser(req));
     const requestedWsId = req.query.workspaceId || req.headers['x-workspace-id'];
     const { storeName, status } = req.query;
+
+    const scope = await resolveScopedWorkspaceContext(user, requestedWsId, {
+      teknisUseSingleDefaultOnAll: true,
+    });
+    if (!scope.ok) {
+      return res.status(scope.status).json({ status: 'error', message: scope.message });
+    }
+    if (scope.workspaceIds.length === 0) {
+      return res.status(200).json({ status: 'success', total: 0, data: [] });
+    }
 
     let query = `SELECT * FROM store_holiday WHERE 1=1`;
     const params = [];
 
-    if (requestedWsId && requestedWsId !== 'all') {
-      try {
-        const cleanWs = BigInt(requestedWsId.toString().replace(/^ws-/, ''));
-        params.push(cleanWs);
-        query += ` AND workspace_id = $${params.length}`;
-      } catch (e) {}
-    } else if (user && user.role === 'Admin' && user.workspaceId) {
-      try {
-        const cleanWs = BigInt(user.workspaceId.toString().replace(/^ws-/, ''));
-        params.push(cleanWs);
-        query += ` AND workspace_id = $${params.length}`;
-      } catch (e) {}
+    if (scope.workspaceIds.length === 1) {
+      params.push(scope.workspaceIds[0]);
+      query += ` AND workspace_id = $${params.length}`;
+    } else {
+      const placeholders = scope.workspaceIds
+        .map((wsId) => {
+          params.push(wsId);
+          return `$${params.length}`;
+        })
+        .join(', ');
+      query += ` AND workspace_id IN (${placeholders})`;
     }
 
     if (storeName) {
@@ -150,12 +166,7 @@ exports.getAllHolidays = async (req, res) => {
       data,
     });
   } catch (error) {
-    console.error('❌ Error in getAllHolidays:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal memuat data libur toko dari database.',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal memuat data libur toko dari database.');
   }
 };
 
@@ -167,7 +178,7 @@ exports.createHoliday = async (req, res) => {
   try {
     await ensureHolidayTable();
 
-    const loggedInUser = await extractUser(req);
+    const loggedInUser = req.user || (await extractUser(req));
     const fallbackName = loggedInUser?.fullName || loggedInUser?.name || loggedInUser?.email || 'Admin';
     const fallbackRole = loggedInUser?.role || 'Admin';
 
@@ -229,34 +240,48 @@ exports.createHoliday = async (req, res) => {
         ) RETURNING *
       `;
 
-      const rawWs = workspaceId || req.query.workspaceId || req.headers['x-workspace-id'] || loggedInUser?.workspaceId;
-      let finalWsId = null;
-      if (rawWs && rawWs !== 'all') {
-        try {
-          finalWsId = BigInt(rawWs.toString().replace(/^ws-/, ''));
-        } catch (e) {}
+      const rawWs = workspaceId || req.query.workspaceId || req.headers['x-workspace-id'];
+      const scope = await resolveScopedWorkspaceContext(loggedInUser, rawWs, {
+        teknisUseSingleDefaultOnAll: true,
+      });
+      if (!scope.ok) {
+        return res.status(scope.status).json({ status: 'error', message: scope.message });
       }
 
+      let finalWsId = scope.targetWorkspaceId;
       let finalStoreId = null;
+
       if (storeId) {
-        try {
-          finalStoreId = BigInt(storeId.toString().replace(/^str-/, ''));
-        } catch (e) {}
+        const stAccess = await assertStoreAccess(loggedInUser, storeId);
+        if (!stAccess.ok) {
+          return res.status(stAccess.status).json({ status: 'error', message: stAccess.message });
+        }
+        finalStoreId = stAccess.store.store_id;
+        finalWsId = stAccess.store.workspace_id;
       } else if (storeName) {
-        try {
+        if (finalWsId) {
           const storeFound = await prisma.store.findFirst({
             where: {
               store_name: storeName.trim(),
-              ...(finalWsId ? { workspace_id: finalWsId } : {}),
+              workspace_id: finalWsId,
             },
           });
           if (storeFound) {
             finalStoreId = storeFound.store_id;
-            if (!finalWsId && storeFound.workspace_id) {
-              finalWsId = storeFound.workspace_id;
-            }
           }
-        } catch (e) {}
+        }
+      }
+
+      if (!finalWsId) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Workspace penugasan libur tidak valid.',
+        });
+      }
+
+      const wsCheck = await assertWorkspaceAccess(loggedInUser, finalWsId);
+      if (!wsCheck.ok) {
+        return res.status(wsCheck.status).json({ status: 'error', message: wsCheck.message });
       }
 
       const values = [
@@ -287,12 +312,7 @@ exports.createHoliday = async (req, res) => {
       data: createdRecords.length === 1 ? createdRecords[0] : createdRecords,
     });
   } catch (error) {
-    console.error('❌ Error in createHoliday:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal menyimpan libur toko ke database.',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal menyimpan libur toko ke database.');
   }
 };
 
@@ -302,8 +322,15 @@ exports.createHoliday = async (req, res) => {
  */
 exports.updateHoliday = async (req, res) => {
   try {
+    const user = await extractUser(req);
     const { id } = req.params;
-    const cleanId = BigInt(id.toString().replace(/^hol-/, ''));
+    const cleanId = toBigIntSafe(id, ['hol-']);
+    if (!cleanId) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Format ID libur toko tidak valid.',
+      });
+    }
     const {
       storeName,
       storeLocation,
@@ -328,6 +355,19 @@ exports.updateHoliday = async (req, res) => {
     }
 
     const current = existingRows[0];
+    const wsCheck = current.workspace_id
+      ? await assertWorkspaceAccess(user, current.workspace_id)
+      : current.store_id
+        ? await assertStoreAccess(user, current.store_id)
+        : { ok: false, status: 403, message: 'Akses libur toko ditolak.' };
+
+    if (!wsCheck.ok) {
+      return res.status(wsCheck.status).json({
+        status: 'error',
+        message: 'Anda tidak memiliki akses untuk mengubah jadwal libur milik workspace lain.',
+      });
+    }
+
     const sDate = startDate || formatDate(current.start_date);
     const eDate = endDate || formatDate(current.end_date);
     const start = new Date(sDate);
@@ -375,12 +415,7 @@ exports.updateHoliday = async (req, res) => {
       data: formatHoliday(updatedRow),
     });
   } catch (error) {
-    console.error('❌ Error in updateHoliday:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal memperbarui libur toko di database.',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal memperbarui libur toko di database.');
   }
 };
 
@@ -390,8 +425,15 @@ exports.updateHoliday = async (req, res) => {
  */
 exports.restoreHoliday = async (req, res) => {
   try {
+    const user = req.user || (await extractUser(req));
     const { id } = req.params;
-    const cleanId = BigInt(id.toString().replace(/^hol-/, ''));
+    const cleanId = toBigIntSafe(id, ['hol-']);
+    if (!cleanId) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Format ID libur toko tidak valid.',
+      });
+    }
 
     // 1. Ambil data libur yang ingin dipulihkan
     const [target] = await prisma.$queryRawUnsafe(
@@ -406,7 +448,20 @@ exports.restoreHoliday = async (req, res) => {
       });
     }
 
-    // 2. Pengecekan Tabrakan / Collision dengan Libur Aktif Lainnya
+    const wsCheck = target.workspace_id
+      ? await assertWorkspaceAccess(user, target.workspace_id)
+      : target.store_id
+        ? await assertStoreAccess(user, target.store_id)
+        : { ok: false, status: 403, message: 'Akses libur toko ditolak.' };
+
+    if (!wsCheck.ok) {
+      return res.status(wsCheck.status).json({
+        status: 'error',
+        message: 'Anda tidak memiliki akses untuk memulihkan jadwal libur milik workspace lain.',
+      });
+    }
+
+    // 2. Pengecekan Tabrakan / Collision dengan Libur Aktif Lainnya (terisolasi per workspace)
     const targetStartDate = formatDate(target.start_date);
     const targetEndDate = formatDate(target.end_date);
 
@@ -418,11 +473,13 @@ exports.restoreHoliday = async (req, res) => {
         AND store_name = $2
         AND start_date <= $3::date
         AND end_date >= $4::date
+        AND ($5::bigint IS NULL OR workspace_id = $5)
       `,
       cleanId,
       target.store_name,
       targetEndDate,
-      targetStartDate
+      targetStartDate,
+      target.workspace_id || null
     );
 
     if (activeHolidays && activeHolidays.length > 0) {
@@ -501,12 +558,7 @@ exports.restoreHoliday = async (req, res) => {
       data: formatHoliday(updatedRow),
     });
   } catch (error) {
-    console.error('❌ Error in restoreHoliday:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal memulihkan jadwal libur.',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal memulihkan jadwal libur.');
   }
 };
 
@@ -516,9 +568,42 @@ exports.restoreHoliday = async (req, res) => {
  */
 exports.deleteHoliday = async (req, res) => {
   try {
+    const user = req.user || (await extractUser(req));
     const { id } = req.params;
-    const cleanId = BigInt(id.toString().replace(/^hol-/, ''));
+    const cleanId = toBigIntSafe(id, ['hol-']);
+    if (!cleanId) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Format ID libur toko tidak valid.',
+      });
+    }
     const isPermanent = req.query.permanent === 'true';
+
+    const existingRows = await prisma.$queryRawUnsafe(
+      `SELECT * FROM store_holiday WHERE holiday_id = $1`,
+      cleanId
+    );
+
+    if (!existingRows || existingRows.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Jadwal libur tidak ditemukan.',
+      });
+    }
+
+    const current = existingRows[0];
+    const wsCheck = current.workspace_id
+      ? await assertWorkspaceAccess(user, current.workspace_id)
+      : current.store_id
+        ? await assertStoreAccess(user, current.store_id)
+        : { ok: false, status: 403, message: 'Akses libur toko ditolak.' };
+
+    if (!wsCheck.ok) {
+      return res.status(wsCheck.status).json({
+        status: 'error',
+        message: 'Anda tidak memiliki akses untuk membatalkan jadwal libur milik workspace lain.',
+      });
+    }
 
     if (isPermanent) {
       await prisma.$executeRawUnsafe(
@@ -544,24 +629,12 @@ exports.deleteHoliday = async (req, res) => {
       cleanId
     );
 
-    if (!updatedRow) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Jadwal libur tidak ditemukan.',
-      });
-    }
-
     return res.status(200).json({
       status: 'success',
       message: 'Jadwal libur toko berhasil dibatalkan.',
       data: formatHoliday(updatedRow),
     });
   } catch (error) {
-    console.error('❌ Error in deleteHoliday:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal membatalkan jadwal libur.',
-      error: error.message,
-    });
+    return sendSafeError(res, error, 'Gagal membatalkan jadwal libur.');
   }
 };

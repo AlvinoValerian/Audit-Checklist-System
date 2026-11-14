@@ -1,5 +1,6 @@
 import { Workspace, WorkspaceStatsData } from "@/types/workspace";
 import { AuthService } from "@/lib/auth";
+import { apiFetch } from "@/lib/api-client";
 
 const getBackendUrl = (): string => {
   if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
@@ -16,20 +17,11 @@ const getAuthHeaders = (): Record<string, string> => {
     "Content-Type": "application/json",
   };
   const token = AuthService.getToken();
-  const user = AuthService.getCurrentUser();
 
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
-  if (rawId && !rawId.startsWith("adm-")) {
-    headers["x-super-admin-id"] = rawId;
-    headers["x-user-id"] = rawId;
-  }
-  if (user?.email) {
-    headers["x-user-email"] = user.email;
-  }
   return headers;
 };
 
@@ -56,26 +48,29 @@ export const WorkspaceService = {
     inFlightWorkspaceFetch = (async () => {
       try {
         const user = AuthService.getCurrentUser();
-        const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
+        const isSuperAdmin = user?.role === "Super Admin";
+        const saRawId = isSuperAdmin
+          ? user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined)
+          : undefined;
 
         let queryParam = "";
-        if (rawId && !rawId.startsWith("adm-")) {
-          queryParam = `?superAdminId=${rawId}`;
+        if (isSuperAdmin && saRawId) {
+          queryParam = `?superAdminId=${saRawId}`;
         } else if (user?.email) {
           queryParam = `?email=${encodeURIComponent(user.email)}`;
         }
 
-        const res = await fetch(`${BACKEND_URL}/api/workspaces${queryParam}`, {
+        const res = await apiFetch(`${BACKEND_URL}/api/workspaces${queryParam}`, {
           method: "GET",
           headers: getAuthHeaders(),
           cache: "no-store",
         });
 
+        const json = await res.json().catch(() => ({}));
         if (!res.ok) {
-          throw new Error(`Gagal mengambil data dari server (HTTP ${res.status})`);
+          throw new Error(json?.message || `Gagal mengambil data dari server (HTTP ${res.status})`);
         }
 
-        const json = await res.json();
         if (json.status === "success" && Array.isArray(json.data)) {
           this.cachedWorkspaces = json.data;
           lastWorkspaceFetchTime = Date.now();
@@ -84,7 +79,7 @@ export const WorkspaceService = {
 
         return [];
       } catch (error) {
-        console.warn("Backend API offline or unreachable:", error);
+        console.warn("WorkspaceService.fetchAll error:", error);
         return this.cachedWorkspaces;
       } finally {
         inFlightWorkspaceFetch = null;
@@ -112,22 +107,25 @@ export const WorkspaceService = {
    */
   async createAsync(workspace: Omit<Workspace, "id" | "createdAt">): Promise<Workspace> {
     const user = AuthService.getCurrentUser();
-    const rawId = user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined);
+    const isSuperAdmin = user?.role === "Super Admin";
+    const saRawId = isSuperAdmin
+      ? user?.rawId || (user?.id ? user.id.replace(/^sa-/, "") : undefined)
+      : undefined;
 
     let res: Response;
     try {
-      res = await fetch(`${BACKEND_URL}/api/workspaces`, {
+      res = await apiFetch(`${BACKEND_URL}/api/workspaces`, {
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify({
           ...workspace,
-          superAdminId: rawId,
+          ...(saRawId ? { superAdminId: saRawId } : {}),
           email: user?.email,
         }),
       });
     } catch (networkErr: unknown) {
       console.error("Network error on POST /api/workspaces:", networkErr);
-      throw new Error("Tidak dapat terhubung ke server backend (http://localhost:5000). Pastikan backend sedang berjalan.");
+      throw new Error("Tidak dapat terhubung ke server backend. Pastikan backend sedang berjalan.");
     }
 
     const json = await res.json().catch(() => ({}));
@@ -142,14 +140,14 @@ export const WorkspaceService = {
   async updateAsync(id: string, data: Partial<Workspace>): Promise<Workspace> {
     let res: Response;
     try {
-      res = await fetch(`${BACKEND_URL}/api/workspaces/${id}`, {
+      res = await apiFetch(`${BACKEND_URL}/api/workspaces/${id}`, {
         method: "PUT",
         headers: getAuthHeaders(),
         body: JSON.stringify(data),
       });
     } catch (networkErr: unknown) {
       console.error("Network error on PUT /api/workspaces:", networkErr);
-      throw new Error("Tidak dapat terhubung ke server backend (http://localhost:5000). Pastikan backend sedang berjalan.");
+      throw new Error("Tidak dapat terhubung ke server backend. Pastikan backend sedang berjalan.");
     }
 
     const json = await res.json().catch(() => ({}));
@@ -164,13 +162,13 @@ export const WorkspaceService = {
   async deleteAsync(id: string): Promise<boolean> {
     let res: Response;
     try {
-      res = await fetch(`${BACKEND_URL}/api/workspaces/${id}`, {
+      res = await apiFetch(`${BACKEND_URL}/api/workspaces/${id}`, {
         method: "DELETE",
         headers: getAuthHeaders(),
       });
     } catch (networkErr: unknown) {
       console.error("Network error on DELETE /api/workspaces:", networkErr);
-      throw new Error("Tidak dapat terhubung ke server backend (http://localhost:5000). Pastikan backend sedang berjalan.");
+      throw new Error("Tidak dapat terhubung ke server backend. Pastikan backend sedang berjalan.");
     }
 
     const json = await res.json().catch(() => ({}));

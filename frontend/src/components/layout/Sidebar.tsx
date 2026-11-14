@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import {
   BookOpen,
   UserPlus,
@@ -27,31 +27,45 @@ import {
 import { toast } from "sonner";
 import { AuthService } from "@/lib/auth";
 
+const SSR_ROLE_SENTINEL = "__SSR__";
+
+const subscribeAuthRole = (onStoreChange: () => void) => {
+  if (typeof window === "undefined") return () => {};
+  window.addEventListener("auth-changed", onStoreChange);
+  window.addEventListener("storage", onStoreChange);
+  return () => {
+    window.removeEventListener("auth-changed", onStoreChange);
+    window.removeEventListener("storage", onStoreChange);
+  };
+};
+
+const getAuthRoleSnapshot = (): string =>
+  AuthService.getCurrentUser()?.role || "";
+
+const getAuthRoleServerSnapshot = (): string => SSR_ROLE_SENTINEL;
+
 export default function Sidebar() {
   const pathname = usePathname();
-  const router = useRouter();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [userRole, setUserRole] = useState<string>("");
 
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const user = AuthService.getCurrentUser();
-      if (user?.role) {
-        setUserRole(user.role);
-      }
-    }
-  }, []);
+  const roleSnapshot = useSyncExternalStore(
+    subscribeAuthRole,
+    getAuthRoleSnapshot,
+    getAuthRoleServerSnapshot
+  );
 
-  const isSuperAdmin = userRole === "Super Admin";
-  const isDivisiTeknis = userRole === "Divisi Teknis";
+  const isAuthResolved = roleSnapshot !== SSR_ROLE_SENTINEL;
+  const userRole = isAuthResolved ? roleSnapshot : "";
 
-  const handleLogout = () => {
-    AuthService.logout();
+  const isSuperAdmin = isAuthResolved && userRole === "Super Admin";
+  const isDivisiTeknis =
+    isAuthResolved && (userRole === "Divisi Teknis" || userRole === "Teknis");
+
+  const handleLogout = async () => {
+    await AuthService.logoutAsync();
     toast.info("Anda telah logout.");
     if (typeof window !== "undefined") {
-      window.location.href = "/login";
-    } else {
-      router.push("/login");
+      window.location.href = "/login?reason=logout";
     }
   };
 
@@ -198,20 +212,38 @@ export default function Sidebar() {
     );
   };
 
+  const renderSidebarSkeleton = (count = 6) => (
+    <div className="space-y-2 animate-pulse" aria-hidden="true">
+      {Array.from({ length: count }).map((_, idx) => (
+        <div
+          key={idx}
+          className="h-8 w-full rounded-lg bg-slate-100 border border-slate-100/80"
+        />
+      ))}
+    </div>
+  );
+
+  const portalHref = !isAuthResolved
+    ? "#"
+    : isDivisiTeknis
+    ? "/divisi-teknis"
+    : isAdminPortal
+    ? "/dashboard-monitoring"
+    : "/workspace";
+
+  const portalLabel = !isAuthResolved
+    ? "\u00A0"
+    : isDivisiTeknis
+    ? "Divisi Teknis"
+    : isAdminPortal
+    ? "Enterprise Monitor"
+    : "Super Admin";
+
   return (
     <>
       {/* Mobile Top Header Bar (Shown only on < md) */}
       <div className="md:hidden w-full bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between sticky top-0 z-40">
-        <Link
-          href={
-            isDivisiTeknis
-              ? "/divisi-teknis"
-              : isAdminPortal
-              ? "/dashboard-monitoring"
-              : "/workspace"
-          }
-          className="flex items-center gap-2.5"
-        >
+        <Link href={portalHref} className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-[#193f53] text-white flex items-center justify-center font-bold text-sm shadow-xs">
             <Monitor className="w-4 h-4" />
           </div>
@@ -219,13 +251,7 @@ export default function Sidebar() {
             <h1 className="text-base font-bold text-slate-900 leading-tight">
               Audit Pro
             </h1>
-            <p className="text-[10px] text-slate-400">
-              {isDivisiTeknis
-                ? "Divisi Teknis"
-                : isAdminPortal
-                ? "Enterprise Monitor"
-                : "Super Admin"}
-            </p>
+            <p className="text-[10px] text-slate-400">{portalLabel}</p>
           </div>
         </Link>
 
@@ -247,7 +273,9 @@ export default function Sidebar() {
       {isMobileMenuOpen && (
         <div className="md:hidden fixed inset-0 top-[53px] bg-slate-900/40 backdrop-blur-xs z-30 animate-in fade-in duration-150">
           <div className="bg-white border-b border-slate-200 p-4 space-y-3 shadow-xl max-h-[calc(100vh-60px)] overflow-y-auto">
-            {isDivisiTeknis ? (
+            {!isAuthResolved ? (
+              renderSidebarSkeleton(6)
+            ) : isDivisiTeknis ? (
               /* Navigasi Khusus Divisi Teknis: 3 Bagian Terpisah */
               <div className="space-y-3">
                 {/* 1. Fitur Super Admin */}
@@ -321,31 +349,17 @@ export default function Sidebar() {
               <Monitor className="w-5 h-5 stroke-[2.2]" />
             </div>
             <div>
-              <Link
-                href={
-                  isDivisiTeknis
-                    ? "/divisi-teknis"
-                    : isAdminPortal
-                    ? "/dashboard-monitoring"
-                    : "/workspace"
-                }
-              >
+              <Link href={portalHref}>
                 <h1 className="text-base font-bold text-slate-900 tracking-tight hover:opacity-90 transition-opacity">
                   Audit Pro
                 </h1>
               </Link>
-              <p className="text-[11px] text-slate-400">
-                {isDivisiTeknis
-                  ? "Divisi Teknis"
-                  : isAdminPortal
-                  ? "Enterprise Monitor"
-                  : "Super Admin"}
-              </p>
+              <p className="text-[11px] text-slate-400">{portalLabel}</p>
             </div>
           </div>
 
           {/* Quick Back to Super Admin Portal if Super Admin in Admin Portal */}
-          {!isDivisiTeknis && isSuperAdmin && isAdminPortal && (
+          {isAuthResolved && !isDivisiTeknis && isSuperAdmin && isAdminPortal && (
             <div className="mb-4">
               <Link
                 href="/workspace"
@@ -359,7 +373,9 @@ export default function Sidebar() {
           )}
 
           {/* Navigation Items */}
-          {isDivisiTeknis ? (
+          {!isAuthResolved ? (
+            renderSidebarSkeleton(8)
+          ) : isDivisiTeknis ? (
             /* Sidebar Khusus Divisi Teknis dengan Judul Kecil Pembagi & Spasi */
             <div className="space-y-4">
               {/* 1. Fitur Super Admin */}

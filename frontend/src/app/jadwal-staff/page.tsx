@@ -27,6 +27,8 @@ import {
 } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import { AuthService, AuthUser } from "@/lib/auth";
+import { apiFetch } from "@/lib/api-client";
+import StaffAuthGuard from "@/components/auth/StaffAuthGuard";
 import StaffBottomNav from "./components/StaffBottomNav";
 import DecryptedImage from "@/components/DecryptedImage";
 
@@ -90,7 +92,7 @@ interface StaffScheduleData {
   schedules: StaffScheduleItem[];
 }
 
-export default function JadwalStaffPage() {
+function JadwalStaffContent() {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -201,36 +203,32 @@ export default function JadwalStaffPage() {
   const fetchScheduleData = async (silent = false) => {
     try {
       if (!silent) setIsRefreshing(true);
-      const token = AuthService.getToken();
       const user = AuthService.getCurrentUser();
       const activeWs = AuthService.getActiveWorkspace();
 
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
       };
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-      if (user?.email) headers["x-user-email"] = user.email;
-      if (user?.role) headers["x-user-role"] = user.role;
-      const rawId = user?.rawId || (user?.id ? user.id.replace(/^staff-/, "").replace(/^sa-/, "").replace(/^adm-/, "") : undefined);
-      if (rawId) headers["x-user-id"] = rawId;
       if (activeWs?.id) headers["x-workspace-id"] = activeWs.id;
       if (user?.storeId) headers["x-store-id"] = user.storeId.toString();
 
       const storeParam = user?.storeId ? `?storeId=${encodeURIComponent(user.storeId)}` : "";
 
-      let res: Response | null = null;
-      try {
-        res = await fetch(`/api/staff/my-schedules${storeParam}`, { headers, cache: "no-store" });
-        if (!res || (!res.ok && res.status >= 500)) throw new Error(`Fetch status: ${res?.status}`);
-      } catch {
-        res = await fetch(`http://127.0.0.1:5000/api/staff/my-schedules${storeParam}`, { headers, cache: "no-store" });
+      const res = await apiFetch(`/api/staff/my-schedules${storeParam}`, {
+        headers,
+        cache: "no-store",
+      });
+
+      if (res.status === 401) {
+        return;
       }
 
-      if (res && (res.status === 401 || res.status === 403)) {
+      if (res.status === 403) {
         const errJson = await res.json().catch(() => null);
-        toast.error(errJson?.message || "Sesi berakhir atau akun dinonaktifkan.");
-        AuthService.logout();
-        router.replace("/login");
+        if (errJson?.code === "ACCOUNT_INACTIVE") {
+          return;
+        }
+        toast.error(errJson?.message || "Akses ditolak.");
         return;
       }
 
@@ -371,18 +369,16 @@ export default function JadwalStaffPage() {
     // Ambil info profil staf terkini dari database
     const refreshProfile = async () => {
       try {
-        const token = AuthService.getToken();
-        if (!token) return;
-        const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
-        let res = await fetch("/api/auth/me", { headers, cache: "no-store" });
-        if (!res.ok && res.status >= 500) {
-          res = await fetch("http://127.0.0.1:5000/api/auth/me", { headers, cache: "no-store" });
+        const res = await apiFetch("/api/auth/me", { cache: "no-store" });
+        if (res.status === 401) {
+          return;
         }
-        if (res.status === 401 || res.status === 403) {
+        if (res.status === 403) {
           const errJson = await res.json().catch(() => null);
-          toast.error(errJson?.message || "Akun Anda dinonaktifkan atau sesi berakhir.");
-          AuthService.logout();
-          router.replace("/login");
+          if (errJson?.code === "ACCOUNT_INACTIVE") {
+            return;
+          }
+          toast.error(errJson?.message || "Akses ditolak.");
           return;
         }
         if (res.ok) {
@@ -402,8 +398,12 @@ export default function JadwalStaffPage() {
     };
     refreshProfile();
 
-    // Auto re-sync saat pengguna kembali ke halaman/tab ini
+    // Auto re-sync saat pengguna kembali ke halaman/tab ini (dengan throttle 5 detik agar tidak membombardir server)
+    let lastFocusSyncTime = 0;
     const handleFocusSync = () => {
+      const now = Date.now();
+      if (now - lastFocusSyncTime < 5000) return;
+      lastFocusSyncTime = now;
       refreshProfile();
       fetchScheduleData(true);
     };
@@ -432,20 +432,18 @@ export default function JadwalStaffPage() {
     };
   }, []);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     setShowProfileMenu(false);
     triggerSuccessToast(
       "Berhasil Logout",
       "Anda telah berhasil keluar dari akun. Mengalihkan..."
     );
-    AuthService.logout();
-    setTimeout(() => {
-      if (typeof window !== "undefined") {
-        window.location.href = "/login";
-      } else {
-        router.push("/login");
-      }
-    }, 1100);
+    await AuthService.logoutAsync({ broadcast: true });
+    if (typeof window !== "undefined") {
+      window.location.replace("/login?reason=logout");
+    } else {
+      router.replace("/login?reason=logout");
+    }
   };
 
   const displayName =
@@ -561,9 +559,9 @@ export default function JadwalStaffPage() {
                   aria-label="Profil Pengguna"
                 >
                   <div className="w-full h-full rounded-full overflow-hidden flex items-center justify-center">
-                    {currentUser?.profilePicture ? (
+                    {currentUser?.profilePicture || scheduleData.staff.photo ? (
                       <DecryptedImage
-                        src={currentUser.profilePicture}
+                        src={currentUser?.profilePicture || scheduleData.staff.photo || ""}
                         alt={displayName}
                         className="w-full h-full object-cover"
                       />
@@ -584,9 +582,9 @@ export default function JadwalStaffPage() {
                     <div className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-slate-100 p-2.5 z-40 animate-in fade-in zoom-in-95 duration-150">
                       <div className="flex items-center gap-2.5 px-2 py-1.5 border-b border-slate-100 pb-2 mb-1">
                         <div className="w-8 h-8 rounded-full bg-blue-50 text-[#193f53] font-bold text-xs flex items-center justify-center shrink-0 border border-blue-100 overflow-hidden">
-                          {currentUser?.profilePicture ? (
+                          {currentUser?.profilePicture || scheduleData.staff.photo ? (
                             <DecryptedImage
-                              src={currentUser.profilePicture}
+                              src={currentUser?.profilePicture || scheduleData.staff.photo || ""}
                               alt={displayName}
                               className="w-full h-full object-cover"
                             />
@@ -1322,5 +1320,13 @@ export default function JadwalStaffPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function JadwalStaffPage() {
+  return (
+    <StaffAuthGuard>
+      <JadwalStaffContent />
+    </StaffAuthGuard>
   );
 }

@@ -14,7 +14,6 @@ import {
   ChevronLeft,
   ChevronRight,
   TrendingUp,
-  Store,
   Clock,
   Repeat,
   CalendarDays,
@@ -36,6 +35,7 @@ import { format, isSameDay } from "date-fns";
 import { AuthService } from "@/lib/auth";
 import { WorkspaceService } from "@/services/workspace.service";
 import { Workspace } from "@/types/workspace";
+import { useRealtimeEvents } from "@/hooks/useRealtime";
 
 export default function JadwalAuditPage() {
   const [schedules, setSchedules] = useState<AuditSchedule[]>([]);
@@ -148,13 +148,25 @@ export default function JadwalAuditPage() {
 
     init();
 
-    // Interval realtime: cek secara berkala agar jadwal otomatis menjadi "Selesai" jika jam selesai terlewati
+    // Backup fallback interval (60s) jika SSE reconnect
     const interval = setInterval(() => {
       refreshData(false);
-    }, 15000);
+    }, 60000);
 
     return () => clearInterval(interval);
   }, [refreshData]);
+
+  // Realtime SSE Event Listener: auto-update seketika saat staf submit atau jadwal berubah
+  useRealtimeEvents({
+    workspaceId: selectedWorkspaceId,
+    onScheduleUpdated: () => {
+      refreshData(false);
+    },
+    onAuditSubmitted: (data) => {
+      refreshData(false);
+      toast.info(`Laporan audit baru masuk dari ${data.storeName || "staf"}!`);
+    },
+  });
 
   const handleWorkspaceChange = async (newWsId: string) => {
     const chosen = workspaces.find((w) => w.id === newWsId);
@@ -730,17 +742,12 @@ export default function JadwalAuditPage() {
                     >
                       {/* NAMA TOKO */}
                       <td className={`py-3.5 px-4 sm:px-6 ${isCancelled ? "opacity-60" : ""}`}>
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-lg bg-sky-50 text-sky-600 border border-sky-100 flex items-center justify-center shrink-0">
-                            <Store className="w-4 h-4" />
+                        <div className="min-w-0">
+                          <div className="font-semibold text-slate-900 leading-snug">
+                            {schedule.storeName}
                           </div>
-                          <div className="min-w-0">
-                            <div className="font-semibold text-slate-900 leading-snug">
-                              {schedule.storeName}
-                            </div>
-                            <div className="text-[11px] text-slate-400 font-normal leading-snug mt-0.5">
-                              {schedule.storeLocation}
-                            </div>
+                          <div className="text-[11px] text-slate-400 font-normal leading-snug mt-0.5">
+                            {schedule.storeLocation}
                           </div>
                         </div>
                       </td>

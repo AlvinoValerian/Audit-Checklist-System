@@ -1,5 +1,6 @@
 import { AdminUser, AdminStatsData } from "@/types/admin";
 import { AuthService } from "@/lib/auth";
+import { apiFetch } from "@/lib/api-client";
 
 const getBackendUrl = (): string => {
   if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
@@ -16,29 +17,22 @@ const getAuthHeaders = (): Record<string, string> => {
     "Content-Type": "application/json",
   };
   const token = AuthService.getToken();
-  const user = AuthService.getCurrentUser();
 
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
   }
-
-  if (user) {
-    headers["x-user-id"] = user.id;
-    if (user.role === "Super Admin" && user.rawId) {
-      headers["x-super-admin-id"] = user.rawId;
-    }
-    if (user.role) {
-      headers["x-user-role"] = user.role;
-    }
-    if (user.email) {
-      headers["x-user-email"] = user.email;
-    }
-  }
   return headers;
 };
 
+export interface AdminListMeta {
+  isTeknis?: boolean;
+  manualSuperAdminCount?: number;
+  maxManualSuperAdmins?: number;
+}
+
 export const AdminService = {
   cachedAdmins: [] as AdminUser[],
+  lastMeta: null as AdminListMeta | null,
 
   /**
    * Mengambil data admin dan super admin yang HANYA berelasi dengan akun yang sedang login
@@ -46,32 +40,38 @@ export const AdminService = {
   async fetchAll(): Promise<AdminUser[]> {
     try {
       const user = AuthService.getCurrentUser();
+      const saRawId = user?.role === "Super Admin"
+        ? user.rawId || user.id.replace(/^sa-/, "")
+        : undefined;
       let queryParam = "";
-      if (user?.role === "Super Admin" && user.rawId) {
-        queryParam = `?superAdminId=${user.rawId}`;
+      if (saRawId) {
+        queryParam = `?superAdminId=${saRawId}`;
       } else if (user?.email) {
         queryParam = `?email=${encodeURIComponent(user.email)}`;
       }
 
-      const res = await fetch(`${BACKEND_URL}/api/admins${queryParam}`, {
+      const res = await apiFetch(`${BACKEND_URL}/api/admins${queryParam}`, {
         method: "GET",
         headers: getAuthHeaders(),
         cache: "no-store",
       });
 
+      const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(`Gagal mengambil data admin dari server (HTTP ${res.status})`);
+        throw new Error(json?.message || `Gagal mengambil data admin dari server (HTTP ${res.status})`);
       }
 
-      const json = await res.json();
       if (json.status === "success" && Array.isArray(json.data)) {
         this.cachedAdmins = json.data;
+        if (json.meta && typeof json.meta === "object") {
+          this.lastMeta = json.meta;
+        }
         return json.data;
       }
 
       return [];
     } catch (error) {
-      console.warn("Backend API offline or unreachable:", error);
+      console.warn("AdminService.fetchAll error:", error);
       return this.cachedAdmins;
     }
   },
@@ -94,6 +94,7 @@ export const AdminService = {
     role?: "Admin" | "Super Admin" | "Staff";
     workspaceName?: string;
     workspaceId?: string;
+    companyName?: string;
     status?: "Aktif" | "Nonaktif";
     password?: string;
   }): Promise<AdminUser> {
@@ -102,7 +103,7 @@ export const AdminService = {
 
     let res: Response;
     try {
-      res = await fetch(`${BACKEND_URL}/api/admins`, {
+      res = await apiFetch(`${BACKEND_URL}/api/admins`, {
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify({
@@ -112,7 +113,7 @@ export const AdminService = {
       });
     } catch (networkErr: unknown) {
       console.error("Network error on POST /api/admins:", networkErr);
-      throw new Error("Tidak dapat terhubung ke server backend (http://localhost:5000). Pastikan backend sedang aktif.");
+      throw new Error("Tidak dapat terhubung ke server backend. Pastikan backend sedang aktif.");
     }
 
     const json = await res.json().catch(() => ({}));
@@ -135,7 +136,7 @@ export const AdminService = {
 
     let res: Response;
     try {
-      res = await fetch(`${BACKEND_URL}/api/admins/${id}`, {
+      res = await apiFetch(`${BACKEND_URL}/api/admins/${id}`, {
         method: "PUT",
         headers: getAuthHeaders(),
         body: JSON.stringify({
@@ -145,7 +146,7 @@ export const AdminService = {
       });
     } catch (networkErr: unknown) {
       console.error("Network error on PUT /api/admins:", networkErr);
-      throw new Error("Tidak dapat terhubung ke server backend (http://localhost:5000). Pastikan backend sedang aktif.");
+      throw new Error("Tidak dapat terhubung ke server backend. Pastikan backend sedang aktif.");
     }
 
     const json = await res.json().catch(() => ({}));
@@ -162,13 +163,13 @@ export const AdminService = {
   async deleteAsync(id: string): Promise<boolean> {
     let res: Response;
     try {
-      res = await fetch(`${BACKEND_URL}/api/admins/${id}`, {
+      res = await apiFetch(`${BACKEND_URL}/api/admins/${id}`, {
         method: "DELETE",
         headers: getAuthHeaders(),
       });
     } catch (networkErr: unknown) {
       console.error("Network error on DELETE /api/admins:", networkErr);
-      throw new Error("Tidak dapat terhubung ke server backend (http://localhost:5000). Pastikan backend sedang aktif.");
+      throw new Error("Tidak dapat terhubung ke server backend. Pastikan backend sedang aktif.");
     }
 
     const json = await res.json().catch(() => ({}));

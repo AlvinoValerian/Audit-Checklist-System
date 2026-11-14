@@ -22,6 +22,8 @@ import {
 } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import { AuthService, AuthUser } from "@/lib/auth";
+import { apiFetch } from "@/lib/api-client";
+import StaffAuthGuard from "@/components/auth/StaffAuthGuard";
 import StaffBottomNav from "../components/StaffBottomNav";
 
 interface HistoryItem {
@@ -121,72 +123,63 @@ function RiwayatContent() {
   const fetchHistoryData = async (silent = false) => {
     try {
       if (!silent) setIsRefreshing(true);
-      const token = AuthService.getToken();
       let user = AuthService.getCurrentUser();
       const activeWs = AuthService.getActiveWorkspace();
 
       // Sinkronkan terlebih dahulu data user terbaru dari database (/api/auth/me)
-      if (token) {
-        try {
-          let meRes: Response | null = await fetch("/api/auth/me", {
-            headers: { Authorization: `Bearer ${token}` },
-            cache: "no-store",
-          });
-          if (!meRes || meRes.status >= 500) {
-            meRes = await fetch("http://127.0.0.1:5000/api/auth/me", {
-              headers: { Authorization: `Bearer ${token}` },
-              cache: "no-store",
-            });
-          }
-          if (meRes && (meRes.status === 401 || meRes.status === 403)) {
-            const errJson = await meRes.json().catch(() => null);
-            toast.error(errJson?.message || "Akun dinonaktifkan atau sesi telah berakhir.");
-            AuthService.logout();
-            router.replace("/login");
+      try {
+        const meRes = await apiFetch("/api/auth/me", {
+          cache: "no-store",
+        });
+        if (meRes.status === 401) {
+          return;
+        }
+        if (meRes.status === 403) {
+          const errJson = await meRes.json().catch(() => null);
+          if (errJson?.code === "ACCOUNT_INACTIVE") {
             return;
           }
-          if (meRes && meRes.ok) {
-            const meJson = await meRes.json();
-            if (meJson.status === "success" && meJson.data?.user) {
-              const freshUser: AuthUser = meJson.data.user;
-              user = freshUser;
-              setCurrentUser(freshUser);
-              AuthService.setCurrentUser(freshUser);
-            }
+          toast.error(errJson?.message || "Akses ditolak.");
+          return;
+        }
+        if (meRes.ok) {
+          const meJson = await meRes.json();
+          if (meJson.status === "success" && meJson.data?.user) {
+            const freshUser: AuthUser = meJson.data.user;
+            user = freshUser;
+            setCurrentUser(freshUser);
+            AuthService.setCurrentUser(freshUser);
           }
-        } catch {}
-      }
+        }
+      } catch {}
 
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
       };
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-      if (user?.email) headers["x-user-email"] = user.email;
-      if (user?.role) headers["x-user-role"] = user.role;
-      const rawId = user?.rawId || (user?.id ? user.id.replace(/^staff-/, "").replace(/^sa-/, "").replace(/^adm-/, "") : undefined);
-      if (rawId) headers["x-user-id"] = rawId;
       if (activeWs?.id) headers["x-workspace-id"] = activeWs.id;
       if (user?.storeId) headers["x-store-id"] = user.storeId.toString();
 
       const storeParam = user?.storeId ? `?storeId=${encodeURIComponent(user.storeId)}` : "";
 
-      let res: Response | null = null;
-      try {
-        res = await fetch(`/api/staff/history${storeParam}`, { headers, cache: "no-store" });
-        if (!res || res.status >= 500) throw new Error(`Fetch status: ${res?.status}`);
-      } catch {
-        res = await fetch(`http://127.0.0.1:5000/api/staff/history${storeParam}`, { headers, cache: "no-store" });
-      }
+      const res = await apiFetch(`/api/staff/history${storeParam}`, {
+        headers,
+        cache: "no-store",
+      });
 
-      if (res && (res.status === 401 || res.status === 403)) {
-        const errJson = await res.json().catch(() => null);
-        toast.error(errJson?.message || "Akun dinonaktifkan atau sesi Anda telah berakhir.");
-        AuthService.logout();
-        router.replace("/login");
+      if (res.status === 401) {
         return;
       }
 
-      if (res && res.ok) {
+      if (res.status === 403) {
+        const errJson = await res.json().catch(() => null);
+        if (errJson?.code === "ACCOUNT_INACTIVE") {
+          return;
+        }
+        toast.error(errJson?.message || "Akses ditolak.");
+        return;
+      }
+
+      if (res.ok) {
         const json = await res.json();
         if (json.status === "success" && Array.isArray(json.data)) {
           setHistoryGroups(json.data);
@@ -226,7 +219,11 @@ function RiwayatContent() {
   useEffect(() => {
     fetchHistoryData(true);
 
+    let lastFocusTime = 0;
     const handleFocus = () => {
+      const now = Date.now();
+      if (now - lastFocusTime < 5000) return;
+      lastFocusTime = now;
       fetchHistoryData(true);
     };
     window.addEventListener("focus", handleFocus);
@@ -846,17 +843,19 @@ function RiwayatContent() {
 
 export default function RiwayatChecklistPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen bg-[#f3f4fa] flex items-center justify-center text-slate-800">
-          <div className="flex items-center gap-2 text-sm font-semibold">
-            <RotateCcw className="w-4 h-4 animate-spin text-[#193f53]" />
-            <span>Memuat riwayat checklist...</span>
+    <StaffAuthGuard>
+      <Suspense
+        fallback={
+          <div className="min-h-screen bg-[#f3f4fa] flex items-center justify-center text-slate-800">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <RotateCcw className="w-4 h-4 animate-spin text-[#193f53]" />
+              <span>Memuat riwayat checklist...</span>
+            </div>
           </div>
-        </div>
-      }
-    >
-      <RiwayatContent />
-    </Suspense>
+        }
+      >
+        <RiwayatContent />
+      </Suspense>
+    </StaffAuthGuard>
   );
 }

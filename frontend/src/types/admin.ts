@@ -7,6 +7,9 @@ export interface AdminUser {
   phone?: string;
   role: AdminRole;
   workspaceName: string;
+  companyName?: string;
+  isSystemTeknis?: boolean;
+  isManualSuperAdmin?: boolean;
   status: "Aktif" | "Nonaktif";
   createdAt: string;
 }
