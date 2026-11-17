@@ -17,6 +17,7 @@ import ActionButtons from "@/components/ui/ActionButtons";
 import { AuthService } from "@/lib/auth";
 import SmartAuditPagination from "@/components/ui/SmartAuditPagination";
 import TableSkeleton from "@/components/ui/TableSkeleton";
+import EmptyStateTable from "@/components/ui/EmptyStateTable";
 
 interface WorkspaceTableProps {
   workspaces: Workspace[];
@@ -40,6 +41,13 @@ export default function WorkspaceTable({
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(7);
+
+  const isFiltered = Boolean(searchQuery.trim() || statusFilter !== "Semua");
+  const handleResetFilters = () => {
+    setSearchQuery("");
+    setStatusFilter("Semua");
+    setCurrentPage(1);
+  };
 
   // Filter Logic
   const filteredWorkspaces = useMemo(() => {
@@ -159,11 +167,20 @@ export default function WorkspaceTable({
             {isLoading ? (
               <TableSkeleton rows={itemsPerPage} cols={6} hasThumbnail={true} />
             ) : paginatedWorkspaces.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="text-center py-10 text-slate-400 text-xs">
-                  Tidak ada data workspace yang sesuai.
-                </td>
-              </tr>
+              <EmptyStateTable
+                colSpan={6}
+                icon={<Building2 className="w-6 h-6 text-slate-400 stroke-[1.8]" />}
+                title={isFiltered ? "Tidak Ada Workspace Yang Cocok" : "Belum Ada Workspace Terdaftar"}
+                description={
+                  isFiltered
+                    ? "Tidak ada data workspace yang sesuai dengan pencarian atau filter status yang dipilih."
+                    : "Belum ada workspace perusahaan yang dibuat. Buat workspace baru sekarang."
+                }
+                isFiltered={isFiltered}
+                onResetFilters={isFiltered ? handleResetFilters : undefined}
+                onAction={onAdd}
+                actionLabel="Buat Workspace Baru"
+              />
             ) : (
               paginatedWorkspaces.map((ws) => {
                 const isSoftDeleted = ws.status === "Nonaktif";
@@ -173,7 +190,8 @@ export default function WorkspaceTable({
                     className="hover:bg-slate-50/60 transition-colors group"
                   >
                     {/* 1. WORKSPACE */}
-                    <td className={`px-5 py-3.5 ${isSoftDeleted ? "opacity-40 grayscale" : ""}`}>
+                    <td className={`relative px-5 py-3.5 ${isSoftDeleted ? "opacity-40 grayscale" : ""}`}>
+                      <div className="absolute left-0 top-1.5 bottom-1.5 w-1 bg-[#193f53] rounded-r opacity-0 group-hover:opacity-100 transition-opacity" />
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-lg bg-sky-50 text-sky-600 border border-sky-100 flex items-center justify-center shrink-0">
                           <Building2 className="w-4 h-4" />

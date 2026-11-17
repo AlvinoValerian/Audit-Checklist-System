@@ -36,6 +36,7 @@ import {
 } from "@/utils/reportExporter";
 import SmartAuditPagination from "@/components/ui/SmartAuditPagination";
 import TableSkeleton from "@/components/ui/TableSkeleton";
+import EmptyStateTable from "@/components/ui/EmptyStateTable";
 
 const INDONESIAN_MONTHS = [
   "Januari",
@@ -852,9 +853,10 @@ export default function LaporanPage() {
                       <TableSkeleton rows={itemsPerPage} cols={6} hasThumbnail={true} />
                     ) : paginatedReports.length > 0 ? (
                       paginatedReports.map((row) => (
-                        <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
+                        <tr key={row.id} className="group hover:bg-slate-50/80 transition-colors">
                           {/* Toko */}
-                          <td className="px-5 py-3.5">
+                          <td className="relative px-5 py-3.5">
+                            <div className="absolute left-0 top-1.5 bottom-1.5 w-1 bg-[#193f53] rounded-r opacity-0 group-hover:opacity-100 transition-opacity" />
                             <div className="flex items-center gap-3 max-w-[220px]">
                               <div className="w-8 h-8 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 shrink-0 overflow-hidden shadow-2xs relative">
                                 {storePhotoMap.get(row.storeName.trim().toLowerCase()) ? (
@@ -973,25 +975,12 @@ export default function LaporanPage() {
                         </tr>
                       ))
                     ) : (
-                      <tr>
-                        <td colSpan={6} className="px-5 py-12 text-center">
-                          <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-2.5">
-                            <Search className="w-5 h-5" />
-                          </div>
-                          <h4 className="text-xs sm:text-sm font-bold text-slate-800">
-                            Tidak Ada Laporan Ditemukan
-                          </h4>
-                          <p className="text-[11px] text-slate-500 mt-1 max-w-sm mx-auto">
-                            Tidak ada laporan audit yang cocok dengan filter yang dipilih. Coba atur ulang kata kunci atau filter status.
-                          </p>
-                          <button
-                            onClick={handleResetFilters}
-                            className="mt-3.5 px-3.5 py-1.5 bg-[#193f53] text-white rounded-lg text-xs font-semibold hover:bg-[#143343] transition-colors cursor-pointer"
-                          >
-                            Reset Filter
-                          </button>
-                        </td>
-                      </tr>
+                      <EmptyStateTable
+                        colSpan={6}
+                        title="Tidak Ada Laporan Audit Ditemukan"
+                        description="Tidak ada laporan audit yang cocok dengan filter yang dipilih. Coba atur ulang kata kunci atau filter status."
+                        onResetFilters={handleResetFilters}
+                      />
                     )}
                   </tbody>
                 </table>

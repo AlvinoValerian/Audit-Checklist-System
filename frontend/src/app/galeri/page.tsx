@@ -26,6 +26,7 @@ import { toast } from "sonner";
 import DecryptedImage from "@/components/DecryptedImage";
 import SmartAuditPagination from "@/components/ui/SmartAuditPagination";
 import CardSkeleton from "@/components/ui/CardSkeleton";
+import EmptyStateTable from "@/components/ui/EmptyStateTable";
 
 export default function GaleriPage() {
   const [logs, setLogs] = useState<AuditGalleryLog[]>([]);
@@ -249,6 +250,25 @@ export default function GaleriPage() {
     if (advancedFilters.onlyIssues) count++;
     return count;
   }, [advancedFilters]);
+
+  const isFiltered = Boolean(
+    searchTerm.trim() ||
+    selectedStore !== "Semua Toko" ||
+    selectedStatus !== "Semua Status" ||
+    activeFilterCount > 0
+  );
+
+  const handleResetFilters = () => {
+    setSearchTerm("");
+    setSelectedStore("Semua Toko");
+    setSelectedStatus("Semua Status");
+    setAdvancedFilters({
+      dateRange: "all",
+      category: "Semua Kategori",
+      onlyIssues: false,
+    });
+    setCurrentPage(1);
+  };
 
   // Modal navigation handlers
   const handleOpenPhoto = (log: AuditGalleryLog, photo: AuditPhoto, index: number) => {
@@ -545,33 +565,17 @@ export default function GaleriPage() {
             ))}
           </div>
         ) : (
-          /* Empty State */
-          <div className="bg-white border border-slate-200 rounded-xl p-10 text-center shadow-xs">
-            <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-2.5">
-              <Search className="w-5 h-5" />
-            </div>
-            <h3 className="text-xs sm:text-sm font-bold text-slate-800">
-              Tidak Ada Foto Audit Ditemukan
-            </h3>
-            <p className="text-[11px] text-slate-500 mt-1 max-w-sm mx-auto">
-              Tidak ada hasil yang sesuai dengan kriteria pencarian atau filter yang dipilih. Coba ubah kata kunci atau reset filter.
-            </p>
-            <button
-              onClick={() => {
-                setSearchTerm("");
-                setSelectedStore("Semua Toko");
-                setSelectedStatus("Semua Status");
-                setAdvancedFilters({
-                  dateRange: "all",
-                  category: "Semua Kategori",
-                  onlyIssues: false,
-                });
-              }}
-              className="mt-3.5 px-3.5 py-1.5 bg-[#193f53] text-white rounded-lg text-xs font-semibold hover:bg-[#143343] transition-colors cursor-pointer"
-            >
-              Reset Semua Filter
-            </button>
-          </div>
+          <EmptyStateTable
+            asCard={true}
+            title={isFiltered ? "Tidak Ada Foto Audit Ditemukan" : "Belum Ada Dokumentasi Foto"}
+            description={
+              isFiltered
+                ? "Tidak ada foto audit yang cocok dengan filter atau kata kunci pencarian. Coba ubah atau atur ulang filter."
+                : "Belum ada foto audit yang diunggah untuk cabang di workspace ini."
+            }
+            isFiltered={isFiltered}
+            onResetFilters={isFiltered ? handleResetFilters : undefined}
+          />
         )}
 
         {/* Pagination Section */}

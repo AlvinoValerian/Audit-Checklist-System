@@ -29,6 +29,7 @@ import SoftDeleteModal from "./components/SoftDeleteModal";
 import RestoreStaffModal from "./components/RestoreStaffModal";
 import SmartAuditPagination from "@/components/ui/SmartAuditPagination";
 import TableSkeleton from "@/components/ui/TableSkeleton";
+import EmptyStateTable from "@/components/ui/EmptyStateTable";
 
 export default function StaffPage() {
   const [staffs, setStaffs] = useState<StaffUser[]>([]);
@@ -62,6 +63,13 @@ export default function StaffPage() {
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(7);
+
+  const isFiltered = Boolean(searchTerm.trim() || filterStatus !== "Semua");
+  const handleResetFilters = () => {
+    setSearchTerm("");
+    setFilterStatus("Semua");
+    setCurrentPage(1);
+  };
 
   // Workspace Switcher States (Super Admin)
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -436,13 +444,23 @@ export default function StaffPage() {
               {isLoading ? (
                 <TableSkeleton rows={itemsPerPage} cols={6} hasThumbnail={true} />
               ) : paginatedStaffs.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="text-center py-12 text-slate-400 text-xs">
-                    {searchTerm || filterStatus !== "Semua"
-                      ? "Tidak ada data staff yang sesuai dengan filter pencarian."
-                      : "Belum ada data staff yang terdaftar pada workspace ini."}
-                  </td>
-                </tr>
+                <EmptyStateTable
+                  colSpan={6}
+                  icon={<Users className="w-6 h-6 text-slate-400 stroke-[1.8]" />}
+                  title={isFiltered ? "Tidak Ada Data Staff Ditemukan" : `Tidak Ada Staff di ${currentWorkspaceName}`}
+                  description={
+                    isFiltered
+                      ? "Tidak ada personil staff yang sesuai dengan kata kunci atau filter status yang dipilih."
+                      : "Belum ada personil staff yang terdaftar pada workspace ini. Tambahkan staff baru sekarang."
+                  }
+                  isFiltered={isFiltered}
+                  onResetFilters={isFiltered ? handleResetFilters : undefined}
+                  onAction={() => {
+                    setStaffToEdit(null);
+                    setIsStaffModalOpen(true);
+                  }}
+                  actionLabel="Tambah Staff Baru"
+                />
               ) : (
                 paginatedStaffs.map((staff) => {
                   const isSoftDeleted = staff.status === "Nonaktif";
@@ -452,7 +470,8 @@ export default function StaffPage() {
                       className="hover:bg-slate-50/60 transition-colors group"
                     >
                       {/* 1. NAMA STAFF */}
-                      <td className={`px-5 py-3.5 ${isSoftDeleted ? "opacity-40 grayscale" : ""}`}>
+                      <td className={`relative px-5 py-3.5 ${isSoftDeleted ? "opacity-40 grayscale" : ""}`}>
+                        <div className="absolute left-0 top-1.5 bottom-1.5 w-1 bg-[#193f53] rounded-r opacity-0 group-hover:opacity-100 transition-opacity" />
                         <span className="font-bold text-slate-900 text-xs sm:text-[13px]">
                           {staff.fullName}
                         </span>

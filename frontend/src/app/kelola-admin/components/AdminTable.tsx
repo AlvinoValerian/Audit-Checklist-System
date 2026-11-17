@@ -14,6 +14,7 @@ import { Workspace } from "@/types/workspace";
 import ActionButtons from "@/components/ui/ActionButtons";
 import SmartAuditPagination from "@/components/ui/SmartAuditPagination";
 import TableSkeleton from "@/components/ui/TableSkeleton";
+import EmptyStateTable from "@/components/ui/EmptyStateTable";
 
 interface AdminTableProps {
   admins: AdminUser[];
@@ -41,6 +42,14 @@ export default function AdminTable({
   const [isWorkspaceFilterOpen, setIsWorkspaceFilterOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(7);
+
+  const isFiltered = Boolean(searchQuery.trim() || workspaceFilter !== "Semua" || statusFilter !== "Semua");
+  const handleResetFilters = () => {
+    setSearchQuery("");
+    setWorkspaceFilter("Semua");
+    setStatusFilter("Semua");
+    setCurrentPage(1);
+  };
 
   const workspaceOptions = useMemo(() => {
     const set = new Set<string>();
@@ -221,11 +230,19 @@ export default function AdminTable({
             {isLoading ? (
               <TableSkeleton rows={itemsPerPage} cols={6} hasThumbnail={false} />
             ) : paginatedAdmins.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="text-center py-10 text-slate-400 text-xs">
-                  Tidak ada data admin yang sesuai.
-                </td>
-              </tr>
+              <EmptyStateTable
+                colSpan={6}
+                title={isFiltered ? "Tidak Ada Admin Yang Cocok" : "Belum Ada Admin Terdaftar"}
+                description={
+                  isFiltered
+                    ? "Tidak ada data admin yang sesuai dengan kata kunci atau filter yang dipilih."
+                    : "Belum ada admin yang terdaftar pada sistem. Tambahkan admin baru sekarang."
+                }
+                isFiltered={isFiltered}
+                onResetFilters={isFiltered ? handleResetFilters : undefined}
+                onAction={onAdd}
+                actionLabel="Tambah Admin Baru"
+              />
             ) : (
               paginatedAdmins.map((adm) => {
                 const isSoftDeleted = adm.status === "Nonaktif";
@@ -236,7 +253,8 @@ export default function AdminTable({
                     className="hover:bg-slate-50/60 transition-colors group"
                   >
                     {/* 1. NAMA ADMIN */}
-                    <td className={`px-5 py-3.5 ${isSoftDeleted ? "opacity-40 grayscale" : ""}`}>
+                    <td className={`relative px-5 py-3.5 ${isSoftDeleted ? "opacity-40 grayscale" : ""}`}>
+                      <div className="absolute left-0 top-1.5 bottom-1.5 w-1 bg-[#193f53] rounded-r opacity-0 group-hover:opacity-100 transition-opacity" />
                       <span className="font-bold text-slate-900 text-xs sm:text-[13px]">
                         {adm.fullName}
                       </span>
