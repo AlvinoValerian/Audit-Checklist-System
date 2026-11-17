@@ -19,6 +19,7 @@ import {
 import { toast } from "sonner";
 import SparkPayCheckoutModal, { SparkPayCheckoutData } from "./SparkPayCheckoutModal";
 import TableSkeleton from "@/components/ui/TableSkeleton";
+import EmptyStateTable from "@/components/ui/EmptyStateTable";
 
 // Interface untuk Data Pembayaran / Invoice Paket
 export interface UserSubscriptionItem {
@@ -165,6 +166,13 @@ export default function UserPackagePaymentDashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState<"Semua" | "Lunas" | "Menunggu Bayar" | "Kadaluarsa">("Semua");
   const [filterPackage, setFilterPackage] = useState<"Semua" | "Starter" | "Pro" | "Enterprise">("Semua");
+
+  const isFiltered = Boolean(searchQuery.trim() || filterStatus !== "Semua" || filterPackage !== "Semua");
+  const handleResetFilters = () => {
+    setSearchQuery("");
+    setFilterStatus("Semua");
+    setFilterPackage("Semua");
+  };
 
   // Modal State untuk Checkout SparkPay
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
@@ -460,11 +468,18 @@ export default function UserPackagePaymentDashboard() {
               {isLoadingDb ? (
                 <TableSkeleton rows={7} cols={9} hasThumbnail={false} />
               ) : filteredUsers.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="text-center py-8 text-slate-400">
-                    Tidak ada data tagihan yang sesuai dengan filter pencarian.
-                  </td>
-                </tr>
+                <EmptyStateTable
+                  colSpan={9}
+                  icon={<CreditCard className="w-6 h-6 text-slate-400 stroke-[1.8]" />}
+                  title={isFiltered ? "Tidak Ada Tagihan Yang Cocok" : "Tidak Ada Riwayat Tagihan"}
+                  description={
+                    isFiltered
+                      ? "Tidak ada data tagihan paket langganan yang cocok dengan filter atau kata kunci pencarian Anda."
+                      : "Belum ada catatan tagihan paket SparkPay yang diterbitkan saat ini."
+                  }
+                  isFiltered={isFiltered}
+                  onResetFilters={isFiltered ? handleResetFilters : undefined}
+                />
               ) : (
                 filteredUsers.map((user, idx) => (
                   <tr
@@ -472,7 +487,8 @@ export default function UserPackagePaymentDashboard() {
                     className="hover:bg-slate-50/70 transition-colors group"
                   >
                     {/* Kolom 0: NO */}
-                    <td className="py-3 px-4 text-center font-mono text-[11px] text-slate-400">
+                    <td className="relative py-3 px-4 text-center font-mono text-[11px] text-slate-400">
+                      <div className="absolute left-0 top-1.5 bottom-1.5 w-1 bg-[#193f53] rounded-r opacity-0 group-hover:opacity-100 transition-opacity" />
                       {idx + 1}
                     </td>
 

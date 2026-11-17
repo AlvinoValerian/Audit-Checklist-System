@@ -30,6 +30,7 @@ import { AuthService } from "@/lib/auth";
 import ActionButtons from "@/components/ui/ActionButtons";
 import SmartAuditPagination from "@/components/ui/SmartAuditPagination";
 import TableSkeleton from "@/components/ui/TableSkeleton";
+import EmptyStateTable from "@/components/ui/EmptyStateTable";
 import TeknisStats from "./components/TeknisStats";
 import CreateTeknisModal from "./components/CreateTeknisModal";
 import EditTeknisModal from "./components/EditTeknisModal";
@@ -55,7 +56,15 @@ export default function DivisiTeknisPage() {
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(8);
+  const [itemsPerPage, setItemsPerPage] = useState(7);
+
+  const isFiltered = Boolean(searchQuery.trim() || statusFilter !== "Semua" || specializationFilter !== "Semua");
+  const handleResetFilters = () => {
+    setSearchQuery("");
+    setStatusFilter("Semua");
+    setSpecializationFilter("Semua");
+    setCurrentPage(1);
+  };
 
   // Modals State
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -369,21 +378,20 @@ export default function DivisiTeknisPage() {
                 {isLoading ? (
                   <TableSkeleton rows={itemsPerPage} cols={7} hasThumbnail={true} />
                 ) : paginatedUsers.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="py-12 text-center text-slate-400">
-                      <div className="flex flex-col items-center justify-center gap-2">
-                        <Wrench className="w-8 h-8 text-slate-300 stroke-[1.5]" />
-                        <span className="font-semibold text-slate-600">
-                          Tidak ada data personil divisi teknis ditemukan
-                        </span>
-                        <span className="text-[11px] text-slate-400">
-                          {searchQuery || statusFilter !== "Semua"
-                            ? "Coba ubah kata kunci pencarian atau filter status."
-                            : "Klik tombol 'Tambah User Teknis' untuk menambahkan personil teknis baru."}
-                        </span>
-                      </div>
-                    </td>
-                  </tr>
+                  <EmptyStateTable
+                    colSpan={7}
+                    icon={<Wrench className="w-6 h-6 text-slate-400 stroke-[1.8]" />}
+                    title={isFiltered ? "Tidak Ada Personil Teknis Yang Cocok" : "Tidak Ada Personil Divisi Teknis"}
+                    description={
+                      isFiltered
+                        ? "Coba ubah kata kunci pencarian atau sesuaikan filter status dan spesialisasi."
+                        : "Belum ada personil teknis yang terdaftar. Tambahkan user teknis pertama sekarang."
+                    }
+                    isFiltered={isFiltered}
+                    onResetFilters={isFiltered ? handleResetFilters : undefined}
+                    onAction={() => setIsCreateOpen(true)}
+                    actionLabel="Tambah User Teknis"
+                  />
                 ) : (
                   paginatedUsers.map((user) => {
                     const isInactive = user.status === "Nonaktif";
@@ -391,12 +399,13 @@ export default function DivisiTeknisPage() {
                     return (
                       <tr
                         key={user.id}
-                        className={`hover:bg-slate-50/60 transition-colors ${
+                        className={`group hover:bg-slate-50/70 transition-colors ${
                           isInactive ? "bg-slate-50/40 opacity-75" : ""
                         }`}
                       >
                         {/* 1. Nama & Email */}
-                        <td className="py-3.5 px-4">
+                        <td className="relative py-3.5 px-4">
+                          <div className="absolute left-0 top-1.5 bottom-1.5 w-1 bg-[#193f53] rounded-r opacity-0 group-hover:opacity-100 transition-opacity" />
                           <div className="flex items-center gap-3">
                             <div className="w-8 h-8 rounded-xl bg-[#193f53] text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-2xs">
                               {user.fullName.charAt(0).toUpperCase()}

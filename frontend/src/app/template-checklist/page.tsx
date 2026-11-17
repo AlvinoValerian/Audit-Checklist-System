@@ -35,6 +35,7 @@ import { ScheduleService, isScheduleInProgress } from "@/services/schedule.servi
 import { AuditSchedule } from "@/types/schedule";
 import SmartAuditPagination from "@/components/ui/SmartAuditPagination";
 import TableSkeleton from "@/components/ui/TableSkeleton";
+import EmptyStateTable from "@/components/ui/EmptyStateTable";
 import ChecklistRequiredModal from "@/app/jadwal-audit/components/ChecklistRequiredModal";
 
 export default function TemplateChecklistPage() {
@@ -83,6 +84,13 @@ export default function TemplateChecklistPage() {
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(7);
+
+  const isFiltered = Boolean(searchTerm.trim() || filterStatus !== "Semua");
+  const handleResetFilters = () => {
+    setSearchTerm("");
+    setFilterStatus("Semua");
+    setCurrentPage(1);
+  };
 
   const refreshData = useCallback(async (targetWs?: string, showLoading = false) => {
     if (showLoading) setIsLoading(true);
@@ -580,15 +588,20 @@ export default function TemplateChecklistPage() {
               {isLoading ? (
                 <TableSkeleton rows={itemsPerPage} cols={4} hasThumbnail={false} />
               ) : paginatedTemplates.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="py-12 text-center text-slate-400">
-                    <FileCheck2 className="w-8 h-8 mx-auto mb-2 text-slate-300 stroke-[1.5]" />
-                    <p className="font-semibold text-slate-600 text-sm">Tidak ada template ditemukan</p>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      Coba sesuaikan kata kunci pencarian atau filter status.
-                    </p>
-                  </td>
-                </tr>
+                <EmptyStateTable
+                  colSpan={4}
+                  icon={<FileCheck2 className="w-6 h-6 text-slate-400 stroke-[1.8]" />}
+                  title={isFiltered ? "Tidak Ada Template SOP Yang Cocok" : `Tidak Ada Template SOP di ${currentWorkspaceName}`}
+                  description={
+                    isFiltered
+                      ? "Coba sesuaikan kata kunci pencarian atau filter status checklist."
+                      : "Belum ada template SOP checklist yang dibuat untuk workspace ini. Buat template SOP pertama sekarang."
+                  }
+                  isFiltered={isFiltered}
+                  onResetFilters={isFiltered ? handleResetFilters : undefined}
+                  onAction={() => setIsCreating(true)}
+                  actionLabel="Buat Template SOP"
+                />
               ) : (
                 paginatedTemplates.map((template) => {
                   const isDeactivated = template.status === "Nonaktif";
@@ -600,9 +613,10 @@ export default function TemplateChecklistPage() {
                     >
                       {/* NAMA TEMPLATE */}
                       <td
-                        className={`py-3.5 px-4 sm:px-6 ${isDeactivated ? "opacity-60" : "cursor-pointer"}`}
+                        className={`relative py-3.5 px-4 sm:px-6 ${isDeactivated ? "opacity-60" : "cursor-pointer"}`}
                         onClick={isDeactivated ? undefined : () => setSelectedTemplateToView(template)}
                       >
+                        <div className="absolute left-0 top-1.5 bottom-1.5 w-1 bg-[#193f53] rounded-r opacity-0 group-hover:opacity-100 transition-opacity" />
                         <div className="font-semibold text-slate-900 group-hover:text-[#193f53] transition-colors">
                           {template.title}
                         </div>

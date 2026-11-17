@@ -30,6 +30,7 @@ import SoftDeleteModal from "./components/SoftDeleteModal";
 import RestoreStoreModal from "./components/RestoreStoreModal";
 import SmartAuditPagination from "@/components/ui/SmartAuditPagination";
 import TableSkeleton from "@/components/ui/TableSkeleton";
+import EmptyStateTable from "@/components/ui/EmptyStateTable";
 import DecryptedImage from "@/components/DecryptedImage";
 
 export default function TokoPage() {
@@ -73,6 +74,13 @@ export default function TokoPage() {
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(7);
+
+  const isFiltered = Boolean(searchTerm.trim() || filterStatus !== "Semua");
+  const handleResetFilters = () => {
+    setSearchTerm("");
+    setFilterStatus("Semua");
+    setCurrentPage(1);
+  };
 
   const refreshData = async (customWsId?: string) => {
     const wsId = customWsId !== undefined ? customWsId : selectedWorkspaceId;
@@ -464,17 +472,20 @@ export default function TokoPage() {
               {isLoading ? (
                 <TableSkeleton rows={itemsPerPage} cols={6} hasThumbnail={false} />
               ) : paginatedStores.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="py-12 text-center text-slate-400">
-                    <Store className="w-8 h-8 mx-auto mb-2 text-slate-300 stroke-[1.5]" />
-                    <p className="font-semibold text-slate-600 text-sm">
-                      Tidak ada toko ditemukan di {currentWorkspaceName}
-                    </p>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      Belum ada toko yang terdaftar atau coba sesuaikan kata kunci pencarian.
-                    </p>
-                  </td>
-                </tr>
+                <EmptyStateTable
+                  colSpan={6}
+                  icon={<Store className="w-6 h-6 text-slate-400 stroke-[1.8]" />}
+                  title={isFiltered ? "Tidak Ada Toko Yang Cocok" : `Tidak Ada Toko di ${currentWorkspaceName}`}
+                  description={
+                    isFiltered
+                      ? "Tidak ada toko yang sesuai dengan kata kunci pencarian atau filter status yang dipilih."
+                      : "Belum ada cabang toko yang terdaftar di workspace ini. Tambahkan toko baru sekarang."
+                  }
+                  isFiltered={isFiltered}
+                  onResetFilters={isFiltered ? handleResetFilters : undefined}
+                  onAction={() => setIsCreateModalOpen(true)}
+                  actionLabel="Tambah Toko Baru"
+                />
               ) : (
                 paginatedStores.map((store) => {
                   const initialLetter =
@@ -487,7 +498,8 @@ export default function TokoPage() {
                       className="hover:bg-slate-50/70 transition-colors group"
                     >
                       {/* NAMA TOKO */}
-                      <td className={`py-3.5 px-4 font-semibold text-slate-900 whitespace-nowrap ${isInactive ? "opacity-40 grayscale" : ""}`}>
+                      <td className={`relative py-3.5 px-4 font-semibold text-slate-900 whitespace-nowrap ${isInactive ? "opacity-40 grayscale" : ""}`}>
+                        <div className="absolute left-0 top-1.5 bottom-1.5 w-1 bg-[#193f53] rounded-r opacity-0 group-hover:opacity-100 transition-opacity" />
                         <div className="flex items-center gap-3">
                           <div className="w-8 h-8 rounded-lg bg-slate-100 border border-slate-200/80 text-slate-700 font-bold text-xs flex items-center justify-center shrink-0 overflow-hidden shadow-2xs relative">
                             {store.storePicture ? (
