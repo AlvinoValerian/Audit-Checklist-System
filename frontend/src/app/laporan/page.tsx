@@ -34,6 +34,8 @@ import {
   exportSingleReport,
   exportAllFilteredReportsToZip,
 } from "@/utils/reportExporter";
+import SmartAuditPagination from "@/components/ui/SmartAuditPagination";
+import TableSkeleton from "@/components/ui/TableSkeleton";
 
 const INDONESIAN_MONTHS = [
   "Januari",
@@ -113,7 +115,7 @@ export default function LaporanPage() {
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
+  const [itemsPerPage, setItemsPerPage] = useState(10);
 
   // Selected Report for Full Detail View
   const [selectedReportToView, setSelectedReportToView] = useState<AuditReportItem | null>(null);
@@ -847,19 +849,7 @@ export default function LaporanPage() {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {isLoading ? (
-                      <tr>
-                        <td colSpan={6} className="py-16 text-center text-slate-400">
-                          <div className="flex flex-col items-center justify-center gap-2">
-                            <Loader2 className="w-6 h-6 text-[#193f53] animate-spin" />
-                            <span className="text-xs font-semibold text-slate-700">
-                              Memuat data laporan audit...
-                            </span>
-                            <span className="text-[11px] text-slate-400">
-                              Menghubungkan ke database
-                            </span>
-                          </div>
-                        </td>
-                      </tr>
+                      <TableSkeleton rows={itemsPerPage} cols={6} hasThumbnail={true} />
                     ) : paginatedReports.length > 0 ? (
                       paginatedReports.map((row) => (
                         <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
@@ -1007,63 +997,25 @@ export default function LaporanPage() {
                 </table>
               </div>
 
-              {/* Pagination Section */}
+              {/* Smart Audit Pagination (Sliding Window, Clickable Jump Popover, Periode Audit Scrubber) */}
               {!isLoading && paginatedReports.length > 0 && (
-                <div className="p-4 border-t border-slate-100 flex flex-wrap gap-4 items-center justify-between">
-                  <p className="text-[11px] text-slate-500">
-                    Menampilkan{" "}
-                    <span className="font-bold text-slate-900">
-                      {startItem}-{endItem}
-                    </span>{" "}
-                    dari{" "}
-                    <span className="font-bold text-slate-900">
-                      {totalFilteredCount} laporan audit
-                    </span>
-                  </p>
-
-                  <div className="flex gap-1 text-[11px]">
-                    {/* Prev Button */}
-                    <button
-                      onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-                      disabled={currentPage === 1}
-                      className={`w-7 h-7 flex items-center justify-center rounded-md border border-slate-200 transition-colors ${
-                        currentPage === 1
-                          ? "text-slate-300 border-slate-100 cursor-not-allowed"
-                          : "text-slate-600 hover:bg-slate-50 cursor-pointer"
-                      }`}
-                    >
-                      <ChevronLeft className="w-4 h-4" />
-                    </button>
-
-                    {/* Page Numbers */}
-                    {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-                      <button
-                        key={page}
-                        onClick={() => setCurrentPage(page)}
-                        className={`w-7 h-7 rounded-md flex items-center justify-center font-bold text-xs transition-colors cursor-pointer ${
-                          currentPage === page
-                            ? "bg-[#193f53] text-white shadow-2xs"
-                            : "border border-slate-200 text-slate-600 hover:bg-slate-50"
-                        }`}
-                      >
-                        {page}
-                      </button>
-                    ))}
-
-                    {/* Next Button */}
-                    <button
-                      onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
-                      disabled={currentPage === totalPages}
-                      className={`px-3 h-7 flex items-center justify-center rounded-md border border-slate-200 font-bold ml-1 transition-colors ${
-                        currentPage === totalPages
-                          ? "text-slate-300 border-slate-100 cursor-not-allowed"
-                          : "text-slate-600 hover:bg-slate-50 cursor-pointer"
-                      }`}
-                    >
-                      Selanjutnya <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
-                    </button>
-                  </div>
-                </div>
+                <SmartAuditPagination
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  totalItems={totalFilteredCount}
+                  itemsPerPage={itemsPerPage}
+                  onPageChange={setCurrentPage}
+                  onItemsPerPageChange={setItemsPerPage}
+                  pageSizeOptions={[10, 25, 50, 100]}
+                  itemName="laporan audit"
+                  months={monthOptions}
+                  selectedMonth={selectedMonth}
+                  onMonthChange={(m) => {
+                    setSelectedMonth(m);
+                    setCurrentPage(1);
+                  }}
+                  currentMonthLabel={getCurrentMonthLabel()}
+                />
               )}
             </div>
           </div>

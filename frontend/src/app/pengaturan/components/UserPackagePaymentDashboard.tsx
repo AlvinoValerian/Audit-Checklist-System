@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import SparkPayCheckoutModal, { SparkPayCheckoutData } from "./SparkPayCheckoutModal";
+import TableSkeleton from "@/components/ui/TableSkeleton";
 
 // Interface untuk Data Pembayaran / Invoice Paket
 export interface UserSubscriptionItem {
@@ -456,7 +457,9 @@ export default function UserPackagePaymentDashboard() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
-              {filteredUsers.length === 0 ? (
+              {isLoadingDb ? (
+                <TableSkeleton rows={7} cols={9} hasThumbnail={false} />
+              ) : filteredUsers.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="text-center py-8 text-slate-400">
                     Tidak ada data tagihan yang sesuai dengan filter pencarian.

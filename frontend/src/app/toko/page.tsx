@@ -28,6 +28,8 @@ import EditStoreModal from "./components/EditStoreModal";
 import DetailStoreModal from "./components/DetailStoreModal";
 import SoftDeleteModal from "./components/SoftDeleteModal";
 import RestoreStoreModal from "./components/RestoreStoreModal";
+import SmartAuditPagination from "@/components/ui/SmartAuditPagination";
+import TableSkeleton from "@/components/ui/TableSkeleton";
 import DecryptedImage from "@/components/DecryptedImage";
 
 export default function TokoPage() {
@@ -70,7 +72,7 @@ export default function TokoPage() {
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 5;
+  const [itemsPerPage, setItemsPerPage] = useState(7);
 
   const refreshData = async (customWsId?: string) => {
     const wsId = customWsId !== undefined ? customWsId : selectedWorkspaceId;
@@ -270,7 +272,7 @@ export default function TokoPage() {
   const paginatedStores = useMemo(() => {
     const start = (currentPage - 1) * itemsPerPage;
     return filteredStores.slice(start, start + itemsPerPage);
-  }, [filteredStores, currentPage]);
+  }, [filteredStores, currentPage, itemsPerPage]);
 
   const startIndex = filteredStores.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0;
   const endIndex = Math.min(currentPage * itemsPerPage, filteredStores.length);
@@ -460,19 +462,7 @@ export default function TokoPage() {
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
               {isLoading ? (
-                <tr>
-                  <td colSpan={6} className="py-16 text-center text-slate-400">
-                    <div className="flex flex-col items-center justify-center gap-2">
-                      <Loader2 className="w-6 h-6 text-[#193f53] animate-spin" />
-                      <span className="text-xs font-semibold text-slate-700">
-                        Memuat data toko...
-                      </span>
-                      <span className="text-[11px] text-slate-400">
-                        Menghubungkan ke ({currentWorkspaceName})
-                      </span>
-                    </div>
-                  </td>
-                </tr>
+                <TableSkeleton rows={itemsPerPage} cols={6} hasThumbnail={false} />
               ) : paginatedStores.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-12 text-center text-slate-400">
@@ -608,59 +598,16 @@ export default function TokoPage() {
         </div>
 
         {/* Pagination Controls */}
-        <div className="p-3.5 sm:p-4 border-t border-slate-100 flex flex-wrap gap-4 items-center justify-between">
-          <p className="text-[11px] text-slate-500">
-            Menampilkan{" "}
-            <span className="font-bold text-slate-900">
-              {filteredStores.length === 0 ? 0 : startIndex}-{endIndex}
-            </span>{" "}
-            dari{" "}
-            <span className="font-bold text-slate-900">
-              {filteredStores.length}
-            </span>{" "}
-            toko
-          </p>
-
-          <div className="flex gap-1 text-[11px] ml-auto">
-            {/* Prev Button */}
-            <button
-              type="button"
-              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-              disabled={currentPage === 1}
-              className="w-7 h-7 flex items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
-              title="Halaman Sebelumnya"
-            >
-              <ChevronLeft className="w-3.5 h-3.5" />
-            </button>
-
-            {/* Page Numbers */}
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
-              <button
-                key={pageNum}
-                type="button"
-                onClick={() => setCurrentPage(pageNum)}
-                className={`w-7 h-7 flex items-center justify-center rounded-md text-xs font-bold transition-colors cursor-pointer ${
-                  currentPage === pageNum
-                    ? "bg-[#193f53] text-white shadow-2xs"
-                    : "border border-slate-200 text-slate-600 hover:bg-slate-50"
-                }`}
-              >
-                {pageNum}
-              </button>
-            ))}
-
-            {/* Next Button */}
-            <button
-              type="button"
-              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-              disabled={currentPage === totalPages}
-              className="px-3 h-7 flex items-center gap-1 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors font-bold ml-1 cursor-pointer"
-            >
-              <span>Selanjutnya</span>
-              <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
+        <SmartAuditPagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={filteredStores.length}
+          itemsPerPage={itemsPerPage}
+          onPageChange={setCurrentPage}
+          onItemsPerPageChange={setItemsPerPage}
+          pageSizeOptions={[7, 14, 21, 35]}
+          itemName="toko"
+        />
       </div>
 
       {/* Create Store Modal */}
