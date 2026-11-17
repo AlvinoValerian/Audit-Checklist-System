@@ -17,6 +17,9 @@ import SoftDeleteModal from "./components/SoftDeleteModal";
 import RestoreHolidayModal from "./components/RestoreHolidayModal";
 import ActionButtons from "@/components/ui/ActionButtons";
 import HolidayCalendarWidget from "./components/HolidayCalendarWidget";
+import SmartAuditPagination from "@/components/ui/SmartAuditPagination";
+import TableSkeleton from "@/components/ui/TableSkeleton";
+import EmptyStateTable from "@/components/ui/EmptyStateTable";
  
 export default function LiburTokoPage() {
   const [holidays, setHolidays] = useState<Holiday[]>([]);
@@ -50,7 +53,15 @@ export default function LiburTokoPage() {
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 5;
+  const [itemsPerPage, setItemsPerPage] = useState(7);
+
+  const isFiltered = Boolean(searchTerm.trim() || filterStatus !== "Semua" || selectedDate);
+  const handleResetFilters = () => {
+    setSearchTerm("");
+    setFilterStatus("Semua");
+    setSelectedDate(null);
+    setCurrentPage(1);
+  };
 
   // Workspace Switcher States
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -209,7 +220,7 @@ export default function LiburTokoPage() {
   const paginatedHolidays = useMemo(() => {
     const start = (currentPage - 1) * itemsPerPage;
     return filteredHolidays.slice(start, start + itemsPerPage);
-  }, [filteredHolidays, currentPage]);
+  }, [filteredHolidays, currentPage, itemsPerPage]);
 
   const startIndex = filteredHolidays.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0;
   const endIndex = Math.min(currentPage * itemsPerPage, filteredHolidays.length);
@@ -509,42 +520,27 @@ export default function LiburTokoPage() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {isLoading ? (
-                <tr>
-                  <td colSpan={6} className="py-16 text-center text-slate-400">
-                    <div className="flex flex-col items-center justify-center gap-2">
-                      <Loader2 className="w-6 h-6 text-[#193f53] animate-spin" />
-                      <span className="text-xs font-semibold text-slate-700">
-                        Memuat data libur toko & pengecualian jadwal...
-                      </span>
-                      <span className="text-[11px] text-slate-400">
-                        Menghubungkan ke database
-                      </span>
-                    </div>
-                  </td>
-                </tr>
+                <TableSkeleton rows={itemsPerPage} cols={6} hasThumbnail={false} />
               ) : paginatedHolidays.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="py-12 text-center text-slate-400">
-                    <CalendarIcon className="w-8 h-8 mx-auto mb-2 text-slate-300 stroke-[1.5]" />
-                    <p className="font-semibold text-slate-600 text-sm">Tidak ada jadwal libur ditemukan di {currentWorkspaceName}</p>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      {selectedDate
-                        ? `Tidak ada jadwal libur toko pada tanggal ${format(selectedDate, "d MMMM yyyy")}.`
-                        : "Coba sesuaikan kata kunci pencarian atau filter status."}
-                    </p> 
-                    {selectedDate && (
-                      <button
-                        onClick={() => {
-                          setSelectedDate(null);
-                          setCurrentPage(1);
-                        }}
-                        className="mt-3 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
-                      >
-                        Tampilkan Semua Jadwal
-                      </button>
-                    )}
-                  </td>
-                </tr>
+                <EmptyStateTable
+                  colSpan={6}
+                  icon={<CalendarIcon className="w-6 h-6 text-slate-400 stroke-[1.8]" />}
+                  title={isFiltered ? "Tidak Ada Jadwal Libur Yang Cocok" : `Tidak Ada Jadwal Libur di ${currentWorkspaceName}`}
+                  description={
+                    isFiltered
+                      ? selectedDate
+                        ? `Tidak ada jadwal libur toko pada tanggal ${format(selectedDate, "d MMMM yyyy")}. Coba atur ulang tanggal atau filter pencarian.`
+                        : "Coba sesuaikan kata kunci pencarian atau filter status."
+                      : "Belum ada jadwal libur toko yang didaftarkan untuk workspace ini."
+                  }
+                  isFiltered={isFiltered}
+                  onResetFilters={isFiltered ? handleResetFilters : undefined}
+                  onAction={() => {
+                    setSelectedHolidayToEdit(null);
+                    setIsCreatingView(true);
+                  }}
+                  actionLabel="Tambah Libur Toko"
+                />
               ) : (
                 paginatedHolidays.map((row) => {
                   const colors = getStatusColor(row.status);
@@ -553,8 +549,9 @@ export default function LiburTokoPage() {
                   const isGrayedOut = isSoftDeleted || isCompleted;
 
                   return (
-                    <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className={`px-4 py-3.5 ${isGrayedOut ? 'opacity-40 grayscale' : ''}`}>
+                    <tr key={row.id} className="group hover:bg-slate-50/70 transition-colors">
+                      <td className={`relative px-4 py-3.5 ${isGrayedOut ? 'opacity-40 grayscale' : ''}`}>
+                        <div className="absolute left-0 top-1.5 bottom-1.5 w-1 bg-[#193f53] rounded-r opacity-0 group-hover:opacity-100 transition-opacity" />
                         <div className="min-w-0">
                           <p className="text-xs font-bold text-slate-900 leading-tight line-clamp-2 break-words" title={row.storeName}>
                             {row.storeName}
@@ -626,52 +623,16 @@ export default function LiburTokoPage() {
         </div>
 
         {/* Table Footer & Pagination */}
-        <div className="p-3.5 sm:p-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-500">
-          <div>
-            Menampilkan <span className="font-semibold text-slate-700">{startIndex}-{endIndex}</span> dari{" "}
-            <span className="font-semibold text-slate-700">{filteredHolidays.length}</span> jadwal libur
-          </div>
-
-          <div className="flex items-center gap-1.5 self-center sm:self-auto">
-            {/* Previous Button */}
-            <button
-              type="button"
-              onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
-              disabled={currentPage === 1}
-              className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
-              title="Halaman Sebelumnya"
-            >
-              <ChevronLeft className="w-3.5 h-3.5" />
-            </button>
-
-            {/* Number Buttons */}
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
-              <button
-                key={pageNum}
-                type="button"
-                onClick={() => setCurrentPage(pageNum)}
-                className={`w-7 h-7 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  currentPage === pageNum
-                    ? "bg-[#193f53] text-white shadow-2xs"
-                    : "text-slate-600 hover:bg-slate-100 border border-transparent"
-                }`}
-              >
-                {pageNum}
-              </button>
-            ))}
-
-            {/* Next Button */}
-            <button
-              type="button"
-              onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
-              disabled={currentPage === totalPages}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer text-xs font-medium"
-            >
-              <span>Selanjutnya</span>
-              <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
+        <SmartAuditPagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={filteredHolidays.length}
+          itemsPerPage={itemsPerPage}
+          onPageChange={setCurrentPage}
+          onItemsPerPageChange={setItemsPerPage}
+          pageSizeOptions={[7, 14, 21, 35]}
+          itemName="jadwal libur"
+        />
       </div>
         </>
       )}

@@ -12,6 +12,9 @@ import {
 import { AdminUser } from "@/types/admin";
 import { Workspace } from "@/types/workspace";
 import ActionButtons from "@/components/ui/ActionButtons";
+import SmartAuditPagination from "@/components/ui/SmartAuditPagination";
+import TableSkeleton from "@/components/ui/TableSkeleton";
+import EmptyStateTable from "@/components/ui/EmptyStateTable";
 
 interface AdminTableProps {
   admins: AdminUser[];
@@ -38,7 +41,15 @@ export default function AdminTable({
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [isWorkspaceFilterOpen, setIsWorkspaceFilterOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 5;
+  const [itemsPerPage, setItemsPerPage] = useState(7);
+
+  const isFiltered = Boolean(searchQuery.trim() || workspaceFilter !== "Semua" || statusFilter !== "Semua");
+  const handleResetFilters = () => {
+    setSearchQuery("");
+    setWorkspaceFilter("Semua");
+    setStatusFilter("Semua");
+    setCurrentPage(1);
+  };
 
   const workspaceOptions = useMemo(() => {
     const set = new Set<string>();
@@ -76,7 +87,7 @@ export default function AdminTable({
   const paginatedAdmins = useMemo(() => {
     const start = (currentPage - 1) * itemsPerPage;
     return filteredAdmins.slice(start, start + itemsPerPage);
-  }, [filteredAdmins, currentPage]);
+  }, [filteredAdmins, currentPage, itemsPerPage]);
 
   const startIndex = filteredAdmins.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0;
   const endIndex = Math.min(currentPage * itemsPerPage, filteredAdmins.length);
@@ -217,21 +228,21 @@ export default function AdminTable({
           </thead>
           <tbody className="divide-y divide-slate-100 text-xs">
             {isLoading ? (
-              <tr>
-                <td colSpan={6} className="text-center py-16 text-slate-400 text-xs">
-                  <div className="flex flex-col items-center justify-center gap-2">
-                    <Loader2 className="w-5 h-5 text-[#193f53] animate-spin" />
-                    <span className="text-xs font-semibold text-slate-600">Memuat data admin...</span>
-                    <span className="text-[11px] text-slate-400">Menghubungkan ke Database</span>
-                  </div>
-                </td>
-              </tr>
+              <TableSkeleton rows={itemsPerPage} cols={6} hasThumbnail={false} />
             ) : paginatedAdmins.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="text-center py-10 text-slate-400 text-xs">
-                  Tidak ada data admin yang sesuai.
-                </td>
-              </tr>
+              <EmptyStateTable
+                colSpan={6}
+                title={isFiltered ? "Tidak Ada Admin Yang Cocok" : "Belum Ada Admin Terdaftar"}
+                description={
+                  isFiltered
+                    ? "Tidak ada data admin yang sesuai dengan kata kunci atau filter yang dipilih."
+                    : "Belum ada admin yang terdaftar pada sistem. Tambahkan admin baru sekarang."
+                }
+                isFiltered={isFiltered}
+                onResetFilters={isFiltered ? handleResetFilters : undefined}
+                onAction={onAdd}
+                actionLabel="Tambah Admin Baru"
+              />
             ) : (
               paginatedAdmins.map((adm) => {
                 const isSoftDeleted = adm.status === "Nonaktif";
@@ -242,7 +253,8 @@ export default function AdminTable({
                     className="hover:bg-slate-50/60 transition-colors group"
                   >
                     {/* 1. NAMA ADMIN */}
-                    <td className={`px-5 py-3.5 ${isSoftDeleted ? "opacity-40 grayscale" : ""}`}>
+                    <td className={`relative px-5 py-3.5 ${isSoftDeleted ? "opacity-40 grayscale" : ""}`}>
+                      <div className="absolute left-0 top-1.5 bottom-1.5 w-1 bg-[#193f53] rounded-r opacity-0 group-hover:opacity-100 transition-opacity" />
                       <span className="font-bold text-slate-900 text-xs sm:text-[13px]">
                         {adm.fullName}
                       </span>
@@ -312,55 +324,16 @@ export default function AdminTable({
       </div>
 
       {/* Pagination Footer */}
-      <div className="p-3.5 sm:p-4 border-t border-slate-100 flex flex-wrap gap-4 items-center justify-between">
-        <p className="text-[11px] text-slate-500">
-          Menampilkan{" "}
-          <span className="font-bold text-slate-900">
-            {startIndex}-{endIndex}
-          </span>{" "}
-          dari{" "}
-          <span className="font-bold text-slate-900">{filteredAdmins.length}</span>{" "}
-          admin
-        </p>
-
-        <div className="flex gap-1 text-[11px]">
-          {/* Prev Button */}
-          <button
-            type="button"
-            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-            disabled={currentPage === 1}
-            className="w-7 h-7 flex items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
-          >
-            <ChevronLeft className="w-3.5 h-3.5" />
-          </button>
-
-          {/* Page Numbers */}
-          {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
-            <button
-              key={pageNum}
-              type="button"
-              onClick={() => setCurrentPage(pageNum)}
-              className={`w-7 h-7 flex items-center justify-center rounded-md text-xs font-bold transition-colors cursor-pointer ${currentPage === pageNum
-                ? "bg-[#193f53] text-white shadow-2xs"
-                : "border border-slate-200 text-slate-600 hover:bg-slate-50"
-                }`}
-            >
-              {pageNum}
-            </button>
-          ))}
-
-          {/* Next Button */}
-          <button
-            type="button"
-            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-            disabled={currentPage === totalPages}
-            className="px-3 h-7 flex items-center gap-1 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors font-bold ml-1 cursor-pointer"
-          >
-            <span>Selanjutnya</span>
-            <ChevronRight className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
+      <SmartAuditPagination
+        currentPage={currentPage}
+        totalPages={totalPages}
+        totalItems={filteredAdmins.length}
+        itemsPerPage={itemsPerPage}
+        onPageChange={setCurrentPage}
+        onItemsPerPageChange={setItemsPerPage}
+        pageSizeOptions={[7, 14, 21, 35]}
+        itemName="admin"
+      />
     </div>
   );
 }

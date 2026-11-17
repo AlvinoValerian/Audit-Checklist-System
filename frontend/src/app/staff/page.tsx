@@ -27,6 +27,9 @@ import CreateStaffModal from "./components/CreateStaffModal";
 import DetailStaffModal from "./components/DetailStaffModal";
 import SoftDeleteModal from "./components/SoftDeleteModal";
 import RestoreStaffModal from "./components/RestoreStaffModal";
+import SmartAuditPagination from "@/components/ui/SmartAuditPagination";
+import TableSkeleton from "@/components/ui/TableSkeleton";
+import EmptyStateTable from "@/components/ui/EmptyStateTable";
 
 export default function StaffPage() {
   const [staffs, setStaffs] = useState<StaffUser[]>([]);
@@ -59,7 +62,14 @@ export default function StaffPage() {
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 5;
+  const [itemsPerPage, setItemsPerPage] = useState(7);
+
+  const isFiltered = Boolean(searchTerm.trim() || filterStatus !== "Semua");
+  const handleResetFilters = () => {
+    setSearchTerm("");
+    setFilterStatus("Semua");
+    setCurrentPage(1);
+  };
 
   // Workspace Switcher States (Super Admin)
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -225,7 +235,7 @@ export default function StaffPage() {
   const paginatedStaffs = useMemo(() => {
     const start = (currentPage - 1) * itemsPerPage;
     return filteredStaffs.slice(start, start + itemsPerPage);
-  }, [filteredStaffs, currentPage]);
+  }, [filteredStaffs, currentPage, itemsPerPage]);
 
   const startIndex = filteredStaffs.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0;
   const endIndex = Math.min(currentPage * itemsPerPage, filteredStaffs.length);
@@ -432,27 +442,25 @@ export default function StaffPage() {
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
               {isLoading ? (
-                <tr>
-                  <td colSpan={6} className="py-16 text-center text-slate-400">
-                    <div className="flex flex-col items-center justify-center gap-2">
-                      <Loader2 className="w-6 h-6 text-[#193f53] animate-spin" />
-                      <span className="text-xs font-semibold text-slate-700">
-                        Memuat data staff...
-                      </span>
-                      <span className="text-[11px] text-slate-400">
-                        Menghubungkan ke database
-                      </span>
-                    </div>
-                  </td>
-                </tr>
+                <TableSkeleton rows={itemsPerPage} cols={6} hasThumbnail={true} />
               ) : paginatedStaffs.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="text-center py-12 text-slate-400 text-xs">
-                    {searchTerm || filterStatus !== "Semua"
-                      ? "Tidak ada data staff yang sesuai dengan filter pencarian."
-                      : "Belum ada data staff yang terdaftar pada workspace ini."}
-                  </td>
-                </tr>
+                <EmptyStateTable
+                  colSpan={6}
+                  icon={<Users className="w-6 h-6 text-slate-400 stroke-[1.8]" />}
+                  title={isFiltered ? "Tidak Ada Data Staff Ditemukan" : `Tidak Ada Staff di ${currentWorkspaceName}`}
+                  description={
+                    isFiltered
+                      ? "Tidak ada personil staff yang sesuai dengan kata kunci atau filter status yang dipilih."
+                      : "Belum ada personil staff yang terdaftar pada workspace ini. Tambahkan staff baru sekarang."
+                  }
+                  isFiltered={isFiltered}
+                  onResetFilters={isFiltered ? handleResetFilters : undefined}
+                  onAction={() => {
+                    setStaffToEdit(null);
+                    setIsStaffModalOpen(true);
+                  }}
+                  actionLabel="Tambah Staff Baru"
+                />
               ) : (
                 paginatedStaffs.map((staff) => {
                   const isSoftDeleted = staff.status === "Nonaktif";
@@ -462,7 +470,8 @@ export default function StaffPage() {
                       className="hover:bg-slate-50/60 transition-colors group"
                     >
                       {/* 1. NAMA STAFF */}
-                      <td className={`px-5 py-3.5 ${isSoftDeleted ? "opacity-40 grayscale" : ""}`}>
+                      <td className={`relative px-5 py-3.5 ${isSoftDeleted ? "opacity-40 grayscale" : ""}`}>
+                        <div className="absolute left-0 top-1.5 bottom-1.5 w-1 bg-[#193f53] rounded-r opacity-0 group-hover:opacity-100 transition-opacity" />
                         <span className="font-bold text-slate-900 text-xs sm:text-[13px]">
                           {staff.fullName}
                         </span>
@@ -550,57 +559,17 @@ export default function StaffPage() {
           </table>
         </div>
 
-        {/* Pagination Footer - Compact libur-toko style */}
-        <div className="p-3.5 sm:p-4 border-t border-slate-100 flex flex-wrap gap-4 items-center justify-between">
-          <p className="text-[11px] text-slate-500">
-            Menampilkan{" "}
-            <span className="font-bold text-slate-900">
-              {startIndex}-{endIndex}
-            </span>{" "}
-            dari{" "}
-            <span className="font-bold text-slate-900">{filteredStaffs.length}</span>{" "}
-            staff
-          </p>
-
-          <div className="flex gap-1 text-[11px]">
-            {/* Prev Button */}
-            <button
-              type="button"
-              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-              disabled={currentPage === 1}
-              className="w-7 h-7 flex items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
-            >
-              <ChevronLeft className="w-3.5 h-3.5" />
-            </button>
-
-            {/* Page Numbers */}
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
-              <button
-                key={pageNum}
-                type="button"
-                onClick={() => setCurrentPage(pageNum)}
-                className={`w-7 h-7 flex items-center justify-center rounded-md text-xs font-bold transition-colors cursor-pointer ${
-                  currentPage === pageNum
-                    ? "bg-[#193f53] text-white shadow-2xs"
-                    : "border border-slate-200 text-slate-600 hover:bg-slate-50"
-                }`}
-              >
-                {pageNum}
-              </button>
-            ))}
-
-            {/* Next Button */}
-            <button
-              type="button"
-              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-              disabled={currentPage === totalPages}
-              className="px-3 h-7 flex items-center gap-1 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors font-bold ml-1 cursor-pointer"
-            >
-              <span>Selanjutnya</span>
-              <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
+        {/* Pagination Footer */}
+        <SmartAuditPagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={filteredStaffs.length}
+          itemsPerPage={itemsPerPage}
+          onPageChange={setCurrentPage}
+          onItemsPerPageChange={setItemsPerPage}
+          pageSizeOptions={[7, 14, 21, 35]}
+          itemName="staff"
+        />
       </div>
 
       {/* Modals */}
