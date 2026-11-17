@@ -33,6 +33,8 @@ import ChecklistRequiredModal from "./components/ChecklistRequiredModal";
 import RestoreScheduleModal from "./components/RestoreScheduleModal";
 import { format, isSameDay } from "date-fns";
 import { AuthService } from "@/lib/auth";
+import SmartAuditPagination from "@/components/ui/SmartAuditPagination";
+import TableSkeleton from "@/components/ui/TableSkeleton";
 import { WorkspaceService } from "@/services/workspace.service";
 import { Workspace } from "@/types/workspace";
 import { useRealtimeEvents } from "@/hooks/useRealtime";
@@ -81,7 +83,7 @@ export default function JadwalAuditPage() {
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 5;
+  const [itemsPerPage, setItemsPerPage] = useState(7);
 
   const refreshData = useCallback(async (showLoading = false, customWsId?: string) => {
     if (showLoading) setIsLoading(true);
@@ -414,7 +416,7 @@ export default function JadwalAuditPage() {
   const paginatedSchedules = useMemo(() => {
     const start = (currentPage - 1) * itemsPerPage;
     return filteredSchedules.slice(start, start + itemsPerPage);
-  }, [filteredSchedules, currentPage]);
+  }, [filteredSchedules, currentPage, itemsPerPage]);
 
   const startIndex = filteredSchedules.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0;
   const endIndex = Math.min(currentPage * itemsPerPage, filteredSchedules.length);
@@ -708,19 +710,7 @@ export default function JadwalAuditPage() {
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
               {isLoading ? (
-                <tr>
-                  <td colSpan={6} className="py-16 text-center text-slate-400">
-                    <div className="flex flex-col items-center justify-center gap-2">
-                      <Loader2 className="w-6 h-6 text-[#193f53] animate-spin" />
-                      <span className="text-xs font-semibold text-slate-700">
-                        Memuat data jadwal audit...
-                      </span>
-                      <span className="text-[11px] text-slate-400">
-                        Menghubungkan ke database
-                      </span>
-                    </div>
-                  </td>
-                </tr>
+                <TableSkeleton rows={itemsPerPage} cols={6} hasThumbnail={false} />
               ) : paginatedSchedules.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-12 text-center text-slate-400">
@@ -904,49 +894,16 @@ export default function JadwalAuditPage() {
         </div>
 
         {/* Table Footer & Pagination */}
-        <div className="p-3.5 sm:p-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-500">
-          <div>
-            Menampilkan <span className="font-semibold text-slate-700">{startIndex}-{endIndex}</span> dari{" "}
-            <span className="font-semibold text-slate-700">{filteredSchedules.length}</span> jadwal
-          </div>
-
-          <div className="flex items-center gap-1.5 self-center sm:self-auto">
-            <button
-              type="button"
-              onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
-              disabled={currentPage === 1}
-              className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
-              title="Halaman Sebelumnya"
-            >
-              <ChevronLeft className="w-3.5 h-3.5" />
-            </button>
-
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
-              <button
-                key={pageNum}
-                type="button"
-                onClick={() => setCurrentPage(pageNum)}
-                className={`w-7 h-7 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  currentPage === pageNum
-                    ? "bg-[#193f53] text-white shadow-2xs"
-                    : "text-slate-600 hover:bg-slate-100 border border-transparent"
-                }`}
-              >
-                {pageNum}
-              </button>
-            ))}
-
-            <button
-              type="button"
-              onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
-              disabled={currentPage === totalPages}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer text-xs font-medium"
-            >
-              <span>Selanjutnya</span>
-              <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
+        <SmartAuditPagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={filteredSchedules.length}
+          itemsPerPage={itemsPerPage}
+          onPageChange={setCurrentPage}
+          onItemsPerPageChange={setItemsPerPage}
+          pageSizeOptions={[7, 14, 21, 35]}
+          itemName="jadwal"
+        />
       </div>
 
       {/* Side Panels & Modals */}

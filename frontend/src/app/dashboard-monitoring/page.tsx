@@ -22,6 +22,7 @@ import {
   FindingsAnalysisData,
 } from "@/services/dashboard.service";
 import { AlertTriangle, Loader2 } from "lucide-react";
+import DashboardSkeleton from "@/components/ui/DashboardSkeleton";
 
 export default function DashboardMonitoringPage() {
   const dynamicMonthOptions = getDynamicMonthOptions();
@@ -232,17 +233,9 @@ export default function DashboardMonitoringPage() {
         </div>
       )}
 
-      {/* Efek Loading Bersih seperti Log Jadwal (Tanpa spinner di tiap card) */}
+      {/* Efek Loading Bersih Shimmer Skeleton */}
       {isLoading ? (
-        <div className="bg-white rounded-xl border border-slate-200 p-12 shadow-2xs flex flex-col items-center justify-center gap-2 my-4">
-          <Loader2 className="w-7 h-7 text-[#193f53] animate-spin" />
-          <span className="text-xs font-bold text-slate-800">
-            Memuat data dashboard monitoring...
-          </span>
-          <span className="text-[11px] text-slate-400">
-            Menghubungkan ke database & memuat performa gerai {activeWorkspaceName || "Workspace"}
-          </span>
-        </div>
+        <DashboardSkeleton />
       ) : (
         <>
           {/* 2. Top Summary Metric Cards Row (4 Cards) */}

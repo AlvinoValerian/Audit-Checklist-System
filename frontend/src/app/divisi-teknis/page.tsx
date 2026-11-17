@@ -28,6 +28,8 @@ import { TeknisService } from "@/services/teknis.service";
 import { WorkspaceService } from "@/services/workspace.service";
 import { AuthService } from "@/lib/auth";
 import ActionButtons from "@/components/ui/ActionButtons";
+import SmartAuditPagination from "@/components/ui/SmartAuditPagination";
+import TableSkeleton from "@/components/ui/TableSkeleton";
 import TeknisStats from "./components/TeknisStats";
 import CreateTeknisModal from "./components/CreateTeknisModal";
 import EditTeknisModal from "./components/EditTeknisModal";
@@ -53,7 +55,7 @@ export default function DivisiTeknisPage() {
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 8;
+  const [itemsPerPage, setItemsPerPage] = useState(8);
 
   // Modals State
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -365,14 +367,7 @@ export default function DivisiTeknisPage() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {isLoading ? (
-                  <tr>
-                    <td colSpan={7} className="py-12 text-center text-slate-400">
-                      <div className="flex flex-col items-center justify-center gap-2">
-                        <Loader2 className="w-6 h-6 animate-spin text-sky-600" />
-                        <span>Memuat data personil divisi teknis...</span>
-                      </div>
-                    </td>
-                  </tr>
+                  <TableSkeleton rows={itemsPerPage} cols={7} hasThumbnail={true} />
                 ) : paginatedUsers.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="py-12 text-center text-slate-400">
@@ -507,54 +502,16 @@ export default function DivisiTeknisPage() {
           </div>
 
           {/* Table Footer / Pagination */}
-          <div className="p-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-500">
-            <div>
-              Menampilkan{" "}
-              <strong className="text-slate-800">
-                {paginatedUsers.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0}
-              </strong>{" "}
-              sampai{" "}
-              <strong className="text-slate-800">
-                {Math.min(currentPage * itemsPerPage, filteredUsers.length)}
-              </strong>{" "}
-              dari <strong className="text-slate-800">{filteredUsers.length}</strong> user teknis
-            </div>
-
-            <div className="flex items-center gap-1 self-end sm:self-auto">
-              <button
-                type="button"
-                onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
-                disabled={currentPage === 1}
-                className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => setCurrentPage(p)}
-                  className={`w-7 h-7 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    currentPage === p
-                      ? "bg-[#193f53] text-white shadow-2xs"
-                      : "text-slate-600 hover:bg-slate-100"
-                  }`}
-                >
-                  {p}
-                </button>
-              ))}
-
-              <button
-                type="button"
-                onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
-                disabled={currentPage === totalPages}
-                className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
+          <SmartAuditPagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={filteredUsers.length}
+            itemsPerPage={itemsPerPage}
+            onPageChange={setCurrentPage}
+            onItemsPerPageChange={setItemsPerPage}
+            pageSizeOptions={[8, 16, 24, 48]}
+            itemName="user teknis"
+          />
         </div>
       </div>
 
