@@ -491,63 +491,93 @@ export default function JadwalAuditPage() {
       {/* Stats and Calendar Section */}
       <div className="flex flex-col lg:flex-row gap-5 mb-8 items-start">
         {/* 3 Metric Cards Container */}
-        <div className="flex-1 w-full grid grid-cols-1 sm:grid-cols-3 gap-5 transition-all duration-500 ease-in-out">
+        <div className="flex-1 w-full grid grid-cols-1 sm:grid-cols-3 gap-3.5 sm:gap-4 transition-all duration-500 ease-in-out">
           {/* Card 1: TOTAL JADWAL */}
-          <div className="bg-[#fefdfa] rounded-xl border border-slate-200 p-5 shadow-xs flex flex-col">
-            <div className="flex justify-between items-start">
-              <h3 className="text-[11px] font-bold text-slate-500 tracking-wider uppercase">
+          <div className="relative overflow-hidden bg-white rounded-xl border border-slate-200/90 p-3.5 sm:p-4 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all flex flex-col justify-between group min-h-[118px]">
+            <div className="absolute -top-10 -right-10 w-28 h-28 rounded-full bg-gradient-to-br from-sky-400/12 via-sky-300/5 to-transparent blur-xl pointer-events-none group-hover:scale-125 transition-transform duration-500" />
+            
+            {/* Header: Judul & Ikon (Satu baris, tidak akan bertabrakan) */}
+            <div className="flex items-center justify-between relative z-10 gap-2">
+              <span className="text-[10px] sm:text-[11px] font-bold text-slate-500 tracking-wider uppercase truncate">
                 TOTAL JADWAL
-              </h3>
-              <div className="w-8 h-8 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center shrink-0">
-                <CalendarIcon className="w-4 h-4" />
+              </span>
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                <CalendarIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               </div>
             </div>
-            <div className="mt-4">
-              <div className="text-2xl font-extrabold text-slate-900 tracking-tight">
-                {stats.total}
+
+            {/* Body: Angka Besar + Pill Badge Bersebelahan */}
+            <div className="mt-2.5 relative z-10">
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight leading-none">
+                  {stats.total}
+                </span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-50 text-sky-700 border border-sky-100 shadow-2xs whitespace-nowrap">
+                  Bulan Ini
+                </span>
               </div>
-              <p className="text-xs text-slate-400 mt-1">
+              <p className="text-[11px] text-slate-400 mt-1 truncate" title="Semua jadwal bulan ini">
                 Semua jadwal bulan ini
               </p>
             </div>
           </div>
 
           {/* Card 2: JADWAL AKTIF */}
-          <div className="bg-[#fefdfa] rounded-xl border border-slate-200 p-5 shadow-xs flex flex-col">
-            <div className="flex justify-between items-start">
-              <h3 className="text-[11px] font-bold text-slate-500 tracking-wider uppercase">
+          <div className="relative overflow-hidden bg-white rounded-xl border border-slate-200/90 p-3.5 sm:p-4 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all flex flex-col justify-between group min-h-[118px]">
+            <div className="absolute -top-10 -right-10 w-28 h-28 rounded-full bg-gradient-to-br from-emerald-400/15 via-emerald-300/5 to-transparent blur-xl pointer-events-none group-hover:scale-125 transition-transform duration-500" />
+            
+            {/* Header: Judul & Ikon */}
+            <div className="flex items-center justify-between relative z-10 gap-2">
+              <span className="text-[10px] sm:text-[11px] font-bold text-slate-500 tracking-wider uppercase truncate">
                 JADWAL AKTIF
-              </h3>
-              <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
-                <Check className="w-4 h-4 stroke-[2.5]" />
+              </span>
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                <Check className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.5]" />
               </div>
             </div>
-            <div className="mt-4">
-              <div className="text-2xl font-extrabold text-slate-900 tracking-tight">
-                {stats.active}
+
+            {/* Body: Angka Besar + Pill Badge Bersebelahan */}
+            <div className="mt-2.5 relative z-10">
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight leading-none">
+                  {stats.active}
+                </span>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/70 shadow-2xs whitespace-nowrap">
+                  <TrendingUp className="w-2.5 h-2.5 stroke-[2.5] shrink-0" />
+                  <span>{stats.activePercentage}% aktif</span>
+                </span>
               </div>
-              <div className="flex items-center gap-1 mt-1 text-emerald-600 text-xs font-medium">
-                <TrendingUp className="w-3 h-3" />
-                <span>{stats.activePercentage}% dari total</span>
-              </div>
+              <p className="text-[11px] text-emerald-600 font-medium mt-1 truncate" title={`${stats.active} dari ${stats.total} jadwal berjalan aktif`}>
+                {stats.active} dari {stats.total} aktif
+              </p>
             </div>
           </div>
 
           {/* Card 3: JADWAL NONAKTIF */}
-          <div className="bg-[#fefdfa] rounded-xl border border-slate-200 p-5 shadow-xs flex flex-col">
-            <div className="flex justify-between items-start">
-              <h3 className="text-[11px] font-bold text-slate-500 tracking-wider uppercase">
+          <div className="relative overflow-hidden bg-white rounded-xl border border-slate-200/90 p-3.5 sm:p-4 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all flex flex-col justify-between group min-h-[118px]">
+            <div className="absolute -top-10 -right-10 w-28 h-28 rounded-full bg-gradient-to-br from-rose-400/12 via-rose-300/5 to-transparent blur-xl pointer-events-none group-hover:scale-125 transition-transform duration-500" />
+            
+            {/* Header: Judul & Ikon */}
+            <div className="flex items-center justify-between relative z-10 gap-2">
+              <span className="text-[10px] sm:text-[11px] font-bold text-slate-500 tracking-wider uppercase truncate">
                 JADWAL NONAKTIF
-              </h3>
-              <div className="w-8 h-8 rounded-lg bg-red-50 text-red-500 flex items-center justify-center shrink-0">
-                <Ban className="w-4 h-4" />
+              </span>
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-rose-50 text-rose-500 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                <Ban className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               </div>
             </div>
-            <div className="mt-4">
-              <div className="text-2xl font-extrabold text-slate-900 tracking-tight">
-                {stats.inactive}
+
+            {/* Body: Angka Besar + Pill Badge Bersebelahan */}
+            <div className="mt-2.5 relative z-10">
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight leading-none">
+                  {stats.inactive}
+                </span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200/70 shadow-2xs whitespace-nowrap">
+                  {stats.total > 0 ? 100 - stats.activePercentage : 0}% nonaktif
+                </span>
               </div>
-              <p className="text-xs text-slate-400 mt-1">
+              <p className="text-[11px] text-slate-400 mt-1 truncate" title="Dibatalkan / Ditunda">
                 Dibatalkan / Ditunda
               </p>
             </div>

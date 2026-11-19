@@ -323,48 +323,94 @@ export default function LiburTokoPage() {
       {/* Stats and Calendar Section */}
       <div className="flex flex-col lg:flex-row gap-5 mb-8 items-start">
         {/* Metric Cards (Left Side) */}
-        <div className="flex-1 w-full grid grid-cols-1 sm:grid-cols-3 gap-5 transition-all duration-500 ease-in-out">
-          {/* Card 1 */}
-          <div className="bg-[#fefdfa] rounded-xl border border-slate-200 p-5 shadow-xs flex flex-col">
-            <div className="flex justify-between items-start">
-              <h3 className="text-[11px] font-bold text-slate-500 tracking-wider uppercase">TOTAL LIBUR</h3>
-              <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
-                <CalendarIcon className="w-4 h-4" />
+        <div className="flex-1 w-full grid grid-cols-1 sm:grid-cols-3 gap-3.5 sm:gap-4 transition-all duration-500 ease-in-out">
+          {/* Card 1: TOTAL LIBUR */}
+          <div className="relative overflow-hidden bg-white rounded-xl border border-slate-200/90 p-3.5 sm:p-4 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all flex flex-col justify-between group min-h-[118px]">
+            <div className="absolute -top-10 -right-10 w-28 h-28 rounded-full bg-gradient-to-br from-emerald-400/12 via-emerald-300/5 to-transparent blur-xl pointer-events-none group-hover:scale-125 transition-transform duration-500" />
+            
+            {/* Header: Judul & Ikon (Satu baris, aman dari bentrok) */}
+            <div className="flex items-center justify-between relative z-10 gap-2">
+              <span className="text-[10px] sm:text-[11px] font-bold text-slate-500 tracking-wider uppercase truncate">
+                TOTAL LIBUR
+              </span>
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                <CalendarIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               </div>
             </div>
-            <div className="mt-4">
-              <div className="text-2xl font-extrabold text-slate-900">{stats.total}</div>
-              <p className="text-xs text-emerald-500 mt-1">Semua libur tercatat</p>
+
+            {/* Body: Angka Besar + Pill Badge Bersebelahan */}
+            <div className="mt-2.5 relative z-10">
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight leading-none">
+                  {stats.total}
+                </span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-100 shadow-2xs whitespace-nowrap">
+                  Agenda Libur
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1 truncate" title="Semua libur cabang tercatat">
+                Semua libur cabang tercatat
+              </p>
             </div>
           </div>
 
-          {/* Card 2 */}
-          <div className="bg-[#fefdfa] rounded-xl border border-slate-200 p-5 shadow-xs flex flex-col">
-            <div className="flex justify-between items-start">
-              <h3 className="text-[11px] font-bold text-slate-500 tracking-wider uppercase">LIBUR AKTIF</h3>
-              <div className="w-8 h-8 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center">
-                <CheckCircle2 className="w-4 h-4" />
+          {/* Card 2: LIBUR AKTIF */}
+          <div className="relative overflow-hidden bg-white rounded-xl border border-slate-200/90 p-3.5 sm:p-4 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all flex flex-col justify-between group min-h-[118px]">
+            <div className="absolute -top-10 -right-10 w-28 h-28 rounded-full bg-gradient-to-br from-purple-400/15 via-purple-300/5 to-transparent blur-xl pointer-events-none group-hover:scale-125 transition-transform duration-500" />
+            
+            {/* Header: Judul & Ikon */}
+            <div className="flex items-center justify-between relative z-10 gap-2">
+              <span className="text-[10px] sm:text-[11px] font-bold text-slate-500 tracking-wider uppercase truncate">
+                LIBUR AKTIF
+              </span>
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               </div>
             </div>
-            <div className="mt-4">
-              <div className="text-2xl font-extrabold text-slate-900">{stats.active}</div>
-              <div className="flex items-center gap-1 mt-1 text-purple-600 text-xs font-medium">
-                {stats.total > 0 ? `${Math.round((stats.active / stats.total) * 100)}% dari total` : "0% dari total"}
+
+            {/* Body: Angka Besar + Pill Badge Bersebelahan */}
+            <div className="mt-2.5 relative z-10">
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight leading-none">
+                  {stats.active}
+                </span>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200/70 shadow-2xs whitespace-nowrap">
+                  {stats.total > 0 ? `${Math.round((stats.active / stats.total) * 100)}% aktif` : "0% aktif"}
+                </span>
               </div>
+              <p className="text-[11px] text-purple-600 font-medium mt-1 truncate" title={`${stats.active} hari libur berlaku aktif`}>
+                {stats.active} hari libur aktif
+              </p>
             </div>
           </div>
 
-          {/* Card 3 */}
-          <div className="bg-[#fefdfa] rounded-xl border border-slate-200 p-5 shadow-xs flex flex-col">
-            <div className="flex justify-between items-start">
-              <h3 className="text-[11px] font-bold text-slate-500 tracking-wider uppercase">DIBATALKAN</h3>
-              <div className="w-8 h-8 rounded-lg bg-red-50 text-red-600 flex items-center justify-center">
-                <XCircle className="w-4 h-4" />
+          {/* Card 3: DIBATALKAN */}
+          <div className="relative overflow-hidden bg-white rounded-xl border border-slate-200/90 p-3.5 sm:p-4 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all flex flex-col justify-between group min-h-[118px]">
+            <div className="absolute -top-10 -right-10 w-28 h-28 rounded-full bg-gradient-to-br from-rose-400/12 via-rose-300/5 to-transparent blur-xl pointer-events-none group-hover:scale-125 transition-transform duration-500" />
+            
+            {/* Header: Judul & Ikon */}
+            <div className="flex items-center justify-between relative z-10 gap-2">
+              <span className="text-[10px] sm:text-[11px] font-bold text-slate-500 tracking-wider uppercase truncate">
+                DIBATALKAN
+              </span>
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-rose-50 text-rose-500 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                <XCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               </div>
             </div>
-            <div className="mt-4">
-              <div className="text-2xl font-extrabold text-slate-900">{stats.cancelled}</div>
-              <p className="text-xs text-red-500 mt-1">Dibatalkan tercatat</p>
+
+            {/* Body: Angka Besar + Pill Badge Bersebelahan */}
+            <div className="mt-2.5 relative z-10">
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight leading-none">
+                  {stats.cancelled}
+                </span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200/70 shadow-2xs whitespace-nowrap">
+                  {stats.total > 0 ? `${Math.round((stats.cancelled / stats.total) * 100)}% batal` : "0%"}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1 truncate" title="Jadwal libur yang dibatalkan">
+                Jadwal libur dibatalkan
+              </p>
             </div>
           </div>
         </div>

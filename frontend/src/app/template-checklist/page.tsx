@@ -92,26 +92,50 @@ export default function TemplateChecklistPage() {
     setCurrentPage(1);
   };
 
+  const normalizeWsId = (raw?: string | null) =>
+    String(raw || "").trim().replace(/^ws-/, "");
+
   const refreshData = useCallback(async (targetWs?: string, showLoading = false) => {
     if (showLoading) setIsLoading(true);
+    const user = AuthService.getCurrentUser();
+    const roleLower = (user?.role || "").toLowerCase();
+    const isMultiWs =
+      roleLower === "super admin" ||
+      roleLower === "divisi teknis" ||
+      roleLower === "teknis";
     const activeWs = AuthService.getActiveWorkspace();
-    const wsId = targetWs || selectedWorkspaceId || activeWs?.id;
+
+    const wsId = !isMultiWs
+      ? normalizeWsId(user?.workspaceId)
+      : normalizeWsId(targetWs || selectedWorkspaceId || activeWs?.id);
+
+    if (!wsId) {
+      setTemplates([]);
+      setStats({ total: 0, active: 0, inactive: 0, activePercentage: 0 });
+      setIsLoading(false);
+      return;
+    }
+
     try {
       const liveList = await TemplateService.fetchAll(wsId);
       if (Array.isArray(liveList)) {
-        setTemplates(liveList);
-        setStats(TemplateService.getStats(liveList));
+        const strictlyScoped = liveList.filter((t) => {
+          const itemWs = normalizeWsId(t.workspaceId);
+          return !itemWs || itemWs === wsId;
+        });
+        setTemplates(strictlyScoped);
+        setStats(TemplateService.getStats(strictlyScoped));
         return;
       }
+      setTemplates([]);
+      setStats({ total: 0, active: 0, inactive: 0, activePercentage: 0 });
     } catch (err) {
-      console.warn("Gagal memuat template dari backend, menggunakan cache:", err);
+      console.warn("Gagal memuat template dari backend:", err);
+      setTemplates([]);
+      setStats({ total: 0, active: 0, inactive: 0, activePercentage: 0 });
     } finally {
       setIsLoading(false);
     }
-    const list = TemplateService.getAll(wsId);
-    setTemplates(list);
-    setStats(TemplateService.getStats(list));
-    setIsLoading(false);
   }, [selectedWorkspaceId]);
 
   useEffect(() => {
@@ -119,34 +143,63 @@ export default function TemplateChecklistPage() {
       setIsLoading(true);
       const user = AuthService.getCurrentUser();
       const activeWs = AuthService.getActiveWorkspace();
-      const isSA = user?.role === "Super Admin";
-      setIsSuperAdmin(isSA);
+      const roleLower = (user?.role || "").toLowerCase();
+      const isMultiWs =
+        roleLower === "super admin" ||
+        roleLower === "divisi teknis" ||
+        roleLower === "teknis";
+      setIsSuperAdmin(isMultiWs);
 
-      let targetWsId = activeWs?.id || user?.workspaceId || "";
+      if (!isMultiWs) {
+        // Admin / Staff: kunci ketat hanya ke workspace milik akun yang sedang login
+        const ownWsId = normalizeWsId(user?.workspaceId);
+        const ownWsName = user?.workspaceName || activeWs?.name || "Workspace";
+
+        if (ownWsId && normalizeWsId(activeWs?.id) !== ownWsId) {
+          AuthService.setActiveWorkspace({
+            id: ownWsId,
+            name: ownWsName,
+          });
+        }
+
+        setSelectedWorkspaceId(ownWsId);
+        setCurrentWorkspaceName(ownWsName);
+        await refreshData(ownWsId, true);
+        return;
+      }
+
+      let targetWsId = normalizeWsId(activeWs?.id || user?.workspaceId);
       let targetWsName = activeWs?.name || user?.workspaceName || "Workspace";
 
-      if (isSA) {
-        try {
-          const wsList = await WorkspaceService.fetchAll();
-          setWorkspaces(wsList);
-          if (wsList.length > 0) {
-            const matched = wsList.find((w) => w.id === targetWsId && w.status !== "Nonaktif");
-            if (matched) {
-              targetWsId = matched.id;
-              targetWsName = matched.companyName || matched.name;
-            } else {
-              const firstActive = wsList.find((w) => w.status !== "Nonaktif") || wsList[0];
-              targetWsId = firstActive.id;
-              targetWsName = firstActive.companyName || firstActive.name;
-              AuthService.setActiveWorkspace({
-                id: firstActive.id,
-                name: targetWsName,
-              });
-            }
-          }
-        } catch (err) {
-          console.warn("Gagal memuat daftar workspace:", err);
+      try {
+        const wsList = await WorkspaceService.fetchAll(true);
+        setWorkspaces(wsList);
+        if (wsList.length === 0) {
+          setSelectedWorkspaceId("");
+          setCurrentWorkspaceName("Belum Ada Workspace");
+          setTemplates([]);
+          setStats({ total: 0, active: 0, inactive: 0, activePercentage: 0 });
+          setIsLoading(false);
+          return;
         }
+
+        const matched = wsList.find(
+          (w) => normalizeWsId(w.id) === targetWsId && w.status !== "Nonaktif"
+        );
+        if (matched) {
+          targetWsId = normalizeWsId(matched.id);
+          targetWsName = matched.companyName || matched.name;
+        } else {
+          const firstActive = wsList.find((w) => w.status !== "Nonaktif") || wsList[0];
+          targetWsId = normalizeWsId(firstActive.id);
+          targetWsName = firstActive.companyName || firstActive.name;
+          AuthService.setActiveWorkspace({
+            id: targetWsId,
+            name: targetWsName,
+          });
+        }
+      } catch (err) {
+        console.warn("Gagal memuat daftar workspace:", err);
       }
 
       setSelectedWorkspaceId(targetWsId);
@@ -158,20 +211,25 @@ export default function TemplateChecklistPage() {
   }, []);
 
   const handleWorkspaceChange = async (newWsId: string) => {
-    const chosen = workspaces.find((w) => w.id === newWsId);
+    const cleanNewWsId = normalizeWsId(newWsId);
+    const chosen = workspaces.find((w) => normalizeWsId(w.id) === cleanNewWsId);
     if (chosen?.status === "Nonaktif") {
       toast.error(`Workspace "${chosen.companyName || chosen.name}" sedang nonaktif dan tidak dapat dipilih.`);
       return;
     }
 
-    setSelectedWorkspaceId(newWsId);
+    setSelectedWorkspaceId(cleanNewWsId);
+    setTemplates([]);
+    setStats({ total: 0, active: 0, inactive: 0, activePercentage: 0 });
+    setCurrentPage(1);
+
     if (chosen) {
       const name = chosen.companyName || chosen.name;
       setCurrentWorkspaceName(name);
-      AuthService.setActiveWorkspace({ id: chosen.id, name });
+      AuthService.setActiveWorkspace({ id: cleanNewWsId, name });
       toast.info(`Menampilkan template checklist untuk workspace "${name}"`);
     }
-    await refreshData(newWsId, true);
+    await refreshData(cleanNewWsId, true);
   };
 
   const loadConnectedSchedulesForTemplate = async (template: TemplateItem) => {
@@ -291,7 +349,7 @@ export default function TemplateChecklistPage() {
         toast.success(`Template "${templateToDeactivate.title}" berhasil dinonaktifkan.`);
         setIsDeactivateModalOpen(false);
         setTemplateToDeactivate(null);
-        refreshData();
+        refreshData(selectedWorkspaceId);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Gagal menonaktifkan template";
         toast.error(msg);
@@ -312,7 +370,7 @@ export default function TemplateChecklistPage() {
         toast.success(`Template "${templateToRestore.title}" berhasil diaktifkan kembali.`);
         setIsRestoreModalOpen(false);
         setTemplateToRestore(null);
-        refreshData();
+        refreshData(selectedWorkspaceId);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Gagal mengaktifkan template";
         toast.error(msg);
@@ -434,62 +492,80 @@ export default function TemplateChecklistPage() {
       {/* 3 Metric Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 sm:gap-4 mb-5 sm:mb-6">
         {/* Card 1: TOTAL TEMPLATE */}
-        <div className="bg-[#fefdfa] rounded-xl border border-slate-200 p-4 sm:p-5 shadow-2xs flex flex-col justify-between">
-          <div className="flex justify-between items-start">
+        <div className="relative overflow-hidden bg-white rounded-xl border border-slate-200/90 p-4 sm:p-5 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all flex flex-col justify-between group">
+          <div className="absolute -top-10 -right-10 w-28 h-28 rounded-full bg-gradient-to-br from-sky-400/12 via-sky-300/5 to-transparent blur-xl pointer-events-none group-hover:scale-125 transition-transform duration-500" />
+          <div className="flex justify-between items-start relative z-10">
             <h3 className="text-[11px] font-bold text-slate-500 tracking-wider uppercase">
               TOTAL TEMPLATE
             </h3>
-            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center shrink-0">
-              <SlidersHorizontal className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-50 text-sky-700 border border-sky-100 shadow-2xs">
+                SOP Terdaftar
+              </span>
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                <SlidersHorizontal className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              </div>
             </div>
           </div>
-          <div className="mt-3 sm:mt-4">
+          <div className="mt-3 sm:mt-4 relative z-10">
             <div className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
               {stats.total}
             </div>
             <p className="text-[11px] text-slate-400 mt-0.5">
-              Semua template terdaftar
+              Semua template checklist SOP
             </p>
           </div>
         </div>
 
         {/* Card 2: TEMPLATE AKTIF */}
-        <div className="bg-[#fefdfa] rounded-xl border border-slate-200 p-4 sm:p-5 shadow-2xs flex flex-col justify-between">
-          <div className="flex justify-between items-start">
+        <div className="relative overflow-hidden bg-white rounded-xl border border-slate-200/90 p-4 sm:p-5 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all flex flex-col justify-between group">
+          <div className="absolute -top-10 -right-10 w-28 h-28 rounded-full bg-gradient-to-br from-emerald-400/15 via-emerald-300/5 to-transparent blur-xl pointer-events-none group-hover:scale-125 transition-transform duration-500" />
+          <div className="flex justify-between items-start relative z-10">
             <h3 className="text-[11px] font-bold text-slate-500 tracking-wider uppercase">
               TEMPLATE AKTIF
             </h3>
-            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
-              <Check className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.5]" />
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/70 shadow-2xs">
+                <TrendingUp className="w-2.5 h-2.5 stroke-[2.5]" />
+                <span>{stats.activePercentage}% aktif</span>
+              </span>
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                <Check className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.5]" />
+              </div>
             </div>
           </div>
-          <div className="mt-3 sm:mt-4">
+          <div className="mt-3 sm:mt-4 relative z-10">
             <div className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
               {stats.active}
             </div>
-            <div className="mt-0.5 inline-flex items-center gap-1 text-emerald-600 text-[11px] font-semibold">
-              <TrendingUp className="w-3 h-3" />
-              <span>{stats.activePercentage}% dari total</span>
-            </div>
+            <p className="text-[11px] text-emerald-600 font-medium mt-0.5">
+              {stats.active} template siap dipakai auditor
+            </p>
           </div>
         </div>
 
         {/* Card 3: TEMPLATE NONAKTIF */}
-        <div className="bg-[#fefdfa] rounded-xl border border-slate-200 p-4 sm:p-5 shadow-2xs flex flex-col justify-between">
-          <div className="flex justify-between items-start">
+        <div className="relative overflow-hidden bg-white rounded-xl border border-slate-200/90 p-4 sm:p-5 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all flex flex-col justify-between group">
+          <div className="absolute -top-10 -right-10 w-28 h-28 rounded-full bg-gradient-to-br from-rose-400/12 via-rose-300/5 to-transparent blur-xl pointer-events-none group-hover:scale-125 transition-transform duration-500" />
+          <div className="flex justify-between items-start relative z-10">
             <h3 className="text-[11px] font-bold text-slate-500 tracking-wider uppercase">
               TEMPLATE NONAKTIF
             </h3>
-            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-red-50 text-red-500 flex items-center justify-center shrink-0">
-              <Ban className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200/70 shadow-2xs">
+                {stats.total > 0 ? 100 - stats.activePercentage : 0}% nonaktif
+              </span>
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-rose-50 text-rose-500 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                <Ban className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              </div>
             </div>
           </div>
-          <div className="mt-3 sm:mt-4">
+          <div className="mt-3 sm:mt-4 relative z-10">
             <div className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
               {stats.inactive}
             </div>
             <p className="text-[11px] text-slate-400 mt-0.5">
-              Diarsipkan / draft
+              Diarsipkan / draf revisi
             </p>
           </div>
         </div>

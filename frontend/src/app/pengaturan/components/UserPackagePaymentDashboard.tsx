@@ -15,6 +15,7 @@ import {
   ChevronRight,
   X,
   ChevronDown,
+  TrendingUp,
 } from "lucide-react";
 import { toast } from "sonner";
 import SparkPayCheckoutModal, { SparkPayCheckoutData } from "./SparkPayCheckoutModal";
@@ -291,16 +292,22 @@ export default function UserPackagePaymentDashboard() {
       {/* ============================================================== */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Card 1: Total Akumulasi Tagihan */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-xs transition-shadow">
-          <div className="flex items-center justify-between">
+        <div className="relative overflow-hidden bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all group flex flex-col justify-between">
+          <div className="absolute -top-10 -right-10 w-28 h-28 rounded-full bg-gradient-to-br from-indigo-400/12 via-indigo-300/5 to-transparent blur-xl pointer-events-none group-hover:scale-125 transition-transform duration-500" />
+          <div className="flex items-center justify-between relative z-10">
             <span className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">
-              Total Tagihan Paket
+              Total Tagihan
             </span>
-            <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
-              <CreditCard className="w-4 h-4" />
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100 shadow-2xs">
+                Sistem SaaS
+              </span>
+              <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                <CreditCard className="w-4 h-4" />
+              </div>
             </div>
           </div>
-          <div className="mt-2">
+          <div className="mt-3 relative z-10">
             <h3 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
               {formatRupiah(summaryStats.totalNominal)}
             </h3>
@@ -311,58 +318,83 @@ export default function UserPackagePaymentDashboard() {
         </div>
 
         {/* Card 2: Tagihan Lunas */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-xs transition-shadow">
-          <div className="flex items-center justify-between">
+        <div className="relative overflow-hidden bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all group flex flex-col justify-between">
+          <div className="absolute -top-10 -right-10 w-28 h-28 rounded-full bg-gradient-to-br from-emerald-400/15 via-emerald-300/5 to-transparent blur-xl pointer-events-none group-hover:scale-125 transition-transform duration-500" />
+          <div className="flex items-center justify-between relative z-10">
             <span className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">
               Tagihan Lunas
             </span>
-            <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
-              <CheckCircle2 className="w-4 h-4" />
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/70 shadow-2xs">
+                <TrendingUp className="w-2.5 h-2.5 stroke-[2.5]" />
+                <span>
+                  {summaryStats.totalCount > 0
+                    ? `${Math.round((summaryStats.lunasCount / summaryStats.totalCount) * 100)}% lunas`
+                    : "0%"}
+                </span>
+              </span>
+              <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                <CheckCircle2 className="w-4 h-4" />
+              </div>
             </div>
           </div>
-          <div className="mt-2">
+          <div className="mt-3 relative z-10">
             <h3 className="text-xl sm:text-2xl font-black text-emerald-950 tracking-tight">
               {summaryStats.lunasCount} Paket
             </h3>
-            <p className="text-[11px] text-slate-400 mt-1">
+            <p className="text-[11px] text-emerald-700 font-medium mt-1">
               {formatRupiah(summaryStats.lunasNominal)} berhasil terbayar
             </p>
           </div>
         </div>
 
         {/* Card 3: Menunggu Pembayaran */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-xs transition-shadow">
-          <div className="flex items-center justify-between">
+        <div className="relative overflow-hidden bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all group flex flex-col justify-between">
+          <div className="absolute -top-10 -right-10 w-28 h-28 rounded-full bg-gradient-to-br from-amber-400/12 via-amber-300/5 to-transparent blur-xl pointer-events-none group-hover:scale-125 transition-transform duration-500" />
+          <div className="flex items-center justify-between relative z-10">
             <span className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">
-              Menunggu Pembayaran
+              Menunggu Bayar
             </span>
-            <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
-              <Clock className="w-4 h-4" />
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200/70 shadow-2xs">
+                {summaryStats.totalCount > 0
+                  ? `${Math.round((summaryStats.pendingCount / summaryStats.totalCount) * 100)}% pending`
+                  : "0%"}
+              </span>
+              <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                <Clock className="w-4 h-4" />
+              </div>
             </div>
           </div>
-          <div className="mt-2">
+          <div className="mt-3 relative z-10">
             <h3 className="text-xl sm:text-2xl font-black text-amber-950 tracking-tight">
               {summaryStats.pendingCount} Paket
             </h3>
-            <p className="text-[11px] text-slate-400 mt-1">
+            <p className="text-[11px] text-amber-700 font-medium mt-1">
               {formatRupiah(summaryStats.pendingNominal)} perlu diselesaikan
             </p>
           </div>
         </div>
 
         {/* Card 4: Penanggung Jawab Pembayar */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-xs transition-shadow">
-          <div className="flex items-center justify-between">
+        <div className="relative overflow-hidden bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all group flex flex-col justify-between">
+          <div className="absolute -top-10 -right-10 w-28 h-28 rounded-full bg-gradient-to-br from-sky-400/12 via-sky-300/5 to-transparent blur-xl pointer-events-none group-hover:scale-125 transition-transform duration-500" />
+          <div className="flex items-center justify-between relative z-10">
             <span className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">
               Total Pembayar
             </span>
-            <div className="w-8 h-8 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center shrink-0">
-              <ShieldCheck className="w-4 h-4" />
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-50 text-sky-700 border border-sky-100 shadow-2xs">
+                Super Admin
+              </span>
+              <div className="w-8 h-8 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                <ShieldCheck className="w-4 h-4" />
+              </div>
             </div>
           </div>
-          <div className="mt-2">
+          <div className="mt-3 relative z-10">
             <h3 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-              {summaryStats.uniquePayers} Super Admin
+              {summaryStats.uniquePayers} Akun
             </h3>
             <p className="text-[11px] text-slate-400 mt-1 truncate">
               {payerInfo.name} & {Math.max(0, summaryStats.uniquePayers - 1)} akun lainnya
