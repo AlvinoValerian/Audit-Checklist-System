@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Monitor,
@@ -13,9 +13,13 @@ import {
   EyeOff,
   Loader2,
   ShieldCheck,
+  FileText,
 } from "lucide-react";
 import { Toaster, toast } from "sonner";
+import { AnimatePresence, motion } from "motion/react";
 import { ApiAuthService } from "@/services/auth.service";
+import { PasswordStrength } from "@/components/ui/password-strength";
+import Modal from "@/components/ui/Modal";
 
 export default function RegisterPage() {
   const [fullName, setFullName] = useState("");
@@ -27,8 +31,53 @@ export default function RegisterPage() {
 
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [isPasswordFocused, setIsPasswordFocused] = useState(false);
   const [agreeTerms, setAgreeTerms] = useState(false);
+
+  const passwordSectionRef = useRef<HTMLDivElement | null>(null);
+  const isPointerDownRef = useRef(false);
+  const pendingCloseRef = useRef(false);
+  const closeTimerRef = useRef<number | null>(null);
+
+  // Tunda penutupan indikator password saat mouse/sentuhan sedang ditekan agar elemen di bawahnya (checkbox, tombol) tidak bergeser sebelum klik selesai
+  useEffect(() => {
+    const handlePointerDown = () => {
+      isPointerDownRef.current = true;
+    };
+
+    const handlePointerRelease = () => {
+      isPointerDownRef.current = false;
+      if (pendingCloseRef.current) {
+        pendingCloseRef.current = false;
+        if (closeTimerRef.current !== null) {
+          window.clearTimeout(closeTimerRef.current);
+        }
+        closeTimerRef.current = window.setTimeout(() => {
+          closeTimerRef.current = null;
+          if (!passwordSectionRef.current?.contains(document.activeElement)) {
+            setIsPasswordFocused(false);
+          }
+        }, 60);
+      }
+    };
+
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("pointerup", handlePointerRelease, true);
+    window.addEventListener("pointercancel", handlePointerRelease, true);
+    window.addEventListener("blur", handlePointerRelease);
+
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("pointerup", handlePointerRelease, true);
+      window.removeEventListener("pointercancel", handlePointerRelease, true);
+      window.removeEventListener("blur", handlePointerRelease);
+      if (closeTimerRef.current !== null) {
+        window.clearTimeout(closeTimerRef.current);
+      }
+    };
+  }, []);
   const [isLoading, setIsLoading] = useState(false);
+  const [legalModal, setLegalModal] = useState<"terms" | "privacy" | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<string>("standard");
   const [isYearlyBilling, setIsYearlyBilling] = useState<boolean>(false);
 
@@ -229,10 +278,10 @@ export default function RegisterPage() {
       {/* =========================================================================
           LEFT SIDE: Presentation & Branding Panel
          ========================================================================= */}
-      <section className="w-full lg:w-1/2 bg-[#193f53] text-white flex flex-col justify-between p-8 sm:p-10 lg:p-12 xl:p-16 h-full relative shrink-0">
+      <section className="w-full lg:w-1/2 bg-[#193f53] text-white flex flex-col justify-between p-6 sm:p-10 lg:p-16 xl:p-20 lg:h-full relative shrink-0">
         {/* Top: Logo & Brand Name */}
         <div className="flex items-center gap-3 z-10">
-          <div className="w-9 h-9 rounded-xl border border-white/20 flex items-center justify-center bg-white/[0.06] shadow-xs">
+          <div className="w-9 h-9 rounded-xl border border-white/20 flex items-center justify-center bg-white/[0.06]">
             <Monitor className="w-4.5 h-4.5 text-white stroke-[2.2]" />
           </div>
           <span className="text-xl font-bold tracking-tight text-white">
@@ -240,33 +289,23 @@ export default function RegisterPage() {
           </span>
         </div>
 
-        {/* Center: Presentation Card */}
-        <div className="my-auto py-8 lg:py-0 z-10 max-w-md w-full">
-          <div className="rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur-xs p-6 sm:p-7 relative overflow-hidden shadow-2xl">
-            {/* Pill Tag */}
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 border border-white/10 text-[11px] font-medium text-white/90 mb-4">
-              <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-              <span>Platform Audit Jaringan Ritel</span>
-            </div>
-
-            {/* Headline */}
-            <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight leading-snug">
-              Sistem Monitoring &amp;
-              <br />
-              Audit Toko Terintegrasi
-            </h1>
-
-            {/* Description */}
-            <p className="mt-3 text-xs sm:text-sm text-slate-300 font-normal leading-relaxed">
-              Tingkatkan efisiensi operasional dan akurasi data audit jaringan toko Anda dalam satu platform terpusat.
-            </p>
-          </div>
+        {/* Center: Main Headline & Description */}
+        <div className="my-auto py-7 sm:py-10 lg:py-0 z-10 max-w-xl">
+          <h1 className="text-2xl sm:text-4xl xl:text-[42px] font-bold text-white tracking-tight leading-[1.2]">
+            Standarisasi Operasional &amp;
+            <br />
+            Audit Checklist
+          </h1>
+          <p className="mt-3 sm:mt-5 text-xs sm:text-base text-slate-300 font-normal leading-relaxed max-w-md">
+            Instrumen pelaksanaan inspeksi berkala, dokumentasi bukti fisik, dan
+            penilaian kepatuhan SOP gerai.
+          </p>
         </div>
 
         {/* Bottom: Copyright Footer */}
-        <div className="z-10 pt-4">
-          <p className="text-xs text-white/40 font-normal tracking-wide">
-            © 2026 Audit Pro Enterprise Monitor. All rights reserved.
+        <div className="z-10 pt-2 lg:pt-6">
+          <p className="text-xs text-white/45 font-normal tracking-wide">
+            © 2026 Audit Pro. All rights reserved.
           </p>
         </div>
       </section>
@@ -274,8 +313,8 @@ export default function RegisterPage() {
       {/* =========================================================================
           RIGHT SIDE: Clean, Normal-Sized Form (Comfortable & Validated)
          ========================================================================= */}
-      <main className="w-full lg:w-1/2 flex-1 bg-white flex items-center justify-center p-6 sm:p-8 lg:p-10 xl:p-12 h-full overflow-y-auto lg:overflow-hidden">
-        <div className="w-full max-w-[460px] mx-auto">
+      <main className="w-full lg:w-1/2 flex-1 bg-white flex flex-col p-6 sm:p-8 lg:p-10 xl:p-12 lg:h-full overflow-y-auto">
+        <div className="w-full max-w-[460px] mx-auto my-auto py-2">
           {/* Header */}
           <div className="mb-4 sm:mb-5">
             <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-sky-50 text-sky-700 text-xs font-semibold border border-sky-100 mb-2">
@@ -289,40 +328,6 @@ export default function RegisterPage() {
               Lengkapi formulir untuk membuat akun Super Admin dan workspace perusahaan Anda.
             </p>
           </div>
-
-          {/* Badge Paket yang Dipilih dari Landing Page */}
-          {selectedPlan && (
-            <div className="mb-4 p-3 rounded-xl bg-gradient-to-r from-sky-50 via-blue-50 to-indigo-50 border border-sky-200/80 flex items-center justify-between text-xs animate-in fade-in">
-              <div className="flex items-center gap-2.5">
-                <div className="w-7 h-7 rounded-lg bg-sky-600 text-white flex items-center justify-center font-black text-xs shadow-xs">
-                  ⚡
-                </div>
-                <div>
-                  <span className="text-[10px] uppercase font-bold text-slate-500 block">
-                    Paket Langganan Dipilih ({isYearlyBilling ? "Tahunan — Hemat 20%" : "Bulanan"})
-                  </span>
-                  <span className="font-extrabold text-[#193f53] text-xs sm:text-sm">
-                    {isYearlyBilling ? (
-                      selectedPlan === "lite"
-                        ? "Lite Plan (Rp 480.000 / tahun)"
-                        : selectedPlan === "pro"
-                        ? "Pro Plan (Rp 3.480.000 / tahun)"
-                        : "Standard Plan (Rp 1.440.000 / tahun)"
-                    ) : (
-                      selectedPlan === "lite"
-                        ? "Lite Plan (Rp 50.000 / bulan)"
-                        : selectedPlan === "pro"
-                        ? "Pro Plan (Rp 360.000 / bulan)"
-                        : "Standard Plan (Rp 150.000 / bulan)"
-                    )}
-                  </span>
-                </div>
-              </div>
-              <span className="text-[10px] font-bold text-sky-700 bg-white/90 border border-sky-200 px-2 py-1 rounded-full shadow-2xs">
-                SparkPay Gateway
-              </span>
-            </div>
-          )}
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-3.5">
@@ -433,7 +438,27 @@ export default function RegisterPage() {
             </div>
 
             {/* 4. Kata Sandi & Konfirmasi Kata Sandi (2 Kolom) */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-3.5">
+            <div
+              ref={passwordSectionRef}
+              onFocus={() => {
+                pendingCloseRef.current = false;
+                if (closeTimerRef.current !== null) {
+                  window.clearTimeout(closeTimerRef.current);
+                  closeTimerRef.current = null;
+                }
+                setIsPasswordFocused(true);
+              }}
+              onBlur={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                  if (isPointerDownRef.current) {
+                    pendingCloseRef.current = true;
+                  } else {
+                    setIsPasswordFocused(false);
+                  }
+                }
+              }}
+            >
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-3.5">
               <div>
                 <label
                   htmlFor="password"
@@ -509,38 +534,58 @@ export default function RegisterPage() {
                   </button>
                 </div>
               </div>
+              </div>
+
+              {/* Indikator Kekuatan & Syarat Kata Sandi Real-Time (muncul saat fokus di field password) */}
+              <AnimatePresence initial={false}>
+                {isPasswordFocused && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0, marginTop: 0 }}
+                    animate={{ opacity: 1, height: "auto", marginTop: 12 }}
+                    exit={{ opacity: 0, height: 0, marginTop: 0 }}
+                    transition={{ duration: 0.2, ease: "easeOut" }}
+                    className="overflow-hidden"
+                  >
+                    <PasswordStrength value={password} confirmValue={confirmPassword} />
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
-            {/* Helper Hint untuk Password */}
-            <p className="text-[11px] text-slate-500 -mt-1 leading-tight">
-              Sandi wajib kombinasi <strong>huruf &amp; angka</strong>, min. 1 huruf <strong>kapital</strong>, tanpa simbol.
-            </p>
-
             {/* Checkbox Terms */}
-            <div className="pt-0.5">
-              <label
-                htmlFor="agreeTerms"
-                className="flex items-center gap-2.5 text-xs text-slate-600 cursor-pointer select-none leading-relaxed"
-              >
-                <input
-                  id="agreeTerms"
-                  type="checkbox"
-                  checked={agreeTerms}
-                  onChange={(e) => setAgreeTerms(e.target.checked)}
-                  suppressHydrationWarning
-                  className="w-4 h-4 rounded border-slate-300 text-[#193f53] accent-[#193f53] focus:ring-[#193f53]/20 cursor-pointer shrink-0"
-                />
-                <span>
+            <div className="pt-0.5 flex items-center gap-2.5 text-xs text-slate-600 select-none leading-relaxed">
+              <input
+                id="agreeTerms"
+                type="checkbox"
+                checked={agreeTerms}
+                onChange={(e) => setAgreeTerms(e.target.checked)}
+                suppressHydrationWarning
+                className="w-4 h-4 rounded border-slate-300 text-[#193f53] accent-[#193f53] focus:ring-[#193f53]/20 cursor-pointer shrink-0"
+              />
+              <span>
+                <label htmlFor="agreeTerms" className="cursor-pointer">
                   Saya menyetujui{" "}
-                  <a href="#terms" className="text-blue-600 hover:underline font-medium">
-                    Syarat &amp; Ketentuan
-                  </a>{" "}
-                  serta{" "}
-                  <a href="#privacy" className="text-blue-600 hover:underline font-medium">
-                    Kebijakan Privasi
-                  </a>
-                </span>
-              </label>
+                </label>
+                <button
+                  type="button"
+                  suppressHydrationWarning
+                  onClick={() => setLegalModal("terms")}
+                  className="text-[#193f53] hover:underline font-semibold cursor-pointer"
+                >
+                  Syarat &amp; Ketentuan
+                </button>
+                <label htmlFor="agreeTerms" className="cursor-pointer">
+                  {" "}serta{" "}
+                </label>
+                <button
+                  type="button"
+                  suppressHydrationWarning
+                  onClick={() => setLegalModal("privacy")}
+                  className="text-[#193f53] hover:underline font-semibold cursor-pointer"
+                >
+                  Kebijakan Privasi
+                </button>
+              </span>
             </div>
 
             {/* Submit Button */}
@@ -556,17 +601,80 @@ export default function RegisterPage() {
           </form>
 
           {/* Bottom Login Link */}
-          <div className="mt-3.5 text-center text-xs text-slate-500">
+          <div className="mt-4 text-center text-xs text-slate-500">
             <span>Sudah memiliki akun? </span>
             <Link
               href="/login"
-              className="text-blue-600 hover:underline font-semibold transition-colors"
+              className="font-bold text-slate-800 hover:text-[#193f53] transition-colors"
             >
               Masuk sekarang
             </Link>
           </div>
         </div>
       </main>
+
+      {/* Modal Syarat & Ketentuan / Kebijakan Privasi */}
+      <Modal
+        isOpen={legalModal !== null}
+        onClose={() => setLegalModal(null)}
+        title={
+          legalModal === "terms" ? "Syarat & Ketentuan" : "Kebijakan Privasi"
+        }
+        subtitle="Audit Pro — Standarisasi Operasional & Audit Checklist"
+        icon={
+          legalModal === "terms" ? (
+            <FileText className="w-5 h-5 text-[#193f53]" />
+          ) : (
+            <ShieldCheck className="w-5 h-5 text-[#193f53]" />
+          )
+        }
+        maxWidth="max-w-lg"
+      >
+        {legalModal === "terms" ? (
+          <div className="space-y-3 text-xs sm:text-sm text-slate-600 leading-relaxed select-text">
+            <p>
+              Dengan mendaftarkan akun Super Admin pada <strong>Audit Pro</strong>, Anda menyetujui ketentuan penggunaan platform berikut:
+            </p>
+            <ul className="list-disc pl-5 space-y-1.5">
+              <li>
+                Akun Super Admin bertanggung jawab penuh atas pengelolaan workspace, data gerai, template checklist SOP, dan hak akses pengguna (Admin, Auditor/Staff, Divisi Teknis).
+              </li>
+              <li>
+                Seluruh data inspeksi, dokumentasi foto bukti, dan laporan audit digunakan khusus untuk keperluan operasional dan evaluasi kepatuhan internal perusahaan Anda.
+              </li>
+              <li>
+                Pengguna wajib menjaga kerahasiaan kredensial login dan tidak membagikan akses akun kepada pihak yang tidak berwenang.
+              </li>
+            </ul>
+          </div>
+        ) : (
+          <div className="space-y-3 text-xs sm:text-sm text-slate-600 leading-relaxed select-text">
+            <p>
+              <strong>Audit Pro</strong> berkomitmen menjaga keamanan dan kerahasiaan data organisasi Anda:
+            </p>
+            <ul className="list-disc pl-5 space-y-1.5">
+              <li>
+                Data identitas pendaftaran (nama, email perusahaan, nomor telepon, dan nama perusahaan) hanya digunakan untuk autentikasi dan administrasi workspace.
+              </li>
+              <li>
+                Dokumentasi foto bukti inspeksi lapangan dan lokasi verifikasi dilindungi dengan enkripsi dan kontrol akses berbasis peran (role-based access control).
+              </li>
+              <li>
+                Kami tidak memperjualbelikan atau membagikan data audit perusahaan Anda kepada pihak ketiga tanpa persetujuan resmi.
+              </li>
+            </ul>
+          </div>
+        )}
+        <div className="mt-5 flex justify-end">
+          <button
+            type="button"
+            onClick={() => setLegalModal(null)}
+            className="px-4 py-2 rounded-lg bg-[#193f53] hover:bg-[#143343] text-white text-xs font-semibold transition-colors cursor-pointer"
+          >
+            Saya Mengerti
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }

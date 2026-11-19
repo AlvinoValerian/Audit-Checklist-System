@@ -25,6 +25,7 @@ import { AuthService, AuthUser } from "@/lib/auth";
 import { apiFetch } from "@/lib/api-client";
 import StaffAuthGuard from "@/components/auth/StaffAuthGuard";
 import StaffBottomNav from "../components/StaffBottomNav";
+import { StaffHistoryListSkeleton, StaffMobileScreenSkeleton } from "../components/StaffSkeleton";
 
 interface HistoryItem {
   id: string;
@@ -528,13 +529,7 @@ function RiwayatContent() {
           {/* 5. Grouped History Timeline (Realtime dari Database) */}
           <div className="space-y-4 pt-0.5">
             {isLoading ? (
-              <div className="bg-white rounded-2xl p-6 text-center border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] space-y-2">
-                <RotateCw className="w-8 h-8 text-[#193f53] animate-spin mx-auto" />
-                <h4 className="text-xs font-bold text-slate-700">Memuat Riwayat Audit...</h4>
-                <p className="text-[11px] text-slate-400">
-                  Menyinkronkan data riwayat checklist langsung dari server database.
-                </p>
-              </div>
+              <StaffHistoryListSkeleton count={3} />
             ) : filteredGroups.length === 0 ? (
               <div className="bg-white rounded-2xl p-6 text-center border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] space-y-2">
                 <Clock className="w-8 h-8 text-slate-300 mx-auto" />
@@ -844,16 +839,7 @@ function RiwayatContent() {
 export default function RiwayatChecklistPage() {
   return (
     <StaffAuthGuard>
-      <Suspense
-        fallback={
-          <div className="min-h-screen bg-[#f3f4fa] flex items-center justify-center text-slate-800">
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <RotateCcw className="w-4 h-4 animate-spin text-[#193f53]" />
-              <span>Memuat riwayat checklist...</span>
-            </div>
-          </div>
-        }
-      >
+      <Suspense fallback={<StaffMobileScreenSkeleton />}>
         <RiwayatContent />
       </Suspense>
     </StaffAuthGuard>

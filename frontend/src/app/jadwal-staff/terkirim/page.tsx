@@ -19,6 +19,7 @@ import { toast, Toaster } from "sonner";
 import { AuthService, AuthUser } from "@/lib/auth";
 import { apiFetch } from "@/lib/api-client";
 import StaffAuthGuard from "@/components/auth/StaffAuthGuard";
+import { StaffMobileScreenSkeleton } from "../components/StaffSkeleton";
 
 interface ReportDetail {
   reportId: string;
@@ -242,13 +243,21 @@ function TerkirimContent() {
                       HASIL EVALUASI
                     </span>
                     <span className="text-sm font-bold text-slate-900 leading-tight mt-0.5 block">
-                      {loading ? "Menghitung data..." : `${answeredItems} dari ${totalItems} Item Selesai`}
+                      {loading ? (
+                        <span className="inline-block h-4 w-36 rounded bg-emerald-200/70 animate-pulse align-middle" />
+                      ) : (
+                        `${answeredItems} dari ${totalItems} Item Selesai`
+                      )}
                     </span>
                   </div>
                 </div>
 
                 <span className="px-3 py-1 bg-emerald-100 text-emerald-800 font-bold text-sm rounded-full">
-                  {loading ? "..." : scorePercent}
+                  {loading ? (
+                    <span className="inline-block h-4 w-10 rounded bg-emerald-200/80 animate-pulse align-middle" />
+                  ) : (
+                    scorePercent
+                  )}
                 </span>
               </div>
 
@@ -260,7 +269,11 @@ function TerkirimContent() {
                     <span>Toko</span>
                   </span>
                   <span className="font-bold text-slate-900 text-right truncate">
-                    {loading ? "..." : displayStore}
+                    {loading ? (
+                      <span className="inline-block h-3.5 w-28 rounded bg-slate-200 animate-pulse align-middle" />
+                    ) : (
+                      displayStore
+                    )}
                   </span>
                 </div>
 
@@ -270,7 +283,11 @@ function TerkirimContent() {
                     <span>Jadwal</span>
                   </span>
                   <span className="font-bold text-slate-900 text-right truncate">
-                    {loading ? "..." : displaySchedule}
+                    {loading ? (
+                      <span className="inline-block h-3.5 w-32 rounded bg-slate-200 animate-pulse align-middle" />
+                    ) : (
+                      displaySchedule
+                    )}
                   </span>
                 </div>
 
@@ -280,8 +297,14 @@ function TerkirimContent() {
                     <span>Petugas</span>
                   </span>
                   <span className="text-right">
-                    <span className="font-bold text-slate-900">{loading ? "..." : displaySigner}</span>{" "}
-                    {displayRole ? <span className="text-slate-500 font-normal">({displayRole})</span> : null}
+                    {loading ? (
+                      <span className="inline-block h-3.5 w-24 rounded bg-slate-200 animate-pulse align-middle" />
+                    ) : (
+                      <>
+                        <span className="font-bold text-slate-900">{displaySigner}</span>{" "}
+                        {displayRole ? <span className="text-slate-500 font-normal">({displayRole})</span> : null}
+                      </>
+                    )}
                   </span>
                 </div>
 
@@ -291,7 +314,11 @@ function TerkirimContent() {
                     <span>Waktu Serah</span>
                   </span>
                   <span className="font-semibold font-mono text-slate-800 text-right">
-                    {loading ? "..." : displayTime}
+                    {loading ? (
+                      <span className="inline-block h-3.5 w-28 rounded bg-slate-200 animate-pulse align-middle" />
+                    ) : (
+                      displayTime
+                    )}
                   </span>
                 </div>
               </div>
@@ -318,16 +345,7 @@ function TerkirimContent() {
 export default function ChecklistTerkirimPage() {
   return (
     <StaffAuthGuard>
-      <Suspense
-        fallback={
-          <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">
-            <div className="flex items-center gap-2 text-sm">
-              <RotateCcw className="w-4 h-4 animate-spin text-blue-400" />
-              <span>Memuat tanda terima pengiriman...</span>
-            </div>
-          </div>
-        }
-      >
+      <Suspense fallback={<StaffMobileScreenSkeleton />}>
         <TerkirimContent />
       </Suspense>
     </StaffAuthGuard>

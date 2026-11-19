@@ -36,6 +36,7 @@ import { apiFetch } from "@/lib/api-client";
 import StaffAuthGuard from "@/components/auth/StaffAuthGuard";
 import { optimizeAndResizeImage, encryptImageData } from "@/lib/image-crypto";
 import DecryptedImage from "@/components/DecryptedImage";
+import { StaffPengerjaanSkeleton, StaffMobileScreenSkeleton } from "../components/StaffSkeleton";
 
 type ConditionType = "standard" | "issue" | "na";
 
@@ -1058,14 +1059,7 @@ function PengerjaanContent() {
         )}
 
         {/* LOADING STATE */}
-        {isLoading && (
-          <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-3">
-            <RotateCcw className="w-7 h-7 animate-spin text-[#193f53]" />
-            <p className="text-xs font-semibold text-slate-600">
-              Memuat template checklist dari database...
-            </p>
-          </div>
-        )}
+        {isLoading && <StaffPengerjaanSkeleton />}
 
         {/* EMPTY OR ERROR STATE */}
         {!isLoading && totalQuestions === 0 && (
@@ -1635,16 +1629,7 @@ function PengerjaanContent() {
 export default function PengerjaanChecklistPage() {
   return (
     <StaffAuthGuard>
-      <Suspense
-        fallback={
-          <div className="fixed inset-0 flex items-center justify-center bg-slate-900 text-white">
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <RotateCcw className="w-4 h-4 animate-spin text-blue-400" />
-              <span>Memuat lembar pengerjaan audit...</span>
-            </div>
-          </div>
-        }
-      >
+      <Suspense fallback={<StaffMobileScreenSkeleton />}>
         <PengerjaanContent />
       </Suspense>
     </StaffAuthGuard>

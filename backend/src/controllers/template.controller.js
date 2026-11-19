@@ -75,6 +75,7 @@ const formatTemplate = (t) => {
     createdAt: dateFormatted,
     storeId: t.store_id ? t.store_id.toString() : undefined,
     storeName: t.store?.store_name || undefined,
+    workspaceId: t.store?.workspace_id ? t.store.workspace_id.toString() : undefined,
     adminId: t.admin_id ? t.admin_id.toString() : undefined,
     radius: t.radius ? Number(t.radius) : 50,
   };
@@ -106,7 +107,7 @@ exports.getAllTemplates = async (req, res) => {
       });
     }
 
-    if (scope.workspaceIds.length === 0) {
+    if (!scope.targetWorkspaceId || scope.workspaceIds.length === 0) {
       return res.status(200).json({
         success: true,
         count: 0,
@@ -115,12 +116,11 @@ exports.getAllTemplates = async (req, res) => {
       });
     }
 
-    const storeScopeFilter = scope.prismaWorkspaceWhere.workspace_id
-      ? { workspace_id: scope.prismaWorkspaceWhere.workspace_id }
-      : { workspace: scope.prismaWorkspaceWhere };
-
+    // Isolasi ketat: selalu tampilkan template milik 1 workspace aktif saja (tidak pernah bercampur lintas workspace)
     const where = {
-      store: storeScopeFilter,
+      store: {
+        workspace_id: scope.targetWorkspaceId,
+      },
     };
 
     // Filter Status
@@ -133,13 +133,19 @@ exports.getAllTemplates = async (req, res) => {
       }
     }
 
-    // Filter Store (dengan verifikasi hak akses store & konsistensi tenant)
+    // Filter Store (dengan verifikasi hak akses store & konsistensi workspace aktif)
     if (storeId && storeId !== 'all') {
       const storeCheck = await assertStoreAccess(user, storeId);
       if (!storeCheck.ok) {
         return res.status(storeCheck.status).json({
           success: false,
           message: storeCheck.message,
+        });
+      }
+      if (storeCheck.store?.workspace_id !== scope.targetWorkspaceId) {
+        return res.status(403).json({
+          success: false,
+          message: 'Toko yang dipilih tidak termasuk dalam workspace aktif.',
         });
       }
       where.store_id = storeCheck.storeId;
@@ -345,19 +351,15 @@ exports.createTemplate = async (req, res) => {
           message: scope.message,
         });
       }
-      if (scope.workspaceIds.length === 0) {
+      if (!scope.targetWorkspaceId || scope.workspaceIds.length === 0) {
         return res.status(400).json({
           success: false,
           message: 'Belum ada workspace atau toko aktif. Tambahkan workspace & toko terlebih dahulu.',
         });
       }
 
-      const storeScopeFilter = scope.prismaWorkspaceWhere.workspace_id
-        ? { workspace_id: scope.prismaWorkspaceWhere.workspace_id }
-        : { workspace: scope.prismaWorkspaceWhere };
-
       targetStoreRecord = await prisma.store.findFirst({
-        where: storeScopeFilter,
+        where: { workspace_id: scope.targetWorkspaceId },
         include: {
           workspace: {
             select: { workspace_id: true, status: true },
@@ -904,19 +906,17 @@ exports.getTemplateStats = async (req, res) => {
       });
     }
 
-    if (scope.workspaceIds.length === 0) {
+    if (!scope.targetWorkspaceId || scope.workspaceIds.length === 0) {
       return res.status(200).json({
         success: true,
         data: { total: 0, active: 0, inactive: 0, activePercentage: 0 },
       });
     }
 
-    const storeScopeFilter = scope.prismaWorkspaceWhere.workspace_id
-      ? { workspace_id: scope.prismaWorkspaceWhere.workspace_id }
-      : { workspace: scope.prismaWorkspaceWhere };
-
     const where = {
-      store: storeScopeFilter,
+      store: {
+        workspace_id: scope.targetWorkspaceId,
+      },
     };
 
     const total = await prisma.checklist_template.count({ where });

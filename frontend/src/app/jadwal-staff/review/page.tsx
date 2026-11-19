@@ -23,6 +23,7 @@ import { AuthService, AuthUser } from "@/lib/auth";
 import { apiFetch } from "@/lib/api-client";
 import StaffAuthGuard from "@/components/auth/StaffAuthGuard";
 import DecryptedImage from "@/components/DecryptedImage";
+import { StaffReviewListSkeleton, StaffMobileScreenSkeleton } from "../components/StaffSkeleton";
 
 interface QuestionItem {
   id: number;
@@ -428,10 +429,7 @@ function ReviewContent() {
 
           {/* 5. Review Cards List (Dynamic from Template) */}
           {isLoading ? (
-            <div className="py-12 text-center text-xs text-slate-500 flex flex-col items-center justify-center gap-2">
-              <RotateCcw className="w-5 h-5 animate-spin text-[#193f53]" />
-              <span>Memuat data checklist...</span>
-            </div>
+            <StaffReviewListSkeleton count={4} />
           ) : questions.length === 0 ? (
             <div className="py-10 text-center text-xs text-slate-500 bg-white rounded-2xl p-4 border border-slate-100">
               Tidak ada butir checklist untuk jadwal ini.
@@ -613,16 +611,7 @@ function ReviewContent() {
 export default function ReviewPage() {
   return (
     <StaffAuthGuard>
-      <Suspense
-        fallback={
-          <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">
-            <div className="flex items-center gap-2 text-sm">
-              <RotateCcw className="w-4 h-4 animate-spin text-blue-400" />
-              <span>Memuat tinjauan checklist...</span>
-            </div>
-          </div>
-        }
-      >
+      <Suspense fallback={<StaffMobileScreenSkeleton />}>
         <ReviewContent />
       </Suspense>
     </StaffAuthGuard>

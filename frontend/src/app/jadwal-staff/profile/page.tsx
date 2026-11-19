@@ -23,6 +23,8 @@ import StaffAuthGuard from "@/components/auth/StaffAuthGuard";
 import StaffBottomNav from "../components/StaffBottomNav";
 import DecryptedImage from "@/components/DecryptedImage";
 import { optimizeAndResizeImage, encryptImageData } from "@/lib/image-crypto";
+import AuthVerificationLoading from "@/components/auth/AuthVerificationLoading";
+import { StaffProfileSkeleton, StaffMobileScreenSkeleton } from "../components/StaffSkeleton";
 
 function ProfileContent() {
   const router = useRouter();
@@ -30,6 +32,7 @@ function ProfileContent() {
   const [isFullscreenMode, setIsFullscreenMode] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState<boolean>(false);
+  const [isLoggingOut, setIsLoggingOut] = useState<boolean>(false);
   const [logoutNotice, setLogoutNotice] = useState<{ show: boolean; message: string }>({
     show: false,
     message: "",
@@ -79,16 +82,8 @@ function ProfileContent() {
   }, [router]);
 
   const handleLogout = async () => {
-    setLogoutNotice({
-      show: true,
-      message: "Anda telah berhasil keluar dari akun. Mengalihkan...",
-    });
-    await AuthService.logoutAsync({ broadcast: true });
-    if (typeof window !== "undefined") {
-      window.location.replace("/login?reason=logout");
-    } else {
-      router.replace("/login?reason=logout");
-    }
+    setIsLoggingOut(true);
+    await AuthService.logoutWithTransition("logout", 3000);
   };
 
   // Handler Ganti Foto Profil: Resize -> Encrypt AES-GCM -> Simpan ke Database
@@ -179,6 +174,10 @@ function ProfileContent() {
     return (parts[0][0] + parts[1][0]).toUpperCase();
   };
 
+  if (isLoggingOut) {
+    return <AuthVerificationLoading message="Loading..." />;
+  }
+
   return (
     <div className="fixed inset-0 flex flex-col overflow-hidden bg-[#f4f6fc] sm:relative sm:inset-auto sm:min-h-screen sm:bg-[#f3f4fa] sm:flex sm:items-center sm:justify-center sm:py-6 sm:px-4 font-sans antialiased">
       <Toaster position="top-center" richColors />
@@ -241,6 +240,10 @@ function ProfileContent() {
 
         {/* Scrollable Body Content */}
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 pt-1 pb-6 space-y-4">
+          {!currentUser ? (
+            <StaffProfileSkeleton />
+          ) : (
+            <>
           {/* 3. User Identity Card (Nama + Posisi Auditor Lapangan sesuai database) */}
           <div className="bg-white rounded-3xl p-5 border border-slate-100/90 shadow-[0_2px_10px_rgba(0,0,0,0.02)] flex items-center gap-4">
             {/* Avatar Lingkaran dengan Fitur Ganti Foto (Resize & AES-GCM Encrypted) */}
@@ -391,6 +394,8 @@ function ProfileContent() {
               </div>
             </div>
           </div>
+            </>
+          )}
 
           {/* 6. Tombol Keluar dari Akun */}
           <div className="pt-2">
@@ -414,16 +419,7 @@ function ProfileContent() {
 export default function ProfilePage() {
   return (
     <StaffAuthGuard>
-      <Suspense
-        fallback={
-          <div className="min-h-screen bg-[#f3f4fa] flex items-center justify-center text-slate-800">
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <RotateCcw className="w-4 h-4 animate-spin text-[#193f53]" />
-              <span>Memuat profil pengguna...</span>
-            </div>
-          </div>
-        }
-      >
+      <Suspense fallback={<StaffMobileScreenSkeleton />}>
         <ProfileContent />
       </Suspense>
     </StaffAuthGuard>
