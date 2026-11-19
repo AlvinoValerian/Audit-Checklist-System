@@ -253,7 +253,12 @@ app.use((err, req, res, next) => {
   });
 });
 
+const { ensureTokenVersionColumns } = require('./src/middlewares/auth.middleware');
+
 // Start Server (Bind to 0.0.0.0 for public & tunnel connectivity)
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Backend server is running on port ${PORT}`);
+  ensureTokenVersionColumns().catch((err) => {
+    console.warn('⚠️ [Startup Token Version Check]:', err.message);
+  });
 });  

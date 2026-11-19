@@ -17,44 +17,53 @@ const getStaffExtras = async (staffId) => {
   }
 };
 
-let ensureTokenVersionPromise = null;
+let tokenVersionColumnsEnsured = false;
+let tokenVersionColumnsEnsuringPromise = null;
 
 /**
  * Self-healing: Pastikan kolom token_version tersedia di tabel super_admin, admin, staff
- * untuk mendukung pembatalan sesi / token revocation di sisi server saat logout.
+ * Dijalankan sekali saat bootstrap server agar tidak mengakibatkan AccessExclusiveLock
+ * di PostgreSQL pada setiap request masuk.
  */
 const ensureTokenVersionColumns = async () => {
-  if (!ensureTokenVersionPromise) {
-    ensureTokenVersionPromise = (async () => {
-      try {
-        await prisma.$executeRawUnsafe(`
-          ALTER TABLE super_admin ADD COLUMN IF NOT EXISTS token_version INT NOT NULL DEFAULT 0;
-        `);
-        await prisma.$executeRawUnsafe(`
-          ALTER TABLE admin ADD COLUMN IF NOT EXISTS token_version INT NOT NULL DEFAULT 0;
-        `);
-        await prisma.$executeRawUnsafe(`
-          ALTER TABLE staff ADD COLUMN IF NOT EXISTS token_version INT NOT NULL DEFAULT 0;
-        `);
-      } catch (err) {
-        ensureTokenVersionPromise = null;
-        console.warn('⚠️ [ensureTokenVersionColumns]:', err.message);
-      }
-    })();
-  }
-  return ensureTokenVersionPromise;
+  if (tokenVersionColumnsEnsured) return;
+  if (tokenVersionColumnsEnsuringPromise) return tokenVersionColumnsEnsuringPromise;
+
+  tokenVersionColumnsEnsuringPromise = (async () => {
+    try {
+      await prisma.$executeRawUnsafe(`
+        ALTER TABLE super_admin ADD COLUMN IF NOT EXISTS token_version INT NOT NULL DEFAULT 0;
+      `);
+      await prisma.$executeRawUnsafe(`
+        ALTER TABLE admin ADD COLUMN IF NOT EXISTS token_version INT NOT NULL DEFAULT 0;
+      `);
+      await prisma.$executeRawUnsafe(`
+        ALTER TABLE staff ADD COLUMN IF NOT EXISTS token_version INT NOT NULL DEFAULT 0;
+      `);
+      tokenVersionColumnsEnsured = true;
+    } catch (err) {
+      console.warn('⚠️ [ensureTokenVersionColumns]:', err.message);
+    } finally {
+      tokenVersionColumnsEnsuringPromise = null;
+    }
+  })();
+
+  return tokenVersionColumnsEnsuringPromise;
 };
 
 const getRecordTokenVersion = async (tableName, pkCol, pkVal) => {
-  await ensureTokenVersionColumns();
   try {
     const rows = await prisma.$queryRawUnsafe(
       `SELECT COALESCE(token_version, 0) AS token_version FROM ${tableName} WHERE ${pkCol} = $1 LIMIT 1`,
       pkVal
     );
-    return Number(rows?.[0]?.token_version ?? 0);
-  } catch {
+    if (rows && rows.length > 0 && rows[0].token_version !== undefined) {
+      return Number(rows[0].token_version);
+    }
     return 0;
+  } catch (err) {
+    console.warn(`⚠️ [getRecordTokenVersion] Gagal membaca token_version ${tableName}:`, err.message);
+    return null; // Return null agar transient database error tidak memicu pencabutan palsu
   }
 };
 
@@ -153,8 +162,6 @@ const extractUser = async (req) => {
     return null;
   }
 
-  await ensureTokenVersionColumns();
-
   const tokenRole = String(decoded.role || '').trim();
   const rawIdCandidate = decoded.rawId
     ? String(decoded.rawId)
@@ -175,14 +182,19 @@ const extractUser = async (req) => {
 
   try {
     if (tokenRole === 'Super Admin' || String(decoded.id).startsWith('sa-')) {
-      const sa = await prisma.super_admin.findUnique({
-        where: { super_admin_id: idBigInt },
-      });
+      const saRows = await prisma.$queryRawUnsafe(
+        `SELECT super_admin_id, name, email, phone_number, company_name, COALESCE(token_version, 0) AS token_version
+         FROM super_admin WHERE super_admin_id = $1 LIMIT 1`,
+        idBigInt
+      );
+      const sa = saRows && saRows[0] ? saRows[0] : null;
+
       if (!sa) {
         if (req) req._authError = 'USER_NOT_FOUND';
       } else {
-        const dbTv = await getRecordTokenVersion('super_admin', 'super_admin_id', idBigInt);
-        if (tokenVersion === null || tokenVersion !== dbTv) {
+        const dbTv = Number(sa.token_version ?? 0);
+        // Token revocation: hanya batalkan jika tokenVersion lebih kecil dari dbTv (sesi dicabut via logout sebelumnya)
+        if (tokenVersion !== null && tokenVersion < dbTv) {
           if (req) req._authError = 'TOKEN_REVOKED';
         } else {
           verifiedUser = {
@@ -201,77 +213,78 @@ const extractUser = async (req) => {
       tokenRole === 'Auditor Lapangan' ||
       String(decoded.id).startsWith('staff-')
     ) {
-      const st = await prisma.staff.findUnique({
-        where: { staff_id: idBigInt },
-        include: { store: true },
-      });
+      const stRows = await prisma.$queryRawUnsafe(
+        `SELECT s.staff_id, s.name, s.email, s.phone_number, s.status, s.store_id, s.position, s.deleted_at,
+                COALESCE(s.token_version, 0) AS token_version,
+                st.store_name, st.address, st.city, st.workspace_id
+         FROM staff s
+         LEFT JOIN store st ON s.store_id = st.store_id
+         WHERE s.staff_id = $1 LIMIT 1`,
+        idBigInt
+      );
+      const st = stRows && stRows[0] ? stRows[0] : null;
+
       if (!st) {
         if (req) req._authError = 'USER_NOT_FOUND';
       } else {
-        const extra = await getStaffExtras(st.staff_id);
         const stStatus = String(st.status || '').toLowerCase();
-        if (stStatus === 'inactive' || stStatus === 'nonaktif' || extra.deleted_at) {
+        if (stStatus === 'inactive' || stStatus === 'nonaktif' || st.deleted_at) {
           if (req) req._authError = 'ACCOUNT_INACTIVE';
         } else {
-          const dbTv = Number(extra.token_version ?? 0);
-          if (tokenVersion === null || tokenVersion !== dbTv) {
+          const dbTv = Number(st.token_version ?? 0);
+          if (tokenVersion !== null && tokenVersion < dbTv) {
             if (req) req._authError = 'TOKEN_REVOKED';
           } else {
             verifiedUser = {
               rawId: st.staff_id.toString(),
               id: `staff-${st.staff_id.toString()}`,
               role: 'Staff',
-              position: extra.position || 'Auditor Lapangan',
+              position: st.position || 'Auditor Lapangan',
               email: st.email,
               fullName: st.name,
               status: st.status,
-              deletedAt: extra.deleted_at || null,
+              deletedAt: st.deleted_at || null,
               storeId: st.store_id ? st.store_id.toString() : null,
-              storeName: st.store ? st.store.store_name : null,
-              storeLocation: st.store ? (st.store.address || st.store.city || 'Cabang') : 'Cabang',
-              storeCode: st.store ? `ST-${st.store.store_id.toString()}` : 'ST-01',
-              workspaceId: st.store?.workspace_id?.toString() || '',
+              storeName: st.store_name || null,
+              storeLocation: st.address || st.city || 'Cabang',
+              storeCode: st.store_id ? `ST-${st.store_id.toString()}` : 'ST-01',
+              workspaceId: st.workspace_id ? st.workspace_id.toString() : '',
               tokenVersion: dbTv,
             };
           }
         }
       }
     } else {
-      const adm = await prisma.admin.findUnique({
-        where: { admin_id: idBigInt },
-      });
+      const admRows = await prisma.$queryRawUnsafe(
+        `SELECT admin_id, name, email, role, status, deleted_at, workspace_id,
+                COALESCE(token_version, 0) AS token_version
+         FROM admin WHERE admin_id = $1 LIMIT 1`,
+        idBigInt
+      );
+      const adm = admRows && admRows[0] ? admRows[0] : null;
+
       if (!adm) {
         if (req) req._authError = 'USER_NOT_FOUND';
       } else {
-        let admRole = adm.role || tokenRole || 'Admin';
-        let dbTv = 0;
-        try {
-          const roleRes = await prisma.$queryRawUnsafe(
-            `SELECT role, COALESCE(token_version, 0) AS token_version FROM admin WHERE admin_id = $1 LIMIT 1`,
-            adm.admin_id
-          );
-          if (roleRes && roleRes[0]) {
-            if (roleRes[0].role) admRole = roleRes[0].role;
-            dbTv = Number(roleRes[0].token_version ?? 0);
-          }
-        } catch {}
-
         const admStatus = String(adm.status || '').toLowerCase();
         if (admStatus === 'inactive' || admStatus === 'nonaktif' || adm.deleted_at) {
           if (req) req._authError = 'ACCOUNT_INACTIVE';
-        } else if (tokenVersion === null || tokenVersion !== dbTv) {
-          if (req) req._authError = 'TOKEN_REVOKED';
         } else {
-          verifiedUser = {
-            rawId: adm.admin_id.toString(),
-            id: `adm-${adm.admin_id.toString()}`,
-            role: admRole,
-            email: adm.email,
-            fullName: adm.name,
-            status: adm.status,
-            workspaceId: adm.workspace_id ? adm.workspace_id.toString() : '',
-            tokenVersion: dbTv,
-          };
+          const dbTv = Number(adm.token_version ?? 0);
+          if (tokenVersion !== null && tokenVersion < dbTv) {
+            if (req) req._authError = 'TOKEN_REVOKED';
+          } else {
+            verifiedUser = {
+              rawId: adm.admin_id.toString(),
+              id: `adm-${adm.admin_id.toString()}`,
+              role: adm.role || tokenRole || 'Admin',
+              email: adm.email,
+              fullName: adm.name,
+              status: adm.status,
+              workspaceId: adm.workspace_id ? adm.workspace_id.toString() : '',
+              tokenVersion: dbTv,
+            };
+          }
         }
       }
     }
@@ -305,6 +318,15 @@ const requireAuth = async (req, res, next) => {
       });
     }
 
+    if (req._authError === 'AUTH_VERIFICATION_FAILED') {
+      return res.status(503).json({
+        success: false,
+        status: 'error',
+        code: 'SERVICE_UNAVAILABLE',
+        message: 'Layanan verifikasi sesi sementara tidak dapat menghubungi database. Silakan coba kembali.',
+      });
+    }
+
     return res.status(401).json({
       success: false,
       status: 'error',
@@ -335,6 +357,16 @@ const requireRole = (...allowedRoles) => {
           message: 'Akun Anda berstatus Nonaktif atau telah dinonaktifkan.',
         });
       }
+
+      if (req._authError === 'AUTH_VERIFICATION_FAILED') {
+        return res.status(503).json({
+          success: false,
+          status: 'error',
+          code: 'SERVICE_UNAVAILABLE',
+          message: 'Layanan verifikasi sesi sementara tidak dapat menghubungi database. Silakan coba kembali.',
+        });
+      }
+
       return res.status(401).json({
         success: false,
         status: 'error',

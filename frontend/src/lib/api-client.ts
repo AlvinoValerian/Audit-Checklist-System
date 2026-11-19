@@ -13,7 +13,9 @@ function shouldSkipUnauthorizedHandling(url?: string): boolean {
   return (
     url.includes("/api/auth/login") ||
     url.includes("/api/auth/register") ||
-    url.includes("/api/auth/logout")
+    url.includes("/api/auth/logout") ||
+    url.includes("/api/auth/refresh") ||
+    url.includes("/api/auth/me")
   );
 }
 
@@ -35,16 +37,7 @@ export function triggerForcedLogout(
     toast.error(message);
   } catch {}
 
-  const token = AuthService.getToken();
-  try {
-    fetch("/api/auth/logout", {
-      method: "POST",
-      credentials: "include",
-      keepalive: true,
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    }).catch(() => {});
-  } catch {}
-
+  // Bersihkan data sesi lokal
   AuthService.logout({ broadcast: true });
 
   const currentPath = window.location.pathname || "/";
