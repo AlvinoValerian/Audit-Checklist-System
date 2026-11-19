@@ -4,7 +4,13 @@ import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore }
 import { usePathname } from "next/navigation";
 import { Clock, Loader2, LogOut, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
-import { AuthService, LAST_ACTIVITY_KEY, LOGOUT_EVENT_KEY } from "@/lib/auth";
+import AuthVerificationLoading from "./AuthVerificationLoading";
+import {
+  AuthService,
+  LAST_ACTIVITY_KEY,
+  LOGOUT_EVENT_KEY,
+  LOGOUT_TRANSITION_EVENT,
+} from "@/lib/auth";
 import { apiFetch } from "@/lib/api-client";
 import { canRoleAccessPath, getHomeRouteForRole, normalizeRole } from "@/lib/routes-acl";
 
@@ -16,7 +22,7 @@ const ACTIVITY_THROTTLE_MS = 10 * 1000; // Maksimal 1x tulis localStorage setiap
 const SSR_SENTINEL = "__SSR__";
 
 const subscribeAuth = (onStoreChange: () => void) => {
-  if (typeof window === "undefined") return () => {};
+  if (typeof window === "undefined") return () => { };
   window.addEventListener("auth-changed", onStoreChange);
   window.addEventListener("storage", onStoreChange);
   return () => {
@@ -76,6 +82,19 @@ export default function SessionManager({ children }: { children: React.ReactNode
     showWarningRef.current = showWarningModal;
   }, [showWarningModal]);
 
+  // Dengarkan event logout manual dari Sidebar / komponen anak agar tampilan loading 3 detik
+  // dikelola oleh wrapper ini tanpa terpotong oleh redirect ?reason=expired
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleLogoutTransition = () => {
+      isLoggingOutRef.current = true;
+      setShowWarningModal(false);
+      setIsLoggingOut(true);
+    };
+    window.addEventListener(LOGOUT_TRANSITION_EVENT, handleLogoutTransition);
+    return () => window.removeEventListener(LOGOUT_TRANSITION_EVENT, handleLogoutTransition);
+  }, []);
+
   // Tampilkan toast jika diarahkan ulang karena akses halaman ditolak (?denied=1)
   useEffect(() => {
     if (!isHydrated || !isAuthorized || typeof window === "undefined") return;
@@ -93,6 +112,7 @@ export default function SessionManager({ children }: { children: React.ReactNode
   // Recovery atau Redirect jika localStorage kosong / role tidak diizinkan
   useEffect(() => {
     if (!isHydrated || typeof window === "undefined") return;
+    if (isLoggingOutRef.current || AuthService.isManualLogoutInProgress()) return;
 
     if (!currentUser) {
       if (meAttemptedRef.current) return;
@@ -107,7 +127,7 @@ export default function SessionManager({ children }: { children: React.ReactNode
             credentials: "include",
             cache: "no-store",
           });
-          if (cancelled) return;
+          if (cancelled || isLoggingOutRef.current || AuthService.isManualLogoutInProgress()) return;
           if (res.ok) {
             const json = await res.json().catch(() => null);
             const meUser = json?.data?.user;
@@ -129,7 +149,7 @@ export default function SessionManager({ children }: { children: React.ReactNode
           // Lanjutkan ke redirect login di bawah
         }
 
-        if (cancelled) return;
+        if (cancelled || isLoggingOutRef.current || AuthService.isManualLogoutInProgress()) return;
         await AuthService.logoutAsync({ broadcast: false });
         const fullTarget = `${window.location.pathname}${window.location.search}`;
         window.location.replace(
@@ -197,20 +217,14 @@ export default function SessionManager({ children }: { children: React.ReactNode
     if (isLoggingOutRef.current) return;
     isLoggingOutRef.current = true;
     setIsLoggingOut(true);
-    await AuthService.logoutAsync({ broadcast: true });
-    if (typeof window !== "undefined") {
-      window.location.replace("/login?reason=timeout");
-    }
+    await AuthService.logoutWithTransition("timeout", 3000);
   }, []);
 
   const handleManualLogout = useCallback(async () => {
     if (isLoggingOutRef.current) return;
     isLoggingOutRef.current = true;
     setIsLoggingOut(true);
-    await AuthService.logoutAsync({ broadcast: true });
-    if (typeof window !== "undefined") {
-      window.location.replace("/login?reason=logout");
-    }
+    await AuthService.logoutWithTransition("logout", 3000);
   }, []);
 
   // Pelacakan aktivitas user, sinkronisasi multi-tab, silent refresh, dan hitung mundur idle 30 menit
@@ -312,19 +326,13 @@ export default function SessionManager({ children }: { children: React.ReactNode
     };
   }, [isAuthorized, performAutoTimeoutLogout, performTokenRefresh]);
 
+  if (isLoggingOut) {
+    return <AuthVerificationLoading message="Loading..." />;
+  }
+
   if (!isHydrated || isRecoveringSession || !isAuthorized) {
-    return (
-      <div className="min-h-screen w-full bg-[#f8fafc] flex flex-col items-center justify-center p-6 text-slate-600 font-sans">
-        <div className="flex flex-col items-center gap-3 bg-white border border-slate-200/80 rounded-2xl px-7 py-6 shadow-xs">
-          <Loader2 className="w-7 h-7 animate-spin text-[#193f53]" />
-          <p className="text-xs font-semibold text-slate-700">
-            {isHydrated && currentUser && !canRoleAccessPath(currentUser.role, pathname)
-              ? "Mengalihkan ke halaman yang sesuai dengan peran Anda..."
-              : "Memverifikasi sesi dan hak akses..."}
-          </p>
-        </div>
-      </div>
-    );
+    // Saat refresh browser (F5), tampilkan latar netral tanpa animasi loading agar tidak berkedip
+    return <div className="min-h-screen w-full bg-[#f8fafc]" />;
   }
 
   return (

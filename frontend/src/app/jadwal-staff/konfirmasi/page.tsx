@@ -31,6 +31,7 @@ import { apiFetch } from "@/lib/api-client";
 import StaffAuthGuard from "@/components/auth/StaffAuthGuard";
 import { optimizeAndResizeImage, encryptImageData } from "@/lib/image-crypto";
 import DecryptedImage from "@/components/DecryptedImage";
+import { StaffMobileScreenSkeleton } from "../components/StaffSkeleton";
 
 interface QuestionItem {
   id: number;
@@ -1629,16 +1630,7 @@ function KonfirmasiContent() {
 export default function KonfirmasiSerahkanPage() {
   return (
     <StaffAuthGuard>
-      <Suspense
-        fallback={
-          <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">
-            <div className="flex items-center gap-2 text-sm">
-              <RotateCcw className="w-4 h-4 animate-spin text-blue-400" />
-              <span>Memuat konfirmasi penyerahan audit...</span>
-            </div>
-          </div>
-        }
-      >
+      <Suspense fallback={<StaffMobileScreenSkeleton />}>
         <KonfirmasiContent />
       </Suspense>
     </StaffAuthGuard>

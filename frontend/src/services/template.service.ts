@@ -10,22 +10,47 @@ const getBackendUrl = (): string => {
 const BACKEND_URL = getBackendUrl();
 const TEMPLATE_STORAGE_KEY = "audit_pro_template_checklist_v1";
 
-const getAuthHeaders = (): Record<string, string> => {
+const normalizeWsId = (raw?: string | null): string => {
+  if (!raw) return "";
+  const cleaned = String(raw).trim().replace(/^ws-/, "");
+  return cleaned && cleaned.toLowerCase() !== "all" ? cleaned : "";
+};
+
+const isMultiWorkspaceRole = (role?: string): boolean => {
+  const r = String(role || "").trim().toLowerCase();
+  return r === "super admin" || r === "divisi teknis" || r === "teknis";
+};
+
+const resolveScopedWorkspaceId = (customWorkspaceId?: string): string => {
+  const user = AuthService.getCurrentUser();
+  const activeWs = AuthService.getActiveWorkspace();
+
+  // Untuk role non-multi-workspace (Admin / Staff), kunci ketat ke workspace milik akun login
+  if (user && !isMultiWorkspaceRole(user.role)) {
+    const ownWs = normalizeWsId(user.workspaceId);
+    if (ownWs) return ownWs;
+  }
+
+  return (
+    normalizeWsId(customWorkspaceId) ||
+    normalizeWsId(activeWs?.id) ||
+    normalizeWsId(user?.workspaceId)
+  );
+};
+
+const getAuthHeaders = (customWorkspaceId?: string): Record<string, string> => {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
   const token = AuthService.getToken();
-  const user = AuthService.getCurrentUser();
-  const activeWs = AuthService.getActiveWorkspace();
+  const targetWsId = resolveScopedWorkspaceId(customWorkspaceId);
 
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  if (activeWs?.id) {
-    headers["x-workspace-id"] = activeWs.id;
-  } else if (user?.workspaceId) {
-    headers["x-workspace-id"] = user.workspaceId;
+  if (targetWsId) {
+    headers["x-workspace-id"] = targetWsId;
   }
 
   return headers;
@@ -100,95 +125,129 @@ export const TemplateService = {
   cachedTemplatesByWs: {} as Record<string, TemplateItem[]>,
 
   getWorkspaceKey(wsId?: string): string {
-    const activeWs = AuthService.getActiveWorkspace();
+    return resolveScopedWorkspaceId(wsId);
+  },
+
+  getScopedCacheKey(wsId?: string): string {
+    const wsKey = this.getWorkspaceKey(wsId);
+    if (!wsKey) return "";
     const user = AuthService.getCurrentUser();
-    const raw = wsId || activeWs?.id || user?.workspaceId || "1";
-    return String(raw).replace(/^ws-/, "");
+    const userKey = user?.id || user?.email || "anon";
+    return `${userKey}__${wsKey}`;
+  },
+
+  clearCache(): void {
+    this.cachedTemplatesByWs = {};
+    if (typeof window !== "undefined") {
+      try {
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && k.startsWith(TEMPLATE_STORAGE_KEY)) {
+            keysToRemove.push(k);
+          }
+        }
+        keysToRemove.forEach((k) => localStorage.removeItem(k));
+      } catch {}
+    }
   },
 
   /**
-   * Mengambil data template langsung dari backend PostgreSQL khusus workspace tertentu
+   * Mengambil data template langsung dari backend PostgreSQL khusus workspace aktif saja
    */
   async fetchAll(customWorkspaceId?: string): Promise<TemplateItem[]> {
-    const wsKey = this.getWorkspaceKey(customWorkspaceId);
+    const targetWsId = resolveScopedWorkspaceId(customWorkspaceId);
+    const scopedKey = this.getScopedCacheKey(targetWsId);
+
+    // Jika tidak ada workspace valid, jangan pernah meminta data global atau fallback ke workspace lain
+    if (!targetWsId || !scopedKey) {
+      return [];
+    }
+
     try {
-      const activeWs = AuthService.getActiveWorkspace();
-      const targetWsId = customWorkspaceId || activeWs?.id;
-
       const params = new URLSearchParams();
-      if (targetWsId && targetWsId !== "all") {
-        params.append("workspaceId", targetWsId);
-      }
+      params.append("workspaceId", targetWsId);
 
-      const headers = getAuthHeaders();
-      if (targetWsId) {
-        headers["x-workspace-id"] = targetWsId;
-      }
-
-      const queryString = params.toString() ? `?${params.toString()}` : "";
-      const res = await apiFetch(`${BACKEND_URL}/api/templates${queryString}`, {
+      const headers = getAuthHeaders(targetWsId);
+      const res = await apiFetch(`${BACKEND_URL}/api/templates?${params.toString()}`, {
         method: "GET",
         headers,
+        cache: "no-store",
       });
 
       if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          this.cachedTemplatesByWs[scopedKey] = [];
+          return [];
+        }
         throw new Error(`Gagal fetch template (Status ${res.status})`);
       }
 
       const body = await res.json();
       if (body.success && Array.isArray(body.data)) {
-        this.cachedTemplatesByWs[wsKey] = body.data;
-        const cacheKey = `${TEMPLATE_STORAGE_KEY}_${wsKey}`;
+        // Filter defensif: pastikan hanya template milik targetWsId yang masuk
+        const strictlyScoped: TemplateItem[] = body.data.filter((t: TemplateItem) => {
+          const itemWs = normalizeWsId(t.workspaceId);
+          return !itemWs || itemWs === targetWsId;
+        });
+
+        this.cachedTemplatesByWs[scopedKey] = strictlyScoped;
+        const storageKey = `${TEMPLATE_STORAGE_KEY}_${scopedKey}`;
         if (typeof window !== "undefined") {
-          localStorage.setItem(cacheKey, JSON.stringify(body.data));
+          localStorage.setItem(storageKey, JSON.stringify(strictlyScoped));
         }
-        return body.data;
+        return strictlyScoped;
       }
-      this.cachedTemplatesByWs[wsKey] = [];
+
+      this.cachedTemplatesByWs[scopedKey] = [];
       return [];
     } catch (err) {
-      console.warn("⚠️ [TemplateService.fetchAll]: Menggunakan cache lokal:", err);
-      return this.getAll(customWorkspaceId);
+      console.warn("⚠️ [TemplateService.fetchAll]: Gagal memuat dari backend:", err);
+      return this.getAll(targetWsId);
     }
   },
 
   getAll(customWorkspaceId?: string): TemplateItem[] {
-    const wsKey = this.getWorkspaceKey(customWorkspaceId);
-    const cacheKey = `${TEMPLATE_STORAGE_KEY}_${wsKey}`;
+    const targetWsId = resolveScopedWorkspaceId(customWorkspaceId);
+    const scopedKey = this.getScopedCacheKey(targetWsId);
 
-    // 1. Cek memory cache khusus workspace ini
-    if (this.cachedTemplatesByWs[wsKey]) {
-      return this.cachedTemplatesByWs[wsKey];
+    if (!targetWsId || !scopedKey) {
+      return [];
+    }
+
+    // 1. Cek memory cache khusus akun + workspace ini
+    if (this.cachedTemplatesByWs[scopedKey]) {
+      return this.cachedTemplatesByWs[scopedKey];
     }
 
     if (typeof window === "undefined") {
-      return wsKey === "1" ? defaultTemplates : [];
+      return [];
     }
 
-    // 2. Cek localStorage khusus workspace ini
+    // 2. Cek localStorage khusus akun + workspace ini (tanpa fallback dummy workspace lain)
+    const storageKey = `${TEMPLATE_STORAGE_KEY}_${scopedKey}`;
     try {
-      const data = localStorage.getItem(cacheKey);
+      const data = localStorage.getItem(storageKey);
       if (data) {
         const parsed = JSON.parse(data);
         if (Array.isArray(parsed)) {
-          const list = parsed.map((t: TemplateItem) => ({
-            ...t,
-            status: (t.status as string) === "Dinonaktifkan" ? "Nonaktif" : t.status,
-          }));
-          this.cachedTemplatesByWs[wsKey] = list;
+          const list: TemplateItem[] = parsed
+            .filter((t: TemplateItem) => {
+              const itemWs = normalizeWsId(t.workspaceId);
+              return !itemWs || itemWs === targetWsId;
+            })
+            .map((t: TemplateItem) => ({
+              ...t,
+              status: (t.status as string) === "Dinonaktifkan" ? "Nonaktif" : t.status,
+            }));
+          this.cachedTemplatesByWs[scopedKey] = list;
           return list;
         }
       }
-      // Hanya Workspace 1 (Mie Gacoan) yang memiliki defaultTemplates jika storage kosong
-      if (wsKey === "1") {
-        localStorage.setItem(cacheKey, JSON.stringify(defaultTemplates));
-        this.cachedTemplatesByWs[wsKey] = defaultTemplates;
-        return defaultTemplates;
-      }
-      this.cachedTemplatesByWs[wsKey] = [];
+      this.cachedTemplatesByWs[scopedKey] = [];
       return [];
     } catch {
-      return wsKey === "1" ? defaultTemplates : [];
+      return [];
     }
   },
 
@@ -215,29 +274,30 @@ export const TemplateService = {
 
   async createAsync(data: Omit<TemplateItem, "id"> & { workspaceId?: string }): Promise<TemplateItem> {
     try {
-      const activeWs = AuthService.getActiveWorkspace();
-      const targetWs = data.workspaceId || activeWs?.id;
-      const headers = getAuthHeaders();
-      if (targetWs) {
-        headers["x-workspace-id"] = targetWs;
-      }
+      const targetWs = resolveScopedWorkspaceId(data.workspaceId);
+      const headers = getAuthHeaders(targetWs);
 
       const res = await apiFetch(`${BACKEND_URL}/api/templates`, {
         method: "POST",
         headers,
-        body: JSON.stringify(data),
+        body: JSON.stringify({
+          ...data,
+          ...(targetWs ? { workspaceId: targetWs } : {}),
+        }),
       });
       if (res.ok) {
         const body = await res.json();
         if (body.success && body.data) {
           const newTemplate = body.data;
-          const wsKey = this.getWorkspaceKey(targetWs);
-          const currentList = this.cachedTemplatesByWs[wsKey] || this.getAll(targetWs);
-          const updatedList = [newTemplate, ...currentList.filter((t) => t.id !== newTemplate.id)];
-          this.cachedTemplatesByWs[wsKey] = updatedList;
-          const cacheKey = `${TEMPLATE_STORAGE_KEY}_${wsKey}`;
-          if (typeof window !== "undefined") {
-            localStorage.setItem(cacheKey, JSON.stringify(updatedList));
+          const scopedKey = this.getScopedCacheKey(targetWs);
+          if (scopedKey) {
+            const currentList = this.cachedTemplatesByWs[scopedKey] || this.getAll(targetWs);
+            const updatedList = [newTemplate, ...currentList.filter((t) => t.id !== newTemplate.id)];
+            this.cachedTemplatesByWs[scopedKey] = updatedList;
+            const storageKey = `${TEMPLATE_STORAGE_KEY}_${scopedKey}`;
+            if (typeof window !== "undefined") {
+              localStorage.setItem(storageKey, JSON.stringify(updatedList));
+            }
           }
           return newTemplate;
         }
@@ -260,8 +320,7 @@ export const TemplateService = {
       }).catch((e) => console.warn("Background template create error:", e));
     }
 
-    const wsKey = this.getWorkspaceKey();
-    const cacheKey = `${TEMPLATE_STORAGE_KEY}_${wsKey}`;
+    const scopedKey = this.getScopedCacheKey();
     const list = this.getAll();
     const totalCategoryTasks = data.categories
       ? data.categories.reduce((acc, cat) => acc + cat.tasks.length, 0)
@@ -283,9 +342,11 @@ export const TemplateService = {
         : data.itemsCount || 5,
     };
     const updated = [newTemplate, ...list];
-    this.cachedTemplatesByWs[wsKey] = updated;
-    if (typeof window !== "undefined") {
-      localStorage.setItem(cacheKey, JSON.stringify(updated));
+    if (scopedKey) {
+      this.cachedTemplatesByWs[scopedKey] = updated;
+      if (typeof window !== "undefined") {
+        localStorage.setItem(`${TEMPLATE_STORAGE_KEY}_${scopedKey}`, JSON.stringify(updated));
+      }
     }
     return newTemplate;
   },
@@ -294,23 +355,24 @@ export const TemplateService = {
     try {
       const res = await apiFetch(`${BACKEND_URL}/api/templates/${id}`, {
         method: "PUT",
-        headers: getAuthHeaders(),
+        headers: getAuthHeaders(data.workspaceId),
         body: JSON.stringify(data),
       });
       if (res.ok) {
         const body = await res.json();
         if (body.success && body.data) {
           const updatedTemplate: TemplateItem = body.data;
-          const wsKey = this.getWorkspaceKey();
-          const cacheKey = `${TEMPLATE_STORAGE_KEY}_${wsKey}`;
-          const currentList = this.getAll();
-          const exists = currentList.some((t: TemplateItem) => t.id === id);
-          const updatedList = exists
-            ? currentList.map((t: TemplateItem) => (t.id === id ? updatedTemplate : t))
-            : [updatedTemplate, ...currentList];
-          this.cachedTemplatesByWs[wsKey] = updatedList;
-          if (typeof window !== "undefined") {
-            localStorage.setItem(cacheKey, JSON.stringify(updatedList));
+          const scopedKey = this.getScopedCacheKey(updatedTemplate.workspaceId || data.workspaceId);
+          if (scopedKey) {
+            const currentList = this.getAll(updatedTemplate.workspaceId || data.workspaceId);
+            const exists = currentList.some((t: TemplateItem) => t.id === id);
+            const updatedList = exists
+              ? currentList.map((t: TemplateItem) => (t.id === id ? updatedTemplate : t))
+              : [updatedTemplate, ...currentList];
+            this.cachedTemplatesByWs[scopedKey] = updatedList;
+            if (typeof window !== "undefined") {
+              localStorage.setItem(`${TEMPLATE_STORAGE_KEY}_${scopedKey}`, JSON.stringify(updatedList));
+            }
           }
           return updatedTemplate;
         }
@@ -328,14 +390,13 @@ export const TemplateService = {
     if (typeof window !== "undefined") {
       apiFetch(`${BACKEND_URL}/api/templates/${id}`, {
         method: "PUT",
-        headers: getAuthHeaders(),
+        headers: getAuthHeaders(data.workspaceId),
         body: JSON.stringify(data),
       }).catch((e) => console.warn("Background template update error:", e));
     }
 
-    const wsKey = this.getWorkspaceKey();
-    const cacheKey = `${TEMPLATE_STORAGE_KEY}_${wsKey}`;
-    const list = this.getAll();
+    const scopedKey = this.getScopedCacheKey(data.workspaceId);
+    const list = this.getAll(data.workspaceId);
     const index = list.findIndex((t) => t.id === id);
     if (index === -1) return null;
 
@@ -358,9 +419,11 @@ export const TemplateService = {
     }
 
     list[index] = updatedTemplate;
-    this.cachedTemplatesByWs[wsKey] = list;
-    if (typeof window !== "undefined") {
-      localStorage.setItem(cacheKey, JSON.stringify(list));
+    if (scopedKey) {
+      this.cachedTemplatesByWs[scopedKey] = list;
+      if (typeof window !== "undefined") {
+        localStorage.setItem(`${TEMPLATE_STORAGE_KEY}_${scopedKey}`, JSON.stringify(list));
+      }
     }
     return updatedTemplate;
   },
@@ -376,13 +439,14 @@ export const TemplateService = {
         const body = await res.json();
         if (body.success && body.data) {
           const updated: TemplateItem = body.data;
-          const wsKey = this.getWorkspaceKey();
-          const cacheKey = `${TEMPLATE_STORAGE_KEY}_${wsKey}`;
-          const currentList = this.getAll();
-          const updatedList = currentList.map((t: TemplateItem) => (t.id === id ? updated : t));
-          this.cachedTemplatesByWs[wsKey] = updatedList;
-          if (typeof window !== "undefined") {
-            localStorage.setItem(cacheKey, JSON.stringify(updatedList));
+          const scopedKey = this.getScopedCacheKey(updated.workspaceId);
+          if (scopedKey) {
+            const currentList = this.getAll(updated.workspaceId);
+            const updatedList = currentList.map((t: TemplateItem) => (t.id === id ? updated : t));
+            this.cachedTemplatesByWs[scopedKey] = updatedList;
+            if (typeof window !== "undefined") {
+              localStorage.setItem(`${TEMPLATE_STORAGE_KEY}_${scopedKey}`, JSON.stringify(updatedList));
+            }
           }
           return updated;
         }
@@ -402,12 +466,13 @@ export const TemplateService = {
         headers: getAuthHeaders(),
       });
       if (res.ok) {
-        const wsKey = this.getWorkspaceKey();
-        const cacheKey = `${TEMPLATE_STORAGE_KEY}_${wsKey}`;
-        const filtered = this.getAll().filter((t) => t.id !== id);
-        this.cachedTemplatesByWs[wsKey] = filtered;
-        if (typeof window !== "undefined") {
-          localStorage.setItem(cacheKey, JSON.stringify(filtered));
+        const scopedKey = this.getScopedCacheKey();
+        if (scopedKey) {
+          const filtered = this.getAll().filter((t) => t.id !== id);
+          this.cachedTemplatesByWs[scopedKey] = filtered;
+          if (typeof window !== "undefined") {
+            localStorage.setItem(`${TEMPLATE_STORAGE_KEY}_${scopedKey}`, JSON.stringify(filtered));
+          }
         }
         return true;
       }
@@ -425,14 +490,15 @@ export const TemplateService = {
       }).catch((e) => console.warn("Background template delete error:", e));
     }
 
-    const wsKey = this.getWorkspaceKey();
-    const cacheKey = `${TEMPLATE_STORAGE_KEY}_${wsKey}`;
+    const scopedKey = this.getScopedCacheKey();
     const list = this.getAll();
     const filtered = list.filter((t) => t.id !== id);
     if (filtered.length === list.length) return false;
-    this.cachedTemplatesByWs[wsKey] = filtered;
-    if (typeof window !== "undefined") {
-      localStorage.setItem(cacheKey, JSON.stringify(filtered));
+    if (scopedKey) {
+      this.cachedTemplatesByWs[scopedKey] = filtered;
+      if (typeof window !== "undefined") {
+        localStorage.setItem(`${TEMPLATE_STORAGE_KEY}_${scopedKey}`, JSON.stringify(filtered));
+      }
     }
     return true;
   },

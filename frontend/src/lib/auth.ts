@@ -28,6 +28,9 @@ export interface ActiveWorkspace {
 const AUTH_USER_KEY = "audit_pro_auth_user";
 const AUTH_TOKEN_KEY = "audit_pro_auth_token";
 const AUTH_ACTIVE_WORKSPACE_KEY = "audit_pro_active_workspace";
+export const LOGOUT_TRANSITION_EVENT = "auth-logout-transition";
+
+let manualLogoutInProgress = false;
 export const LAST_ACTIVITY_KEY = "audit_pro_last_activity";
 export const LAST_REFRESH_KEY = "audit_pro_last_refresh";
 export const LOGOUT_EVENT_KEY = "audit_pro_logout_event";
@@ -140,6 +143,18 @@ export const AuthService = {
       localStorage.removeItem(LAST_ACTIVITY_KEY);
       localStorage.removeItem(LAST_REFRESH_KEY);
 
+      // Bersihkan cache template lintas workspace agar tidak bocor antar akun saat ganti login
+      try {
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && k.startsWith("audit_pro_template_checklist_v1")) {
+            keysToRemove.push(k);
+          }
+        }
+        keysToRemove.forEach((k) => localStorage.removeItem(k));
+      } catch {}
+
       if (options?.broadcast !== false) {
         try {
           localStorage.setItem(LOGOUT_EVENT_KEY, String(Date.now()));
@@ -167,6 +182,31 @@ export const AuthService = {
       } catch {}
     }
     this.logout(options);
+  },
+
+  isManualLogoutInProgress(): boolean {
+    return manualLogoutInProgress;
+  },
+
+  async logoutWithTransition(
+    reason: "logout" | "timeout" = "logout",
+    durationMs = 3000
+  ): Promise<void> {
+    if (typeof window === "undefined") return;
+    if (manualLogoutInProgress) return;
+
+    manualLogoutInProgress = true;
+    window.dispatchEvent(new Event(LOGOUT_TRANSITION_EVENT));
+
+    const startedAt = Date.now();
+    await this.logoutAsync({ broadcast: true });
+
+    const remaining = Math.max(0, durationMs - (Date.now() - startedAt));
+    if (remaining > 0) {
+      await new Promise<void>((resolve) => setTimeout(resolve, remaining));
+    }
+
+    window.location.replace(`/login?reason=${reason}`);
   },
 
   isAuthenticated(): boolean {

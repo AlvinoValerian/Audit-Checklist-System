@@ -38,6 +38,9 @@ export interface TemplateItem {
   itemsCount?: number;
   items?: ChecklistItem[];
   createdAt: string;
+  workspaceId?: string;
+  storeId?: string;
+  storeName?: string;
 }
 
 export interface TemplateStats {

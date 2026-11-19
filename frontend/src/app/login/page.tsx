@@ -3,12 +3,13 @@
 import React, { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Mail, Lock, Eye, EyeOff, Loader2, AlertCircle } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff, Loader2, AlertCircle, Monitor } from "lucide-react";
 import { Toaster, toast } from "sonner";
 
 import { ApiAuthService } from "@/services/auth.service";
 import { AuthService } from "@/lib/auth";
 import { resolvePostLoginRedirect } from "@/lib/routes-acl";
+import AuthVerificationLoading from "@/components/auth/AuthVerificationLoading";
 
 const REASON_MESSAGES: Record<string, { text: string; tone: "warning" | "error" | "info" }> = {
   timeout: {
@@ -39,6 +40,7 @@ function LoginContent() {
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   const handledReasonRef = useRef<string | null>(null);
   const reasonInfo = reason ? REASON_MESSAGES[reason] : undefined;
@@ -82,6 +84,7 @@ function LoginContent() {
       });
 
       const user = response.data?.user;
+      setIsLoggingIn(true);
       toast.success(response.message || "Login berhasil! Mengalihkan ke dashboard...");
 
       const targetUrl = resolvePostLoginRedirect(user?.role, redirectParam);
@@ -109,45 +112,53 @@ function LoginContent() {
           } catch {}
           window.location.href = "/workspace";
         }
-      }, 500);
+      }, 3000);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Terjadi kesalahan saat mencoba login.";
       toast.error(msg);
+      setIsLoggingIn(false);
     } finally {
       setIsLoading(false);
     }
   };
+
+  if (isLoggingIn) {
+    return <AuthVerificationLoading message="Loading..." />;
+  }
 
   return (
     <div className="min-h-screen w-full flex flex-col lg:flex-row font-sans bg-white">
       <Toaster position="top-right" richColors />
 
       {/* Tampilan Login sebelah kiri */}
-      <section className="w-full lg:w-1/2 bg-[#193f53] text-white flex flex-col justify-between p-8 sm:p-12 lg:p-16 xl:p-20 min-h-[420px] lg:min-h-screen relative select-none">
+      <section className="w-full lg:w-1/2 bg-[#193f53] text-white flex flex-col justify-between p-6 sm:p-10 lg:p-16 xl:p-20 lg:min-h-screen relative select-none">
         {/* Top: Logo & App Name */}
-        <div className="flex items-center gap-3.5 z-10">
+        <div className="flex items-center gap-3 z-10">
+          <div className="w-9 h-9 rounded-xl border border-white/20 flex items-center justify-center bg-white/[0.06]">
+            <Monitor className="w-4.5 h-4.5 text-white stroke-[2.2]" />
+          </div>
           <span className="text-xl font-bold tracking-tight text-white">
             Audit Pro
           </span>
         </div>
 
         {/* Center: Main Headline & Description */}
-        <div className="my-auto py-12 lg:py-0 z-10 max-w-xl">
-          <h1 className="text-3xl sm:text-4xl xl:text-[42px] font-bold text-white tracking-tight leading-[1.2]">
-            Sistem Monitoring & Audit Toko
+        <div className="my-auto py-7 sm:py-10 lg:py-0 z-10 max-w-xl">
+          <h1 className="text-2xl sm:text-4xl xl:text-[42px] font-bold text-white tracking-tight leading-[1.2]">
+            Standarisasi Operasional &amp;
             <br />
-            Terintegrasi
+            Audit Checklist
           </h1>
-          <p className="mt-5 text-sm sm:text-base text-slate-300 font-normal leading-relaxed max-w-md">
-            Tingkatkan efisiensi operasional dan akurasi data audit jaringan
-            toko Anda dalam satu platform terpusat.
+          <p className="mt-3 sm:mt-5 text-xs sm:text-base text-slate-300 font-normal leading-relaxed max-w-md">
+            Instrumen pelaksanaan inspeksi berkala, dokumentasi bukti fisik, dan
+            penilaian kepatuhan SOP gerai.
           </p>
         </div>
 
         {/* Bottom: Copyright Footer */}
-        <div className="z-10 pt-6">
+        <div className="z-10 pt-2 lg:pt-6">
           <p className="text-xs text-white/45 font-normal tracking-wide">
-            © 2026 Audit Pro Enterprise Monitor. All rights reserved.
+            © 2026 Audit Pro. All rights reserved.
           </p>
         </div>
       </section>
@@ -161,7 +172,7 @@ function LoginContent() {
               Selamat Datang
             </h2>
             <p className="text-xs sm:text-sm text-slate-500 mt-1">
-              Masuk dengan akun Super Admin atau Admin workspace Anda.
+              Masuk dengan email dan kata sandi akun Anda.
             </p>
           </div>
 
