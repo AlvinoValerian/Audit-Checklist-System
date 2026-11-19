@@ -124,11 +124,11 @@ export const AuthService = {
     if (typeof window === "undefined") return Date.now();
     try {
       const raw = localStorage.getItem(LAST_REFRESH_KEY);
-      if (!raw) return 0;
+      if (!raw) return Date.now();
       const parsed = Number(raw);
-      return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : Date.now();
     } catch {
-      return 0;
+      return Date.now();
     }
   },
 

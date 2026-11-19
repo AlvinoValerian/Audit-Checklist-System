@@ -122,9 +122,14 @@ export default function SessionManager({ children }: { children: React.ReactNode
       let cancelled = false;
       (async () => {
         try {
+          const token = AuthService.getToken();
+          const headers: Record<string, string> = {};
+          if (token) headers["Authorization"] = `Bearer ${token}`;
+
           const res = await fetch("/api/auth/me", {
             method: "GET",
             credentials: "include",
+            headers,
             cache: "no-store",
           });
           if (cancelled || isLoggingOutRef.current || AuthService.isManualLogoutInProgress()) return;

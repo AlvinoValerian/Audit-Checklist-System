@@ -215,14 +215,14 @@ export default function SmartAuditPagination({
             onClick={() => onPageChange(Math.max(currentPage - 1, 1))}
             disabled={currentPage === 1}
             aria-label="Halaman Sebelumnya"
-            className={`h-7 px-2 flex items-center justify-center rounded-md border border-slate-200 transition-colors ${
+            className={`h-7 px-2.5 flex items-center justify-center rounded-md border border-slate-200 transition-colors mr-1 ${
               currentPage === 1
                 ? "text-slate-300 border-slate-100 cursor-not-allowed"
-                : "text-slate-600 hover:bg-slate-50 cursor-pointer"
+                : "text-slate-600 hover:bg-slate-50 cursor-pointer font-bold"
             }`}
           >
-            <ChevronLeft className="w-4 h-4 mr-0.5" />
-            <span className="hidden md:inline font-medium">Prev</span>
+            <ChevronLeft className="w-3.5 h-3.5 mr-0.5" />
+            <span className="inline font-bold">Sebelumnya</span>
           </button>
 
           {/* Smart Number Buttons (Desktop & Tablet) */}

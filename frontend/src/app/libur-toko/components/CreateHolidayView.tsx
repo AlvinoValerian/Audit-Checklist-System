@@ -335,14 +335,14 @@ export default function CreateHolidayView({
       alert("Toko sudah diliburkan penuh pada tanggal ini. Tidak dapat menyimpan jadwal.");
       return;
     }
-    if (!initialData && liburType === "full" && startDate === todayStr && totalSchedulesCount > 0 && unavailableScheduleIds.length >= totalSchedulesCount) {
-      alert("Seluruh jadwal audit toko hari ini sudah terlewat jam operasionalnya!");
+    if (!initialData && liburType === "full" && startDate === todayStr && (!endDate || endDate === todayStr) && totalSchedulesCount > 0 && unavailableScheduleIds.length >= totalSchedulesCount) {
+      alert("Seluruh jadwal audit toko hari ini sedang berjalan atau sudah terlewat jam operasionalnya!");
       return;
     }
-    if (!initialData && liburType === "partial") {
+    if (!initialData && liburType === "partial" && startDate === todayStr && (!endDate || endDate === todayStr)) {
       const validSchedules = selectedSchedules.filter((id) => !unavailableScheduleIds.includes(id));
       if (validSchedules.length === 0) {
-        alert("Jadwal audit yang dipilih sudah terlewat jam operasionalnya untuk hari ini!");
+        alert("Jadwal audit yang dipilih sedang berjalan atau sudah terlewat jam operasionalnya untuk hari ini!");
         return;
       }
     }
@@ -401,64 +401,93 @@ export default function CreateHolidayView({
     }
   };
 
-  // 1. Ambil jadwal toko terpilih yang BENAR-BENAR BERJALAN PADA HARI INI
-  const todayActiveSchedules = selectedStoreSchedules.filter((s) => {
-    return isScheduleActiveOnDate(s, todayStr);
-  });
+  // Helper penentu status jadwal audit hari ini: "completed" | "finished" | "running" | "upcoming"
+  const getScheduleStatusToday = (schedule: {
+    timeRange?: string;
+    time?: string;
+    startTime?: string;
+    endTime?: string;
+    isCompletedToday?: boolean;
+    status?: string;
+  }): "completed" | "finished" | "running" | "upcoming" => {
+    if (schedule.isCompletedToday || schedule.status === "Selesai") {
+      return "completed";
+    }
 
-  const isScheduleFinishedToday = (s: AuditSchedule): boolean => {
-    // a. Jika laporan sudah diserahkan / dikerjakan hari ini
-    if (s.isCompletedToday) return true;
-
-    // b. Cek apakah jam operasional jadwal hari ini sudah terlewat
-    let startStr = s.startTime;
-    let endStr = s.endTime;
-    if ((!startStr || !endStr) && s.timeRange) {
-      const parts = s.timeRange.replace(/WIB/gi, "").split("-");
+    let startStr = schedule.startTime;
+    let endStr = schedule.endTime;
+    const timeRange = schedule.timeRange || schedule.time;
+    if ((!startStr || !endStr) && timeRange) {
+      const parts = timeRange.replace(/WIB/gi, "").split("-");
       if (parts.length >= 2) {
         if (!startStr) startStr = parts[0].trim();
         if (!endStr) endStr = parts[1].trim();
       }
     }
 
-    if (endStr) {
-      const cleanEnd = endStr.replace(/[^\d:]/g, "");
-      const eParts = cleanEnd.split(":").map(Number);
-      if (eParts.length >= 2 && !isNaN(eParts[0])) {
-        const now = new Date();
-        const currentMinutes = now.getHours() * 60 + now.getMinutes();
-        const endMinutes = eParts[0] * 60 + (isNaN(eParts[1]) ? 0 : eParts[1]);
+    if (!startStr && !endStr) {
+      return schedule.status === "Sedang Berjalan" ? "running" : "upcoming";
+    }
 
-        let startMinutes = 0;
-        if (startStr) {
-          const cleanStart = startStr.replace(/[^\d:]/g, "");
-          const sParts = cleanStart.split(":").map(Number);
-          if (sParts.length >= 2 && !isNaN(sParts[0])) {
-            startMinutes = sParts[0] * 60 + (isNaN(sParts[1]) ? 0 : sParts[1]);
-          }
-        }
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
 
-        if (endMinutes >= startMinutes) {
-          // Normal shift di hari yang sama (misal 08:00 - 12:00)
-          return currentMinutes > endMinutes;
-        } else {
-          // Shift malam lintas hari (misal 22:00 - 02:00)
-          return currentMinutes > endMinutes && currentMinutes < startMinutes;
-        }
+    let startMinutes: number | null = null;
+    let endMinutes: number | null = null;
+
+    if (startStr) {
+      const cleanStart = startStr.replace(/[^\d:]/g, "");
+      const [sH, sM] = cleanStart.split(":").map(Number);
+      if (!isNaN(sH)) {
+        startMinutes = sH * 60 + (isNaN(sM) ? 0 : sM);
       }
     }
 
-    // c. Fallback ke status jadwal
-    return s.status === "Selesai";
+    if (endStr) {
+      const cleanEnd = endStr.replace(/[^\d:]/g, "");
+      const [eH, eM] = cleanEnd.split(":").map(Number);
+      if (!isNaN(eH)) {
+        endMinutes = eH * 60 + (isNaN(eM) ? 0 : eM);
+      }
+    }
+
+    if (startMinutes !== null) {
+      if (endMinutes !== null) {
+        if (endMinutes >= startMinutes) {
+          // Normal shift di hari yang sama (misal 08:00 - 12:00)
+          if (currentMinutes > endMinutes) return "finished";
+          if (currentMinutes >= startMinutes) return "running";
+        } else {
+          // Shift malam lintas hari (misal 22:00 - 02:00)
+          if (currentMinutes > endMinutes && currentMinutes < startMinutes) return "finished";
+          if (currentMinutes >= startMinutes || currentMinutes <= endMinutes) return "running";
+        }
+      } else {
+        if (currentMinutes >= startMinutes) return "running";
+      }
+    }
+
+    return "upcoming";
   };
 
-  const todayTotalCount = todayActiveSchedules.length;
-  // Selesai hari ini dihitung jika laporan audit sudah diserahkan atau jam operasionalnya telah selesai
-  const todayCompletedCount = todayActiveSchedules.filter(isScheduleFinishedToday).length;
+  // 1. Ambil jadwal toko terpilih yang BENAR-BENAR BERJALAN PADA HARI INI
+  const todayActiveSchedules = selectedStoreSchedules.filter((s) => {
+    return isScheduleActiveOnDate(s, todayStr);
+  });
 
-  const isAllCompletedToday = todayTotalCount > 0 && todayCompletedCount >= todayTotalCount;
-  const isPartialCompletedToday = todayTotalCount > 0 && todayCompletedCount > 0 && todayCompletedCount < todayTotalCount;
-  const hasCompletedScheduleToday = isAllCompletedToday || isPartialCompletedToday;
+  const todayTotalCount = todayActiveSchedules.length;
+  // Jadwal yang tidak dapat diliburkan hari ini: sudah selesai, lewat jam operasional, atau sedang berjalan
+  const todayUnavailableCount = todayActiveSchedules.filter((s) => {
+    const st = getScheduleStatusToday(s);
+    return st === "completed" || st === "finished" || st === "running";
+  }).length;
+
+  // Selesai atau sedang berjalan seluruhnya (semua shift hari ini sudah mulai / lewat / selesai) -> Hijau Tua
+  const isAllPassedOrRunningToday = todayTotalCount > 0 && todayUnavailableCount >= todayTotalCount;
+  // Selesai atau berjalan sebagian (masih ada shift mendatang yang belum mulai) -> Hijau Muda
+  const isPartialPassedOrRunningToday =
+    todayTotalCount > 0 && todayUnavailableCount > 0 && todayUnavailableCount < todayTotalCount;
+  const hasPassedOrRunningScheduleToday = isAllPassedOrRunningToday || isPartialPassedOrRunningToday;
 
   // 2. Filter jadwal nyata sesuai cabang toko dan hari operasional rentang tanggal yang dipilih
   const schedules = selectedStoreSchedules
@@ -468,33 +497,39 @@ export default function CreateHolidayView({
       }
       return isScheduleActiveInRange(s, startDate, endDate);
     })
-    .map((s) => ({
-      id: s.id,
-      name: s.scheduleName,
-      time: s.timeRange,
-      desc: s.templateName || "Checklist Operasional",
-      startTime: s.startTime || s.timeRange.split(" - ")[0],
-      storeName: s.storeName,
-      recurrence: s.recurrence,
-      selectedDays: s.selectedDays,
-    }));
+    .map((s) => {
+      let startStr = s.startTime;
+      let endStr = s.endTime;
+      if ((!startStr || !endStr) && s.timeRange) {
+        const parts = s.timeRange.replace(/WIB/gi, "").split("-");
+        if (parts.length >= 2) {
+          if (!startStr) startStr = parts[0].trim();
+          if (!endStr) endStr = parts[1].trim();
+        }
+      }
+      return {
+        id: s.id,
+        name: s.scheduleName,
+        time: s.timeRange,
+        desc: s.templateName || "Checklist Operasional",
+        startTime: startStr || s.timeRange.split(" - ")[0],
+        endTime: endStr,
+        storeName: s.storeName,
+        recurrence: s.recurrence,
+        selectedDays: s.selectedDays,
+        isCompletedToday: s.isCompletedToday,
+        status: s.status,
+      };
+    });
 
   const unavailableScheduleIds = schedules
     .filter((schedule) => {
       if (takenSchedules.includes(schedule.id)) return true;
-      // Pengecekan jam operasional yang telah lewat hanya diterapkan saat membuat libur baru, bukan saat edit
+      // Pengecekan jam operasional yang telah lewat atau sedang berjalan hanya diterapkan saat membuat libur baru untuk hari ini
       if (!initialData && startDate && startDate === todayStr) {
-        const now = new Date();
-        const timePart = schedule.startTime || schedule.time.split(" - ")[0];
-        const cleanTime = timePart.replace(/[^\d:]/g, "");
-        const [startH, startM] = cleanTime.split(":").map(Number);
-
-        if (!isNaN(startH)) {
-          const currentH = now.getHours();
-          const currentM = now.getMinutes();
-          if (currentH > startH || (currentH === startH && currentM >= (isNaN(startM) ? 0 : startM))) {
-            return true;
-          }
+        const st = getScheduleStatusToday(schedule);
+        if (st === "completed" || st === "finished" || st === "running") {
+          return true;
         }
       }
       return false;
@@ -523,6 +558,7 @@ export default function CreateHolidayView({
     !initialData &&
     liburType === "full" &&
     startDate === todayStr &&
+    (!endDate || endDate === todayStr) &&
     totalSchedulesCount > 0 &&
     unavailableScheduleIds.length >= totalSchedulesCount
   );
@@ -972,6 +1008,14 @@ export default function CreateHolidayView({
                       cellCls =
                         "bg-amber-300 text-amber-950 font-bold border-amber-400 shadow-xs hover:bg-amber-400 cursor-pointer";
                       if (isInRange) cellCls += " ring-2 ring-blue-600 ring-offset-1";
+                    } else if (isToday && isAllPassedOrRunningToday) {
+                      cellCls =
+                        "bg-emerald-600 text-white font-bold border-emerald-700 shadow-xs hover:bg-emerald-700 cursor-pointer";
+                      if (isInRange) cellCls += " ring-2 ring-[#193f53] ring-offset-1";
+                    } else if (isToday && isPartialPassedOrRunningToday) {
+                      cellCls =
+                        "bg-emerald-300 text-emerald-950 font-bold border-emerald-400 shadow-xs hover:bg-emerald-400 cursor-pointer";
+                      if (isInRange) cellCls += " ring-2 ring-[#193f53] ring-offset-1";
                     } else if (isInRange) {
                       if (isSelectedStart || isSelectedEnd) {
                         cellCls = "bg-[#193f53] text-white font-bold border-[#193f53] shadow-xs cursor-pointer";
@@ -979,15 +1023,7 @@ export default function CreateHolidayView({
                         cellCls = "bg-blue-100/80 text-blue-900 font-semibold border-blue-200 cursor-pointer";
                       }
                     } else if (isToday) {
-                      if (isAllCompletedToday) {
-                        cellCls =
-                          "bg-emerald-600 text-white font-bold border-emerald-700 shadow-xs hover:bg-emerald-700 cursor-pointer";
-                      } else if (isPartialCompletedToday) {
-                        cellCls =
-                          "bg-emerald-300 text-emerald-950 font-bold border-emerald-400 shadow-xs hover:bg-emerald-400 cursor-pointer";
-                      } else {
-                        cellCls = "bg-white text-blue-700 font-bold border-blue-400 ring-1 ring-blue-400 cursor-pointer";
-                      }
+                      cellCls = "bg-white text-blue-700 font-bold border-blue-400 ring-1 ring-blue-400 cursor-pointer";
                     }
 
                     return (
@@ -1003,12 +1039,16 @@ export default function CreateHolidayView({
                             ? "Tanggal sudah terlewat"
                             : isNonOperational
                             ? "Tidak ada jadwal audit pada hari ini"
+                            : isToday && isAllPassedOrRunningToday
+                            ? "Semua jadwal hari ini sedang berjalan atau telah selesai/terlewat (tidak dapat diliburkan)"
+                            : isToday && isPartialPassedOrRunningToday
+                            ? "Sebagian jadwal hari ini sedang berjalan atau telah selesai/terlewat"
                             : undefined
                         }
                         className={`h-9 sm:h-9.5 rounded-lg border flex flex-col items-center justify-center relative transition-all text-[11px] ${cellCls}`}
                       >
                         <span>{d}</span>
-                        {isToday && !hasCompletedScheduleToday && !isNonOperational && !isInRange && !isFullHoliday && !isPartialHoliday && (
+                        {isToday && !hasPassedOrRunningScheduleToday && !isNonOperational && !isInRange && !isFullHoliday && !isPartialHoliday && (
                           <div className="w-1 h-1 rounded-full bg-blue-600 absolute bottom-1" />
                         )}
                       </button>
@@ -1043,11 +1083,11 @@ export default function CreateHolidayView({
                     </div>
                     <div className="flex items-center gap-1.5">
                       <div className="w-2.5 h-2.5 rounded bg-emerald-600" />
-                      <span>Jadwal Selesai</span>
+                      <span>Selesai / Sedang Berjalan</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <div className="w-2.5 h-2.5 rounded bg-emerald-300 border border-emerald-400" />
-                      <span>Selesai Sebagian</span>
+                      <span>Selesai / Berjalan Sebagian</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <div className="w-2.5 h-2.5 rounded bg-slate-100 border border-slate-300" />
@@ -1212,23 +1252,21 @@ export default function CreateHolidayView({
                   <div className="flex items-start gap-3 p-4 rounded-xl border mb-5 bg-amber-50/70 border-amber-200 text-amber-900">
                     <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
                     <div>
-                      <h4 className="text-xs font-bold mb-1">Seluruh Jam Audit Hari Ini Telah Terlewat</h4>
+                      <h4 className="text-xs font-bold mb-1">Seluruh Jam Audit Hari Ini Telah Terlewat / Sedang Berjalan</h4>
                       <p className="text-[11px] opacity-90 leading-relaxed">
-                        Semua shift jam audit untuk hari ini telah selesai atau terlewat. Silakan pilih tanggal besok atau
-                        setelahnya.
+                        Semua shift jam audit untuk hari ini sedang berjalan atau telah selesai/terlewat. Jadwal yang sudah berjalan tidak dapat diliburkan. Silakan pilih tanggal besok atau setelahnya.
                       </p>
                     </div>
                   </div>
                 )}
 
-                {!isTodayAllShiftsPassed && hasNoAvailableSchedules && liburType === "partial" && startDate === todayStr && (
+                {!isTodayAllShiftsPassed && hasNoAvailableSchedules && liburType === "partial" && startDate === todayStr && (!endDate || endDate === todayStr) && (
                   <div className="flex items-start gap-3 p-4 rounded-xl border mb-5 bg-amber-50/70 border-amber-200 text-amber-900">
                     <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
                     <div>
-                      <h4 className="text-xs font-bold mb-1">Shift Jam Audit Telah Terlewat</h4>
+                      <h4 className="text-xs font-bold mb-1">Shift Jam Audit Sedang Berjalan / Telah Terlewat</h4>
                       <p className="text-[11px] opacity-90 leading-relaxed">
-                        Shift audit yang Anda pilih untuk hari ini sudah terlewat jam mulainya. Tidak dapat menambahkan
-                        pengecualian libur untuk jam yang sudah berlalu.
+                        Shift audit yang Anda pilih untuk hari ini sedang berjalan atau sudah terlewat jam mulainya. Tidak dapat menambahkan pengecualian libur untuk jadwal yang sedang atau sudah berjalan.
                       </p>
                     </div>
                   </div>
@@ -1260,7 +1298,9 @@ export default function CreateHolidayView({
                       schedules.map((schedule) => {
                         const isTaken = takenSchedules.includes(schedule.id);
                         const isUnavailable = unavailableScheduleIds.includes(schedule.id);
-                        const isExpired = isUnavailable && !isTaken;
+                        const schedStatus = startDate === todayStr ? getScheduleStatusToday(schedule) : "upcoming";
+                        const isRunning = schedStatus === "running";
+                        const isExpired = isUnavailable && !isTaken && !isRunning;
                         const isLibur = isUnavailable || liburType === "full" || activeSelected.includes(schedule.id);
 
                         return (
@@ -1295,7 +1335,7 @@ export default function CreateHolidayView({
                                   <h4 className="text-xs font-bold text-slate-900">{schedule.name}</h4>
                                   {isUnavailable ? (
                                     <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase rounded bg-slate-200 text-slate-600">
-                                      {isExpired ? "SUDAH TERLEWAT" : "SUDAH DILIBURKAN"}
+                                      {isTaken ? "SUDAH DILIBURKAN" : isRunning ? "SEDANG BERJALAN" : "SUDAH TERLEWAT"}
                                     </span>
                                   ) : (
                                     <span
@@ -1318,7 +1358,11 @@ export default function CreateHolidayView({
                             </div>
 
                             <div className="flex items-center gap-1.5 shrink-0">
-                              {isUnavailable ? null : isLibur ? (
+                              {isUnavailable ? (
+                                <span className="flex items-center gap-1.5 text-xs font-bold text-slate-500">
+                                  {isRunning ? "Sedang Berjalan" : isTaken ? "Diliburkan" : "Selesai"}
+                                </span>
+                              ) : isLibur ? (
                                 <span className="flex items-center gap-1.5 text-xs font-bold text-red-500">
                                   <XCircle className="w-4 h-4" /> Libur
                                 </span>
