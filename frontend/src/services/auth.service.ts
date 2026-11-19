@@ -14,6 +14,7 @@ export interface RegisterPayload {
   phoneNumber: string;
   companyName: string;
   password: string;
+  plan?: string;
 }
 
 export interface RegisterResponse {
@@ -62,6 +63,7 @@ export const ApiAuthService = {
           phoneNumber: payload.phoneNumber.trim(),
           companyName: payload.companyName.trim(),
           password: payload.password,
+          plan: payload.plan || "standard",
         }),
       });
     } catch (networkErr: unknown) {
@@ -231,6 +233,35 @@ export const ApiAuthService = {
             : {}),
       };
       LocalAuthService.setCurrentUser(updatedUser);
+    }
+  },
+
+  /**
+   * Mengambil data profil user terbaru langsung dari database PostgreSQL via backend (/api/auth/me)
+   */
+  async getMe(): Promise<AuthUser | null> {
+    try {
+      const token = LocalAuthService.getToken();
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      const res = await apiFetch(`${BACKEND_URL}/api/auth/me`, {
+        method: "GET",
+        headers,
+      });
+
+      if (!res.ok) return null;
+      const json = await res.json().catch(() => ({}));
+      if (json?.data?.user) {
+        const user = json.data.user as AuthUser;
+        LocalAuthService.setCurrentUser(user);
+        return user;
+      }
+      return null;
+    } catch {
+      return null;
     }
   },
 };

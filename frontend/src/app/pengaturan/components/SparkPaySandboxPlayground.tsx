@@ -22,7 +22,7 @@ import {
 import { toast } from "sonner";
 import SparkPayCheckoutModal, { SparkPayCheckoutData } from "./SparkPayCheckoutModal";
 
-export default function SparkPaySandboxPlayground() {
+export default function SparkPaySandboxPlayground() { 
   // Environment & Credentials
   const [environment, setEnvironment] = useState<"sandbox" | "production">("sandbox");
   const [serverKey, setServerKey] = useState("sk_test_51687cb2e81ee70b1c634b90e79e4917057cf212505bad90");
