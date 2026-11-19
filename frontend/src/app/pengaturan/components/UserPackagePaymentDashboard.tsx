@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import {
   CreditCard,
   CheckCircle2,
@@ -25,9 +26,11 @@ import EmptyStateTable from "@/components/ui/EmptyStateTable";
 // Interface untuk Data Pembayaran / Invoice Paket
 export interface UserSubscriptionItem {
   id: string;
+  superAdminId?: string;
   name: string;
   email: string;
   role: string;
+  phone?: string;
   avatar?: string;
   packageName: "Starter" | "Pro" | "Enterprise";
   nominal: number;
@@ -101,6 +104,7 @@ const INITIAL_USER_SUBSCRIPTIONS: UserSubscriptionItem[] = [
 ];
 
 export default function UserPackagePaymentDashboard() {
+  const router = useRouter();
   // State Data
   const [usersList, setUsersList] = useState<UserSubscriptionItem[]>(INITIAL_USER_SUBSCRIPTIONS);
   const [payerInfo, setPayerInfo] = useState<{
@@ -135,9 +139,11 @@ export default function UserPackagePaymentDashboard() {
           if (Array.isArray(json.data.users) && json.data.users.length > 0) {
             const mappedUsers: UserSubscriptionItem[] = json.data.users.map((u: any) => ({
               id: u.id,
+              superAdminId: u.superAdminId,
               name: u.name || "Anton Kurniawan",
               email: u.email || "admin@auditcorp.com",
               role: u.role || "Super Admin",
+              phone: u.phone,
               packageName: u.packageName,
               nominal: u.nominal,
               billingCycle: u.billingCycle || "Bulanan",
@@ -230,57 +236,92 @@ export default function UserPackagePaymentDashboard() {
     });
   }, [usersList, searchQuery, filterStatus, filterPackage]);
 
-  // Handle Klik Bayar via SparkPay
+  // Handle Klik Bayar via SparkPay -> Arahkan ke Halaman Checkout Dedicated
   const handleInitiatePayment = (user: UserSubscriptionItem) => {
-    setPayingUser(user);
-    setCheckoutData({
-      slug: `paket-${user.packageName.toLowerCase()}`,
-      external_reference: user.invoiceNumber,
-      title: `Pembayaran Paket Langganan ${user.packageName} (${user.billingCycle})`,
-      amount: user.nominal,
-      currency: "IDR",
-      customer: {
-        name: user.name || payerInfo.name || "Anton Kurniawan",
-        email: user.email || payerInfo.email || "admin@auditcorp.com",
-        phone: payerInfo.phone || "081234567890",
-      },
-      items: [
-        {
-          name: `Paket Langganan ${user.packageName} (${user.billingCycle})`,
-          quantity: 1,
-          price: user.nominal,
-        },
-      ],
+    // Jika Super Admin sudah lunas, jangan pernah mengeluarkan pop up pembayaran!
+    if (user.status === "Lunas") {
+      toast.info(`Akun Super Admin ${user.name} sudah berstatus LUNAS.`);
+      return;
+    }
+
+    try {
+      localStorage.setItem("audit_pro_checkout_item", JSON.stringify(user));
+    } catch {}
+
+    const params = new URLSearchParams({
+      id: user.id,
+      superAdminId: user.superAdminId || "",
+      name: user.name || payerInfo.name || "Anton Kurniawan",
+      email: user.email || payerInfo.email || "admin@auditcorp.com",
+      package: user.packageName || "Standard Plan",
+      nominal: String(user.nominal || 150000),
+      invoice: user.invoiceNumber || "",
+      cycle: user.billingCycle || "Bulanan",
     });
-    setIsCheckoutOpen(true);
+
+    router.push(`/checkout?${params.toString()}`);
   };
 
-  // Handle Sukses Pembayaran SparkPay
-  const handlePaymentSuccess = (result: any) => {
+  // Handle Sukses Pembayaran SparkPay (Simpan ke Database PostgreSQL tabel super_admin)
+  const handlePaymentSuccess = async (result: any) => {
     if (payingUser) {
+      const paymentMethodChosen = result?.paymentMethod || "QRIS SparkPay";
+      try {
+        // Simpan status Lunas ke database super_admin
+        const res = await fetch("http://localhost:5000/api/sparkpay/confirm-payment", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            superAdminId: payingUser.superAdminId,
+            email: payingUser.email,
+            invoiceNumber: payingUser.invoiceNumber,
+            packageName: payingUser.packageName,
+            nominal: payingUser.nominal,
+            paymentMethod: paymentMethodChosen,
+          }),
+        });
+
+        if (res.ok) {
+          toast.success(
+            `Pembayaran ${payingUser.invoiceNumber} berhasil! Status Super Admin ${payingUser.name} telah disimpan ke database sebagai LUNAS.`
+          );
+        }
+      } catch (err) {
+        console.error("Gagal sinkronisasi pembayaran ke database:", err);
+      }
+
+      const nowStr =
+        new Date().toLocaleString("id-ID", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        }) + " WIB";
+
       setUsersList((prev) =>
         prev.map((item) => {
-          if (item.id === payingUser.id) {
+          if (
+            item.id === payingUser.id ||
+            (payingUser.superAdminId && item.superAdminId === payingUser.superAdminId) ||
+            (payingUser.email && item.email === payingUser.email)
+          ) {
             return {
               ...item,
               status: "Lunas",
-              paymentMethod: result.paymentMethod || "QRIS SparkPay",
-              lastPaymentDate:
-                new Date().toLocaleString("id-ID", {
-                  day: "2-digit",
-                  month: "short",
-                  year: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                }) + " WIB",
+              paymentMethod: paymentMethodChosen,
+              lastPaymentDate: nowStr,
             };
           }
           return item;
         })
       );
-      toast.success(
-        `Pembayaran ${payingUser.invoiceNumber} sebesar ${formatRupiah(payingUser.nominal)} berhasil dilunasi oleh Anton Kurniawan!`
-      );
+
+      setTimeout(() => {
+        fetchDbUsers();
+      }, 500);
     }
     setIsCheckoutOpen(false);
   };
@@ -638,15 +679,21 @@ export default function UserPackagePaymentDashboard() {
                           <span>Bayar via SparkPay</span>
                         </button>
                       ) : (
-                        <button
-                          type="button"
-                          onClick={() => setSelectedInvoice(user)}
-                          className="inline-flex items-center gap-1 text-xs font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer"
-                        >
-                          <FileText className="w-3.5 h-3.5" />
-                          <span>Detail Invoice</span>
-                          <ChevronRight className="w-3 h-3" />
-                        </button>
+                        <div className="flex items-center justify-center gap-1.5">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Lunas</span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedInvoice(user)}
+                            className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 hover:text-indigo-800 p-1.5 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
+                            title="Lihat Detail Kwitansi"
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                            <span>Kwitansi</span>
+                          </button>
+                        </div>
                       )}
                     </td>
                   </tr>

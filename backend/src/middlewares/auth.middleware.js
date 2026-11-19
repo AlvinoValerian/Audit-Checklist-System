@@ -3,7 +3,7 @@ const prisma = require('../config/prisma');
 
 const AUTH_COOKIE_NAME = 'audit_pro_token';
 const getJwtSecret = () =>
-  process.env.JWT_SECRET || 'audit_checklist_system_jwt_secret_key_2024';
+  (process.env.JWT_SECRET || 'audit_checklist_system_jwt_secret_key_2024').trim().replace(/^["']|["']$/g, '');
 
 const getStaffExtras = async (staffId) => {
   try {

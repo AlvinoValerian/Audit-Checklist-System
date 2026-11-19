@@ -71,6 +71,11 @@ const formatAuthSuperAdmin = (sa, token) => {
       role: 'Super Admin',
       status: 'Aktif',
       profilePicture: sa.profile_picture || null,
+      paymentStatus: sa.payment_status || 'Menunggu Bayar',
+      paymentPackage: sa.payment_package || 'Starter',
+      paidAt: sa.paid_at || null,
+      expiryDate: sa.expiry_date || null,
+      isPaid: sa.payment_status === 'Lunas',
     },
   };
 };
@@ -217,6 +222,13 @@ exports.register = async (req, res) => {
     // Hash kata sandi dengan bcrypt
     const hashedPassword = await bcrypt.hash(rawPassword, 10);
 
+    const initialPlan = (req.body.plan || req.body.selectedPlan || req.body.packageName || 'Standard Plan').toString().toLowerCase();
+    const formattedPlan = initialPlan.includes('lite')
+      ? 'Lite Plan'
+      : initialPlan.includes('pro')
+      ? 'Pro Plan'
+      : 'Standard Plan';
+
     // 1. Simpan akun ke tabel super_admin
     const newSuperAdmin = await prisma.super_admin.create({
       data: {
@@ -225,6 +237,8 @@ exports.register = async (req, res) => {
         phone_number: rawPhone || null,
         company_name: rawCompany || 'Perusahaan Retail',
         password: hashedPassword,
+        payment_package: formattedPlan,
+        payment_status: 'Menunggu Bayar',
       },
     });
 

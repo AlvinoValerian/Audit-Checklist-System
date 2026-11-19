@@ -1,10 +1,12 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { Settings, User } from "lucide-react";
+import { Settings, User, CreditCard, Sparkles } from "lucide-react";
 import { usePathname } from "next/navigation";
 import ProfileModal from "./ProfileModal";
+import SubscriptionPricingModal from "./SubscriptionPricingModal";
 import { AuthService } from "@/lib/auth";
+import { ApiAuthService } from "@/services/auth.service";
 import { CryptoService } from "@/lib/crypto";
 import { WorkspaceService } from "@/services/workspace.service";
 import DecryptedImage from "@/components/DecryptedImage";
@@ -34,6 +36,7 @@ export default function TopBar({
   const pathname = usePathname();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [isPricingModalOpen, setIsPricingModalOpen] = useState(false);
 
   // Dynamic user data states (start empty to prevent flashing static/dummy values)
   const [currentAdminName, setCurrentAdminName] = useState("");
@@ -135,7 +138,7 @@ export default function TopBar({
       setAvatar(null);
     }
 
-    // Sync paket langganan yang dibeli (Hanya untuk Super Admin karena hanya Super Admin yang membeli paket)
+    // Sync paket langganan yang dibeli (Hanya untuk Super Admin yang SUDAH LUNAS di database)
     try {
       const isSuperAdmin =
         resolvedRole === "Super Admin" || currentUser?.role === "Super Admin";
@@ -143,30 +146,68 @@ export default function TopBar({
       if (!isSuperAdmin) {
         setPurchasedPlan(null);
       } else {
-        const plan =
-          localStorage.getItem("active_subscription_plan") ||
-          localStorage.getItem("selected_checkout_plan");
-        const isPaid = localStorage.getItem("superadmin_paid") === "true";
-        const billingCycle = localStorage.getItem("selected_billing_cycle");
-        const isYearly =
-          billingCycle === "yearly" ||
-          billingCycle === "annual" ||
-          billingCycle === "tahunan";
-        const cycleLabel = isYearly ? " (Tahunan)" : "";
+        const isPaid =
+          (currentUser as any)?.isPaid === true ||
+          (currentUser as any)?.paymentStatus === "Lunas" ||
+          (currentUser as any)?.payment_status === "Lunas" ||
+          localStorage.getItem("superadmin_paid") === "true";
 
-        if (plan) {
-          const formatted =
-            plan.toLowerCase() === "lite"
+        if (!isPaid) {
+          // JANGAN BUAT/TAMPILKAN LABEL SEBELUM MELAKUKAN PEMBAYARAN
+          setPurchasedPlan(null);
+          localStorage.removeItem("active_subscription_plan");
+        } else {
+          const plan =
+            localStorage.getItem("active_subscription_plan") ||
+            (currentUser as any)?.paymentPackage ||
+            (currentUser as any)?.payment_package ||
+            localStorage.getItem("selected_checkout_plan");
+
+          if (plan) {
+            const lower = String(plan).toLowerCase();
+            const formatted = lower.includes("lite")
               ? "Lite Plan"
-              : plan.toLowerCase() === "pro"
+              : lower.includes("pro")
               ? "Pro Plan"
               : "Standard Plan";
-          setPurchasedPlan(formatted + cycleLabel);
-        } else if (isPaid) {
-          setPurchasedPlan("Standard Plan" + cycleLabel);
-        } else {
-          setPurchasedPlan(null);
+            setPurchasedPlan(formatted);
+          } else {
+            setPurchasedPlan("Standard Plan");
+          }
         }
+
+        // Verifikasi langsung dengan data database PostgreSQL (/api/auth/me)
+        ApiAuthService.getMe()
+          .then((freshUser) => {
+            if (freshUser) {
+              const isFreshPaid =
+                freshUser.isPaid === true ||
+                freshUser.paymentStatus === "Lunas" ||
+                freshUser.payment_status === "Lunas";
+
+              if (!isFreshPaid) {
+                setPurchasedPlan(null);
+                localStorage.removeItem("active_subscription_plan");
+                localStorage.removeItem("superadmin_paid");
+              } else {
+                const freshPlan =
+                  freshUser.paymentPackage ||
+                  freshUser.payment_package ||
+                  localStorage.getItem("active_subscription_plan") ||
+                  "Standard Plan";
+                const lower = String(freshPlan).toLowerCase();
+                const formatted = lower.includes("lite")
+                  ? "Lite Plan"
+                  : lower.includes("pro")
+                  ? "Pro Plan"
+                  : "Standard Plan";
+                setPurchasedPlan(formatted);
+                localStorage.setItem("superadmin_paid", "true");
+                localStorage.setItem("active_subscription_plan", formatted);
+              }
+            }
+          })
+          .catch(() => {});
       }
     } catch {
       setPurchasedPlan(null);
@@ -242,7 +283,7 @@ export default function TopBar({
               className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200/90 text-emerald-800 text-xs font-bold shadow-2xs"
               title={`Paket Langganan Aktif: ${purchasedPlan}`}
             >
-              <span>Paket: {purchasedPlan}</span>
+              <span>{purchasedPlan}</span>
             </div>
           )}
 
@@ -348,6 +389,12 @@ export default function TopBar({
             setAvatar(newAvatar);
           }
         }}
+      />
+
+      {/* Modal Pilihan Paket & Harga Langganan (Sesuai Landing Page) */}
+      <SubscriptionPricingModal
+        isOpen={isPricingModalOpen}
+        onClose={() => setIsPricingModalOpen(false)}
       />
     </>
   );

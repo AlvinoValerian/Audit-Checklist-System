@@ -95,6 +95,11 @@ export default function Sidebar() {
       href: "/kelola-admin",
       icon: UserPlus,
     },
+    {
+      name: "Langganan",
+      href: "/langganan",
+      icon: CreditCard,
+    },
   ];
 
   // 2. Fitur Admin

@@ -277,12 +277,12 @@ function LoginContent() {
                 <span>Ingat saya</span>
               </label>
 
-              <Link
+              {/* <Link
                 href="/forgot-password"
                 className="text-xs font-semibold text-[#193f53] hover:text-[#122e3d] transition-colors"
               >
                 Lupa Password?
-              </Link>
+              </Link> */}
             </div>
 
             {/* Submit Button */}
