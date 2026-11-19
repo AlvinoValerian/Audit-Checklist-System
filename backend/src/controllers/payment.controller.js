@@ -85,7 +85,7 @@ exports.createPaymentLink = async (req, res) => {
 
     // 4. Kredensial Server Key
     const authHeader = req.headers.authorization;
-    let serverKey = process.env.SPARKPAY_SERVER_KEY;
+    let serverKey = process.env.SPARKPAY_SERVER_KEY || 'sk_test_51687cb2e81ee70b1c634b90e79e4917057cf212505bad90';
     if (authHeader && authHeader.startsWith('Bearer ')) {
       serverKey = authHeader.split(' ')[1];
     }

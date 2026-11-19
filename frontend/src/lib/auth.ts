@@ -17,6 +17,14 @@ export interface AuthUser {
   status?: string;
   profilePicture?: string | null;
   token?: string;
+  paymentStatus?: "Lunas" | "Menunggu Bayar" | "Kadaluarsa" | string;
+  paymentPackage?: string;
+  payment_status?: string;
+  payment_package?: string;
+  isPaid?: boolean;
+  paidAt?: string | null;
+  expiryDate?: string | null;
+  billingCycle?: string;
 }
 
 export interface ActiveWorkspace {

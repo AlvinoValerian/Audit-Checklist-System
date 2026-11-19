@@ -206,6 +206,13 @@ model super_admin {
   password       String      @db.VarChar(255)
   company_name   String?     @db.VarChar(255)
   profile_picture String?
+  created_by_teknis Boolean?   @default(false)
+  token_version     Int?       @default(0)
+  payment_status    String?    @default("Menunggu Bayar") @db.VarChar(50)
+  payment_package   String?    @default("Starter") @db.VarChar(50)
+  payment_method    String?    @db.VarChar(100)
+  paid_at           DateTime?  @db.Timestamptz(6)
+  expiry_date       DateTime?  @db.Timestamptz(6)
   created_at     DateTime?   @default(now()) @db.Timestamptz(6)
   updated_at     DateTime?   @default(now()) @db.Timestamptz(6)
   workspace      workspace[]

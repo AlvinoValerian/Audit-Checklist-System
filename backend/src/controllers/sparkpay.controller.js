@@ -108,9 +108,66 @@ exports.createPaymentLink = async (req, res) => {
 };
 
 /**
+ * Helper untuk menandai Super Admin sebagai Lunas di database PostgreSQL
+ */
+async function markSuperAdminAsPaid({ superAdminId, email, invoiceNumber, packageName, paymentMethod, billingCycle, nominal }) {
+  let target = null;
+  if (superAdminId) {
+    const cleanId = String(superAdminId).replace(/^sa-/, '').trim();
+    if (/^\d+$/.test(cleanId)) {
+      target = await prisma.super_admin.findUnique({
+        where: { super_admin_id: BigInt(cleanId) }
+      });
+    }
+  }
+  if (!target && email) {
+    target = await prisma.super_admin.findUnique({
+      where: { email: email.trim().toLowerCase() }
+    });
+  }
+  if (!target && invoiceNumber) {
+    const match = invoiceNumber.match(/INV-\d+-\d+-(\d{2})(\d{2})/) || invoiceNumber.match(/INV-\d+-\d+-0*(\d+)/);
+    if (match && match[1]) {
+      const saIdNum = parseInt(match[1], 10);
+      if (!isNaN(saIdNum)) {
+        target = await prisma.super_admin.findUnique({
+          where: { super_admin_id: BigInt(saIdNum) }
+        });
+      }
+    }
+  }
+
+  const cycleStr = String(billingCycle || '').toLowerCase();
+  const isYearly =
+    cycleStr.includes('tahun') ||
+    cycleStr.includes('year') ||
+    cycleStr.includes('12') ||
+    (nominal && Number(nominal) >= 400000);
+  const durationDays = isYearly ? 365 : 30;
+  const expiryDate = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000);
+
+  if (target) {
+    const updated = await prisma.super_admin.update({
+      where: { super_admin_id: target.super_admin_id },
+      data: {
+        payment_status: 'Lunas',
+        payment_package: packageName || target.payment_package || 'Standard Plan',
+        payment_method: paymentMethod || 'QRIS SparkPay',
+        paid_at: new Date(),
+        expiry_date: expiryDate,
+        updated_at: new Date()
+      }
+    });
+    console.log(`[SparkPay] Berhasil mengupdate status pembayaran Super Admin ${updated.name} (ID: ${updated.super_admin_id}) menjadi LUNAS (${isYearly ? 'Tahunan - 365 hari' : 'Bulanan - 30 hari'}) di database.`);
+    return updated;
+  }
+  return null;
+}
+
+/**
  * Step 3 — POST /api/payment-callback (Menerima Webhook Callback Server-to-Server)
  */
-exports.handleWebhookCallback = (req, res) => {
+exports.handleWebhookCallback = async (req, res) => {
   try {
     const webhookSecret = process.env.SPARKPAY_WEBHOOK_SECRET || 'f38db35a6479f8cb5cb5ba902a979c99cc957fde523386b10c1da093476a3e38';
     const signatureHeader = req.headers['x-sparkpay-signature'];
@@ -136,6 +193,19 @@ exports.handleWebhookCallback = (req, res) => {
     if (recentWebhookEvents.length > 50) recentWebhookEvents.pop();
 
     console.log(`[SparkPay Webhook] Event: ${eventRecord.event} | Ref: ${eventRecord.external_reference} | Verified: ${isVerified}`);
+
+    // Jika event PAID, simpan otomatis status Lunas ke database super_admin
+    if (req.body.event === 'PAID') {
+      try {
+        await markSuperAdminAsPaid({
+          email: req.body.customer?.email,
+          invoiceNumber: req.body.external_reference,
+          paymentMethod: req.body.payment_method || 'QRIS SparkPay'
+        });
+      } catch (e) {
+        console.error('[Webhook DB Update Error]:', e);
+      }
+    }
 
     // Sesuai dokumentasi SparkPay, wajib balas HTTP 200 OK
     return res.status(200).json({
@@ -163,7 +233,7 @@ exports.getWebhookEvents = (req, res) => {
 /**
  * POST /api/payment-callback/simulate - Simulasi kirim webhook (untuk testing lokal)
  */
-exports.simulateWebhook = (req, res) => {
+exports.simulateWebhook = async (req, res) => {
   try {
     const webhookSecret = process.env.SPARKPAY_WEBHOOK_SECRET || 'f38db35a6479f8cb5cb5ba902a979c99cc957fde523386b10c1da093476a3e38';
     const { event, external_reference, slug, amount } = req.body;
@@ -198,6 +268,17 @@ exports.simulateWebhook = (req, res) => {
     recentWebhookEvents.unshift(eventRecord);
     if (recentWebhookEvents.length > 50) recentWebhookEvents.pop();
 
+    if (payloadObj.event === 'PAID') {
+      try {
+        await markSuperAdminAsPaid({
+          invoiceNumber: payloadObj.external_reference,
+          paymentMethod: 'QRIS SparkPay'
+        });
+      } catch (e) {
+        console.error('[Simulate DB Update Error]:', e);
+      }
+    }
+
     return res.status(200).json({
       status: 'success',
       message: `Simulasi webhook ${payloadObj.event} berhasil ditambahkan!`,
@@ -206,6 +287,52 @@ exports.simulateWebhook = (req, res) => {
     });
   } catch (err) {
     return res.status(500).json({ status: 'error', message: err.message });
+  }
+};
+
+/**
+ * POST /api/sparkpay/confirm-payment - Konfirmasi pembayaran & simpan status Lunas ke database super_admin
+ */
+exports.confirmPayment = async (req, res) => {
+  try {
+    const { superAdminId, email, invoiceNumber, packageName, nominal, paymentMethod, billingCycle } = req.body;
+    const updated = await markSuperAdminAsPaid({
+      superAdminId,
+      email,
+      invoiceNumber,
+      packageName,
+      paymentMethod,
+      billingCycle,
+      nominal
+    });
+
+    if (!updated) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Super Admin tidak ditemukan untuk konfirmasi pembayaran.'
+      });
+    }
+
+    return res.status(200).json({
+      status: 'success',
+      message: `Status pembayaran untuk Super Admin ${updated.name} berhasil disimpan ke database sebagai LUNAS!`,
+      data: {
+        superAdminId: updated.super_admin_id.toString(),
+        name: updated.name,
+        email: updated.email,
+        payment_status: updated.payment_status,
+        payment_package: updated.payment_package,
+        payment_method: updated.payment_method,
+        paid_at: updated.paid_at,
+        expiry_date: updated.expiry_date
+      }
+    });
+  } catch (err) {
+    console.error('[confirmPayment Error]:', err);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Gagal menyimpan status pembayaran ke database: ' + err.message
+    });
   }
 };
 
@@ -266,40 +393,48 @@ exports.getUserSubscriptions = async (req, res) => {
 
     // Loop setiap Super Admin yang terdaftar di database
     superAdmins.forEach((sa) => {
+      const isPaid = sa.payment_status === 'Lunas';
+      const status = isPaid ? 'Lunas' : (sa.payment_status || 'Menunggu Bayar');
+
+      let expiryDateStr = '20 Nov 2026';
+      if (sa.expiry_date) {
+        expiryDateStr = new Date(sa.expiry_date).toLocaleDateString('id-ID', {
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric'
+        });
+      } else if (isPaid) {
+        expiryDateStr = '15 Jan 2027';
+      }
+
+      let lastPaymentDateStr = undefined;
+      if (sa.paid_at) {
+        lastPaymentDateStr = new Date(sa.paid_at).toLocaleString('id-ID', {
+          day: '2-digit',
+          month: 'short',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        }) + ' WIB';
+      } else if (isPaid) {
+        lastPaymentDateStr = '15 Nov 2026, 09:30 WIB';
+      }
+
+      const paymentMethod = isPaid ? (sa.payment_method || 'QRIS SparkPay') : undefined;
+
       if (sa.workspace && sa.workspace.length > 0) {
         sa.workspace.forEach((w, idx) => {
           const storeCount = w.store?.length || 0;
           const adminCount = w.admin?.length || 0;
 
-          let packageName = 'Starter';
+          let packageName = sa.payment_package || 'Starter';
           let nominal = 99000;
-          if (storeCount >= 3) {
+          if (packageName === 'Enterprise' || storeCount >= 3) {
             packageName = 'Enterprise';
             nominal = 799000;
-          } else if (storeCount >= 1 || adminCount >= 1) {
+          } else if (packageName === 'Pro' || storeCount >= 1 || adminCount >= 1) {
             packageName = 'Pro';
             nominal = 299000;
-          }
-
-          // Status tagihan:
-          let status = 'Menunggu Bayar';
-          let expiryDate = '20 Nov 2026';
-          let paymentMethod = undefined;
-          let lastPaymentDate = undefined;
-
-          // Riwayat pembayaran akun pertama (Anton Kurniawan ID 1)
-          if (sa.super_admin_id === 1n) {
-            if (w.company_name === 'Mie Gacoan') {
-              status = 'Lunas';
-              expiryDate = '15 Jan 2027';
-              paymentMethod = 'BCA Virtual Account';
-              lastPaymentDate = '15 Nov 2026, 09:30 WIB';
-            } else if (w.company_name === 'Bakso Gacoan') {
-              status = 'Lunas';
-              expiryDate = '28 Des 2026';
-              paymentMethod = 'QRIS SparkPay';
-              lastPaymentDate = '28 Okt 2026, 14:10 WIB';
-            }
           }
 
           subscriptions.push({
@@ -316,14 +451,15 @@ exports.getUserSubscriptions = async (req, res) => {
             billingCycle: 'Bulanan',
             status: status,
             paymentMethod: paymentMethod,
-            expiryDate: expiryDate,
+            expiryDate: expiryDateStr,
             invoiceNumber: `INV-2026-11-${sa.super_admin_id.toString().padStart(2, '0')}${w.workspace_id.toString().padStart(2, '0')}`,
-            lastPaymentDate: lastPaymentDate,
+            lastPaymentDate: lastPaymentDateStr,
             proportion: 20.0
           });
         });
       } else {
         // Super Admin baru yang belum memiliki workspace tambahan
+        const nominal = sa.payment_package === 'Enterprise' ? 799000 : sa.payment_package === 'Pro' ? 299000 : 99000;
         subscriptions.push({
           id: `SUB-${sa.super_admin_id}-default`,
           superAdminId: sa.super_admin_id.toString(),
@@ -333,14 +469,14 @@ exports.getUserSubscriptions = async (req, res) => {
           company: sa.company_name || 'Perusahaan Retail',
           phone: sa.phone_number || '081234567890',
           workspaceName: sa.company_name || `${sa.name}'s Workspace`,
-          packageName: 'Starter',
-          nominal: 99000,
+          packageName: sa.payment_package || 'Starter',
+          nominal: nominal,
           billingCycle: 'Bulanan',
-          status: 'Menunggu Bayar',
-          paymentMethod: undefined,
-          expiryDate: '30 Nov 2026',
+          status: status,
+          paymentMethod: paymentMethod,
+          expiryDate: expiryDateStr,
           invoiceNumber: `INV-2026-11-${sa.super_admin_id.toString().padStart(4, '0')}`,
-          lastPaymentDate: undefined,
+          lastPaymentDate: lastPaymentDateStr,
           proportion: 10.0
         });
       }

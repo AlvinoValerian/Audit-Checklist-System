@@ -239,19 +239,21 @@ export default function RegisterPage() {
         phoneNumber,
         companyName: cleanCompany,
         password,
+        plan: selectedPlan,
       });
 
       toast.success(
         result.message || "Pendaftaran berhasil! Akun Super Admin Anda siap digunakan."
       );
 
-      // Simpan preferensi paket langganan dan picu modal pembayaran di workspace
+      // Simpan preferensi paket langganan dan picu modal pembayaran di workspace (label paket BELUM aktif sebelum lunas)
       try {
         localStorage.setItem("selected_checkout_plan", selectedPlan);
         localStorage.setItem("selected_billing_cycle", isYearlyBilling ? "yearly" : "monthly");
         localStorage.setItem("show_payment_modal_on_workspace", "true");
         localStorage.setItem("pending_superadmin_payment", "true");
         localStorage.removeItem("superadmin_paid");
+        localStorage.removeItem("active_subscription_plan");
         if (cleanEmail) {
           localStorage.removeItem(`superadmin_paid_${cleanEmail}`);
         }

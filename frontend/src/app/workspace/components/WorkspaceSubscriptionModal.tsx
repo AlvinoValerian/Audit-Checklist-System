@@ -121,10 +121,10 @@ export default function WorkspaceSubscriptionModal({
       if (savedPlan && (savedPlan === "lite" || savedPlan === "standard" || savedPlan === "pro")) {
         setSelectedPlanId(savedPlan as "lite" | "standard" | "pro");
       }
-      const savedBilling = localStorage.getItem("selected_billing_cycle");
-      if (savedBilling === "yearly") {
+      const savedBilling = String(localStorage.getItem("selected_billing_cycle") || "").toLowerCase();
+      if (savedBilling.includes("year") || savedBilling.includes("tahun") || savedBilling.includes("annual")) {
         setIsYearly(true);
-      } else if (savedBilling === "monthly") {
+      } else if (savedBilling.includes("month") || savedBilling.includes("bulan")) {
         setIsYearly(false);
       }
     } catch {}
@@ -154,88 +154,20 @@ export default function WorkspaceSubscriptionModal({
   };
 
   /**
-   * Step 1 — Buat Payment Link (Panggil Backend Server)
-   * Sesuai dokumen .md: POST /api/payment-links
+   * Navigasi ke Halaman Checkout Dedicated SparkPay
    */
-  const handleInitiatePayment = async () => {
-    setIsProcessing(true);
-
+  const handleInitiatePayment = () => {
+    onClose();
     const externalReference = `INV-WS-${workspaceId}-${Date.now().toString().slice(-6)}`;
-    const payload = {
-      external_reference: externalReference,
-      customer: {
-        name: customerName,
-        email: customerEmail,
-        phone: customerPhone,
-      },
-      title: `Langganan ${selectedPlan.name} (${currentDurationLabel}) - ${workspaceName}`,
-      amount: currentPrice,
-      currency: "IDR",
-      products: [
-        {
-          name: `Paket ${selectedPlan.name} (${currentDurationLabel})`,
-          quantity: 1,
-          price: currentPrice,
-        },
-      ],
-    };
-
-    try {
-      // Panggil backend API (proxy /api atau fallback langsung ke server Railway)
-      let res: Response;
-      try {
-        res = await fetch("/api/payment-links", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-      } catch {
-        res = await fetch("https://audit-checklist-system-production.up.railway.app/api/payment-links", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-      }
-
-      const json = await res.json().catch(() => ({}));
-
-      if (res.ok && json.data?.slug) {
-        const slug = json.data.slug;
-        toast.success("Sesi pembayaran berhasil dibuat dari SparkPay (201 Created)!");
-
-        // Siapkan data untuk Step 2 (Popup Modal Checkout Snap.js)
-        setCheckoutData({
-          slug: slug,
-          external_reference: externalReference,
-          title: `Langganan ${selectedPlan.name} (${currentDurationLabel}) — ${workspaceName}`,
-          amount: currentPrice,
-          currency: "IDR",
-          customer: {
-            name: customerName,
-            email: customerEmail,
-            phone: customerPhone,
-          },
-          items: [
-            {
-              name: `Paket ${selectedPlan.name} (${currentDurationLabel})`,
-              quantity: 1,
-              price: currentPrice,
-            },
-          ],
-        });
-
-        // Buka Modal Checkout Popup Snap.js
-        setIsCheckoutOpen(true);
-      } else {
-        const errorMsg = json.message || "Gagal membuat sesi pembayaran SparkPay.";
-        toast.error(`SparkPay: ${errorMsg}`);
-      }
-    } catch (err: unknown) {
-      console.error("Error creating payment link:", err);
-      toast.error("Gagal terhubung ke server pembayaran.");
-    } finally {
-      setIsProcessing(false);
-    }
+    const params = new URLSearchParams({
+      package: selectedPlan.name,
+      nominal: String(currentPrice),
+      cycle: currentDurationLabel,
+      name: customerName,
+      email: customerEmail,
+      invoice: externalReference,
+    });
+    router.push(`/checkout?${params.toString()}`);
   };
 
   /**
@@ -251,14 +183,39 @@ export default function WorkspaceSubscriptionModal({
     setIsCheckoutOpen(false);
     toast.success(`Pembayaran BERHASIL! (Ref: ${result.external_reference})`);
 
-    // Tandai status langganan superadmin & workspace aktif di localStorage
+    // Tandai status langganan superadmin & workspace aktif di localStorage dan Database
     try {
       localStorage.setItem("superadmin_paid", "true");
-      localStorage.setItem("active_subscription_plan", selectedPlan.id);
+      localStorage.setItem("active_subscription_plan", selectedPlan.name);
+      localStorage.setItem("selected_checkout_plan", selectedPlan.name);
       localStorage.setItem("selected_billing_cycle", isYearly ? "yearly" : "monthly");
       localStorage.setItem("subscription_duration_days", isYearly ? "365" : "30");
       localStorage.removeItem("show_payment_modal_on_workspace");
       localStorage.removeItem("pending_superadmin_payment");
+
+      // Perbarui status Super Admin di localStorage
+      const user = AuthService.getCurrentUser();
+      if (user) {
+        user.paymentStatus = "Lunas";
+        user.paymentPackage = selectedPlan.name;
+        (user as any).isPaid = true;
+        AuthService.setCurrentUser(user);
+      }
+
+      // Simpan status Lunas ke database PostgreSQL super_admin
+      fetch("http://localhost:5000/api/sparkpay/confirm-payment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          superAdminId: user?.rawId || user?.id,
+          email: customerEmail,
+          invoiceNumber: result.external_reference,
+          packageName: selectedPlan.name,
+          nominal: result.amount,
+          paymentMethod: "QRIS SparkPay",
+          billingCycle: isYearly ? "Tahunan" : "Bulanan",
+        }),
+      }).catch(console.warn);
 
       if (workspace?.id) {
         localStorage.setItem(`workspace_plan_${workspace.id}`, selectedPlan.id);
