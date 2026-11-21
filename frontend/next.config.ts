@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: [
+    "192.168.16.1",
+    "localhost:3000",
+    "127.0.0.1:3000",
+  ],
   experimental: {
     proxyTimeout: 120000,
   },
