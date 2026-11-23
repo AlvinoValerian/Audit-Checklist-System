@@ -684,6 +684,10 @@ exports.createSchedule = async (req, res) => {
     }
 
     const createdResults = [];
+    const affectedWsIds = new Set();
+    if (targetWsId) {
+      affectedWsIds.add(targetWsId);
+    }
     const { dateStr: wibTodayStr } = getWibDateParts(new Date());
     const todayStoreHolidays = await getActiveHolidaysOnDate(wibTodayStr, scope.workspaceIds);
 
@@ -738,6 +742,9 @@ exports.createSchedule = async (req, res) => {
       }
 
       const itemWsId = storeRecord.workspace_id;
+      if (itemWsId) {
+        affectedWsIds.add(itemWsId);
+      }
 
       // 2. Resolusi Template secara ketat dalam cakupan workspace yang sah
       let templateRecord = null;
@@ -882,9 +889,9 @@ exports.createSchedule = async (req, res) => {
       createdResults.push(formatSchedule(scheduleCreated, todayStoreHolidays));
     }
 
-    if (store?.workspace_id) {
+    for (const wsId of affectedWsIds) {
       try {
-        emitWorkspaceEvent(store.workspace_id, 'schedule:updated', { action: 'create' });
+        emitWorkspaceEvent(wsId, 'schedule:updated', { action: 'create' });
       } catch (e) {}
     }
 
