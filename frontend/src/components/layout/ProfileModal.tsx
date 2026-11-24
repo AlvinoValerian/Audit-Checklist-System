@@ -74,7 +74,8 @@ export default function ProfileModal({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // State Periode Paket Langganan
-  const [purchasedPlan, setPurchasedPlan] = useState("Standard Plan");
+  const [purchasedPlan, setPurchasedPlan] = useState<string | null>(null);
+  const [isPaidUser, setIsPaidUser] = useState<boolean>(false);
   const [subscriptionStartDate, setSubscriptionStartDate] = useState<Date>(new Date());
   const [subscriptionEndDate, setSubscriptionEndDate] = useState<Date>(() => {
     const d = new Date();
@@ -127,25 +128,47 @@ export default function ProfileModal({
         setIsEncryptedAvatar(false);
       }
 
-      // Sinkronisasi data paket langganan (Eksklusif Super Admin - Teknis & role lain tidak memiliki paket)
-      if (resolvedRole === "Super Admin") {
+      // Sinkronisasi data paket langganan (Hanya jika Super Admin SUDAH LUNAS di database)
+      const isPaid =
+        (currentUser as any)?.isPaid === true ||
+        (currentUser as any)?.paymentStatus === "Lunas" ||
+        (currentUser as any)?.payment_status === "Lunas" ||
+        localStorage.getItem("superadmin_paid") === "true";
+      setIsPaidUser(isPaid);
+
+      if (resolvedRole === "Super Admin" && isPaid) {
         try {
           const plan =
             localStorage.getItem("active_subscription_plan") ||
+            (currentUser as any)?.paymentPackage ||
+            (currentUser as any)?.payment_package ||
             localStorage.getItem("selected_checkout_plan");
           const billingCycle = localStorage.getItem("selected_billing_cycle");
           const durationDaysStored = localStorage.getItem("subscription_duration_days");
+
+          // Cek tanggal dari database jika tersedia
+          const expiryFromDb = (currentUser as any)?.expiryDate || (currentUser as any)?.expiry_date;
+          const paidFromDb = (currentUser as any)?.paidAt || (currentUser as any)?.paid_at;
+          let isDbYearly = false;
+          if (expiryFromDb && paidFromDb) {
+            const diffDays = Math.round((new Date(expiryFromDb).getTime() - new Date(paidFromDb).getTime()) / (1000 * 60 * 60 * 24));
+            if (diffDays > 60) isDbYearly = true;
+          }
+
+          const rawCycle = String(billingCycle || (currentUser as any)?.billingCycle || "").toLowerCase();
           const isYearly =
-            billingCycle === "yearly" ||
-            billingCycle === "annual" ||
-            billingCycle === "tahunan" ||
-            durationDaysStored === "365";
+            rawCycle.includes("tahun") ||
+            rawCycle.includes("year") ||
+            rawCycle.includes("annual") ||
+            rawCycle.includes("12") ||
+            durationDaysStored === "365" ||
+            isDbYearly;
           const durationDays = durationDaysStored ? parseInt(durationDaysStored, 10) : isYearly ? 365 : 30;
 
           const basePlanName = plan
-            ? plan.toLowerCase() === "lite"
+            ? String(plan).toLowerCase().includes("lite")
               ? "Lite Plan"
-              : plan.toLowerCase() === "pro"
+              : String(plan).toLowerCase().includes("pro")
               ? "Pro Plan"
               : "Standard Plan"
             : "Standard Plan";
@@ -155,6 +178,7 @@ export default function ProfileModal({
           // Tanggal mulai langganan (default ke waktu akun terdaftar / pembayaran)
           let start = new Date();
           const storedStart =
+            (paidFromDb ? new Date(paidFromDb).toISOString() : null) ||
             localStorage.getItem("subscription_start_date") ||
             (currentUser?.email ? localStorage.getItem(`subscription_start_date_${currentUser.email}`) : null);
 
@@ -169,9 +193,13 @@ export default function ProfileModal({
           }
           setSubscriptionStartDate(start);
 
-          // Tanggal berakhir (periode 30 hari untuk bulanan, 365 hari untuk tahunan)
-          const end = new Date(start);
-          end.setDate(end.getDate() + durationDays);
+          // Tanggal berakhir (prioritaskan expiry dari database jika ada)
+          let end = new Date(start);
+          if (expiryFromDb && !isNaN(new Date(expiryFromDb).getTime())) {
+            end = new Date(expiryFromDb);
+          } else {
+            end.setDate(end.getDate() + durationDays);
+          }
           setSubscriptionEndDate(end);
 
           // Sisa hari aktif
@@ -181,7 +209,25 @@ export default function ProfileModal({
           setDaysRemaining(days);
         } catch {}
       } else {
-        setPurchasedPlan("");
+        setPurchasedPlan(null);
+      }
+
+      // Verifikasi status ke database PostgreSQL secara asinkron
+      if (resolvedRole === "Super Admin") {
+        ApiAuthService.getMe()
+          .then((freshUser) => {
+            if (freshUser) {
+              const freshPaid =
+                freshUser.isPaid === true ||
+                freshUser.paymentStatus === "Lunas" ||
+                freshUser.payment_status === "Lunas";
+              setIsPaidUser(freshPaid);
+              if (!freshPaid) {
+                setPurchasedPlan(null);
+              }
+            }
+          })
+          .catch(() => {});
       }
 
       setIsEditingName(false);
@@ -474,8 +520,8 @@ export default function ProfileModal({
             </div>
           </div>
 
-          {/* Masa Periode Paket Langganan (Eksklusif Khusus Super Admin - Tidak Ditampilkan ke Teknis/Staff/Admin) */}
-          {role === "Super Admin" && purchasedPlan && (
+          {/* Masa Periode Paket Langganan (Eksklusif Khusus Super Admin - Hanya Ditampilkan Jika Sudah Lunas) */}
+          {role === "Super Admin" && isPaidUser && purchasedPlan && (
             <div className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-br from-slate-50 via-sky-50/50 to-blue-50/30 border border-sky-200/90 shadow-2xs space-y-2.5">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">

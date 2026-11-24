@@ -4,9 +4,19 @@ export const PUBLIC_ROUTES = ["/", "/login", "/register", "/forgot-password"];
 
 export const STAFF_ROUTES = ["/jadwal-staff", "/profile", "/profil", "/riwayat"];
 
-export const TEKNIS_ONLY_ROUTES = ["/divisi-teknis", "/pengaturan"];
+export const TEKNIS_ONLY_ROUTES = [
+  "/divisi-teknis",
+  "/pengaturan",
+  "/rekap-pembayaran",
+  "/checkout",
+];
 
-export const SUPER_ADMIN_ROUTES = ["/workspace", "/kelola-admin"];
+export const SUPER_ADMIN_ROUTES = [
+  "/workspace",
+  "/kelola-admin",
+  "/langganan",
+  "/checkout",
+];
 
 export const OPS_ROUTES = [
   "/dashboard-monitoring",

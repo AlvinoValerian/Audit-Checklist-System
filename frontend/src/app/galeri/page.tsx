@@ -24,6 +24,9 @@ import { WorkspaceService } from "@/services/workspace.service";
 import { Workspace } from "@/types/workspace";
 import { toast } from "sonner";
 import DecryptedImage from "@/components/DecryptedImage";
+import SmartAuditPagination from "@/components/ui/SmartAuditPagination";
+import CardSkeleton from "@/components/ui/CardSkeleton";
+import EmptyStateTable from "@/components/ui/EmptyStateTable";
 
 export default function GaleriPage() {
   const [logs, setLogs] = useState<AuditGalleryLog[]>([]);
@@ -69,7 +72,7 @@ export default function GaleriPage() {
 
   // Pagination State (4 cards per page)
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 4;
+  const [itemsPerPage, setItemsPerPage] = useState(4);
 
   // Load Data from Backend with Workspace Context
   const loadData = useCallback(async (showLoading = true, customWsId?: string) => {
@@ -247,6 +250,25 @@ export default function GaleriPage() {
     if (advancedFilters.onlyIssues) count++;
     return count;
   }, [advancedFilters]);
+
+  const isFiltered = Boolean(
+    searchTerm.trim() ||
+    selectedStore !== "Semua Toko" ||
+    selectedStatus !== "Semua Status" ||
+    activeFilterCount > 0
+  );
+
+  const handleResetFilters = () => {
+    setSearchTerm("");
+    setSelectedStore("Semua Toko");
+    setSelectedStatus("Semua Status");
+    setAdvancedFilters({
+      dateRange: "all",
+      category: "Semua Kategori",
+      onlyIssues: false,
+    });
+    setCurrentPage(1);
+  };
 
   // Modal navigation handlers
   const handleOpenPhoto = (log: AuditGalleryLog, photo: AuditPhoto, index: number) => {
@@ -453,17 +475,7 @@ export default function GaleriPage() {
 
         {/* Audit Cards List or Loading */}
         {isLoading ? (
-          <div className="bg-white border border-slate-200 rounded-xl py-16 text-center shadow-xs">
-            <div className="flex flex-col items-center justify-center gap-2">
-              <Loader2 className="w-6 h-6 text-[#193f53] animate-spin" />
-              <span className="text-xs font-semibold text-slate-700">
-                Memuat data galeri foto audit...
-              </span>
-              <span className="text-[11px] text-slate-400">
-                Menghubungkan ke database
-              </span>
-            </div>
-          </div>
+          <CardSkeleton count={itemsPerPage} />
         ) : paginatedLogs.length > 0 ? (
           <div className="space-y-3">
             {paginatedLogs.map((log) => (
@@ -553,82 +565,32 @@ export default function GaleriPage() {
             ))}
           </div>
         ) : (
-          /* Empty State */
-          <div className="bg-white border border-slate-200 rounded-xl p-10 text-center shadow-xs">
-            <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-2.5">
-              <Search className="w-5 h-5" />
-            </div>
-            <h3 className="text-xs sm:text-sm font-bold text-slate-800">
-              Tidak Ada Foto Audit Ditemukan
-            </h3>
-            <p className="text-[11px] text-slate-500 mt-1 max-w-sm mx-auto">
-              Tidak ada hasil yang sesuai dengan kriteria pencarian atau filter yang dipilih. Coba ubah kata kunci atau reset filter.
-            </p>
-            <button
-              onClick={() => {
-                setSearchTerm("");
-                setSelectedStore("Semua Toko");
-                setSelectedStatus("Semua Status");
-                setAdvancedFilters({
-                  dateRange: "all",
-                  category: "Semua Kategori",
-                  onlyIssues: false,
-                });
-              }}
-              className="mt-3.5 px-3.5 py-1.5 bg-[#193f53] text-white rounded-lg text-xs font-semibold hover:bg-[#143343] transition-colors cursor-pointer"
-            >
-              Reset Semua Filter
-            </button>
-          </div>
+          <EmptyStateTable
+            asCard={true}
+            title={isFiltered ? "Tidak Ada Foto Audit Ditemukan" : "Belum Ada Dokumentasi Foto"}
+            description={
+              isFiltered
+                ? "Tidak ada foto audit yang cocok dengan filter atau kata kunci pencarian. Coba ubah atau atur ulang filter."
+                : "Belum ada foto audit yang diunggah untuk cabang di workspace ini."
+            }
+            isFiltered={isFiltered}
+            onResetFilters={isFiltered ? handleResetFilters : undefined}
+          />
         )}
 
         {/* Pagination Section */}
         {!isLoading && paginatedLogs.length > 0 && (
-          <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs flex flex-wrap gap-3 items-center justify-between">
-            <p className="text-[11px] text-slate-500">
-              Menampilkan <span className="font-bold text-slate-900">{startItem}-{endItem}</span> dari{" "}
-              <span className="font-bold text-slate-900">{totalFilteredCount} laporan audit</span>
-            </p>
-
-            <div className="flex gap-1 text-[11px]">
-              {/* Prev Button */}
-              <button
-                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-                disabled={currentPage === 1}
-                className={`w-7 h-7 flex items-center justify-center rounded-md border border-slate-200 transition-colors ${currentPage === 1
-                    ? "text-slate-300 border-slate-100 cursor-not-allowed"
-                    : "text-slate-600 hover:bg-slate-50 cursor-pointer"
-                  }`}
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-
-              {/* Page Numbers */}
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-                <button
-                  key={page}
-                  onClick={() => setCurrentPage(page)}
-                  className={`w-7 h-7 rounded-md flex items-center justify-center font-bold text-xs transition-colors cursor-pointer ${currentPage === page
-                      ? "bg-[#193f53] text-white shadow-2xs"
-                      : "border border-slate-200 text-slate-600 hover:bg-slate-50"
-                    }`}
-                >
-                  {page}
-                </button>
-              ))}
-
-              {/* Next Button */}
-              <button
-                onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
-                disabled={currentPage === totalPages}
-                className={`px-3 h-7 flex items-center justify-center rounded-md border border-slate-200 font-bold ml-1 transition-colors ${currentPage === totalPages
-                    ? "text-slate-300 border-slate-100 cursor-not-allowed"
-                    : "text-slate-600 hover:bg-slate-50 cursor-pointer"
-                  }`}
-              >
-                Selanjutnya <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
-              </button>
-            </div>
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">
+            <SmartAuditPagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={totalFilteredCount}
+              itemsPerPage={itemsPerPage}
+              onPageChange={setCurrentPage}
+              onItemsPerPageChange={setItemsPerPage}
+              pageSizeOptions={[4, 8, 16, 32]}
+              itemName="laporan audit"
+            />
           </div>
         )}
       </div>

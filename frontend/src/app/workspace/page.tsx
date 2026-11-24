@@ -73,13 +73,21 @@ export default function WorkspacePage() {
     try {
       const currentUser = AuthService.getCurrentUser();
       const isSuperAdmin = !currentUser?.role || currentUser?.role === "Super Admin";
-      const isPaid = localStorage.getItem("superadmin_paid") === "true";
+      const isPaid =
+        (currentUser as any)?.paymentStatus === "Lunas" ||
+        (currentUser as any)?.isPaid === true ||
+        localStorage.getItem("superadmin_paid") === "true";
       const requireModal = localStorage.getItem("show_payment_modal_on_workspace") === "true";
       const pendingPayment = localStorage.getItem("pending_superadmin_payment") === "true";
       setIsPaidUser(isPaid);
 
-      // Munculkan modal otomatis HANYA untuk Super Admin jika belum bayar
-      if (isSuperAdmin && (requireModal || pendingPayment || !isPaid)) {
+      // Jika Super Admin sudah Lunas, pastikan pop up aktivasi TIDAK PERNAH muncul!
+      if (isPaid) {
+        setIsSubscriptionModalOpen(false);
+        localStorage.setItem("superadmin_paid", "true");
+        localStorage.removeItem("show_payment_modal_on_workspace");
+        localStorage.removeItem("pending_superadmin_payment");
+      } else if (isSuperAdmin && (requireModal || pendingPayment)) {
         setIsSubscriptionModalOpen(true);
       }
 

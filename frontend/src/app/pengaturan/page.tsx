@@ -20,11 +20,13 @@ import {
   BookOpen,
   Zap,
   CreditCard,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import SparkPaySandboxPlayground from "./components/SparkPaySandboxPlayground";
 import SparkPayGuideDocs from "./components/SparkPayGuideDocs";
 import UserPackagePaymentDashboard from "./components/UserPackagePaymentDashboard";
+import SubscriptionPricingView from "./components/SubscriptionPricingView";
 
 function PengaturanContent() {
   const searchParams = useSearchParams();
@@ -32,7 +34,7 @@ function PengaturanContent() {
 
   const initialTab = searchParams?.get("tab") || "sparkpay_sandbox";
   const [activeTab, setActiveTab] = useState<
-    "sparkpay_sandbox" | "user_packages" | "sparkpay_docs" | "system"
+    "sparkpay_sandbox" | "user_packages" | "sparkpay_docs" | "system" | "pricing"
   >(
     initialTab === "system"
       ? "system"
@@ -40,6 +42,8 @@ function PengaturanContent() {
       ? "sparkpay_docs"
       : initialTab === "user_packages" || initialTab === "rekap"
       ? "user_packages"
+      : initialTab === "pricing" || initialTab === "langganan"
+      ? "pricing"
       : "sparkpay_sandbox"
   );
 
@@ -51,13 +55,15 @@ function PengaturanContent() {
       setActiveTab("sparkpay_docs");
     } else if (tabParam === "user_packages" || tabParam === "rekap") {
       setActiveTab("user_packages");
+    } else if (tabParam === "pricing" || tabParam === "langganan") {
+      setActiveTab("pricing");
     } else if (tabParam === "sparkpay" || tabParam === "sparkpay_sandbox") {
       setActiveTab("sparkpay_sandbox");
     }
   }, [searchParams]);
 
   const handleTabChange = (
-    tab: "sparkpay_sandbox" | "user_packages" | "sparkpay_docs" | "system"
+    tab: "sparkpay_sandbox" | "user_packages" | "sparkpay_docs" | "system" | "pricing"
   ) => {
     setActiveTab(tab);
     const param =
@@ -67,6 +73,8 @@ function PengaturanContent() {
         ? "user_packages"
         : tab === "sparkpay_docs"
         ? "docs"
+        : tab === "pricing"
+        ? "pricing"
         : "system";
     router.replace(`/pengaturan?tab=${param}`);
   };
@@ -165,6 +173,20 @@ function PengaturanContent() {
             >
               <Sliders className="w-4 h-4 text-sky-600" />
               <span>⚙️ Infrastruktur & Sistem</span>
+            </button>
+
+            {/* TAB 5: PAKET LANGGANAN (LANDING PAGE) */}
+            <button
+              type="button"
+              onClick={() => handleTabChange("pricing")}
+              className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeTab === "pricing"
+                  ? "bg-white text-emerald-950 shadow-2xs font-extrabold"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              <Sparkles className="w-4 h-4 text-emerald-600" />
+              <span>🏷️ Paket Langganan</span>
             </button>
           </div>
 
@@ -428,6 +450,9 @@ function PengaturanContent() {
             </div>
           </div>
         )}
+
+        {/* TAB 5: PAKET LANGGANAN (LANDING PAGE) */}
+        {activeTab === "pricing" && <SubscriptionPricingView />}
       </div>
     </DashboardLayout>
   );

@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { AuthService } from "@/lib/auth";
+import AuthVerificationLoading from "@/components/auth/AuthVerificationLoading";
 
 const SSR_ROLE_SENTINEL = "__SSR__";
 
@@ -47,6 +48,7 @@ const getAuthRoleServerSnapshot = (): string => SSR_ROLE_SENTINEL;
 export default function Sidebar() {
   const pathname = usePathname();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const roleSnapshot = useSyncExternalStore(
     subscribeAuthRole,
@@ -62,11 +64,8 @@ export default function Sidebar() {
     isAuthResolved && (userRole === "Divisi Teknis" || userRole === "Teknis");
 
   const handleLogout = async () => {
-    await AuthService.logoutAsync();
-    toast.info("Anda telah logout.");
-    if (typeof window !== "undefined") {
-      window.location.href = "/login?reason=logout";
-    }
+    setIsLoggingOut(true);
+    await AuthService.logoutWithTransition("logout", 3000);
   };
 
   // Determine if viewing Admin portal or Super Admin portal
@@ -95,6 +94,11 @@ export default function Sidebar() {
       name: "Kelola Admin",
       href: "/kelola-admin",
       icon: UserPlus,
+    },
+    {
+      name: "Langganan",
+      href: "/langganan",
+      icon: CreditCard,
     },
   ];
 
@@ -238,6 +242,10 @@ export default function Sidebar() {
     : isAdminPortal
     ? "Enterprise Monitor"
     : "Super Admin";
+
+  if (isLoggingOut) {
+    return <AuthVerificationLoading message="Loading..." />;
+  }
 
   return (
     <>

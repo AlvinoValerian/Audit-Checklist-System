@@ -28,6 +28,9 @@ import EditStoreModal from "./components/EditStoreModal";
 import DetailStoreModal from "./components/DetailStoreModal";
 import SoftDeleteModal from "./components/SoftDeleteModal";
 import RestoreStoreModal from "./components/RestoreStoreModal";
+import SmartAuditPagination from "@/components/ui/SmartAuditPagination";
+import TableSkeleton from "@/components/ui/TableSkeleton";
+import EmptyStateTable from "@/components/ui/EmptyStateTable";
 import DecryptedImage from "@/components/DecryptedImage";
 
 export default function TokoPage() {
@@ -70,7 +73,14 @@ export default function TokoPage() {
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 5;
+  const [itemsPerPage, setItemsPerPage] = useState(7);
+
+  const isFiltered = Boolean(searchTerm.trim() || filterStatus !== "Semua");
+  const handleResetFilters = () => {
+    setSearchTerm("");
+    setFilterStatus("Semua");
+    setCurrentPage(1);
+  };
 
   const refreshData = async (customWsId?: string) => {
     const wsId = customWsId !== undefined ? customWsId : selectedWorkspaceId;
@@ -270,7 +280,7 @@ export default function TokoPage() {
   const paginatedStores = useMemo(() => {
     const start = (currentPage - 1) * itemsPerPage;
     return filteredStores.slice(start, start + itemsPerPage);
-  }, [filteredStores, currentPage]);
+  }, [filteredStores, currentPage, itemsPerPage]);
 
   const startIndex = filteredStores.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0;
   const endIndex = Math.min(currentPage * itemsPerPage, filteredStores.length);
@@ -312,57 +322,81 @@ export default function TokoPage() {
       {/* 3 Metric Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 sm:gap-4 mb-5 sm:mb-6">
         {/* Card 1: TOTAL TOKO */}
-        <div className="bg-[#fefdfa] rounded-xl border border-slate-200 p-4 sm:p-5 shadow-2xs flex flex-col justify-between">
-          <div className="flex justify-between items-start">
+        <div className="relative overflow-hidden bg-white rounded-xl border border-slate-200/90 p-4 sm:p-5 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all flex flex-col justify-between group">
+          <div className="absolute -top-10 -right-10 w-28 h-28 rounded-full bg-gradient-to-br from-sky-400/12 via-sky-300/5 to-transparent blur-xl pointer-events-none group-hover:scale-125 transition-transform duration-500" />
+          <div className="flex justify-between items-start relative z-10">
             <h3 className="text-[11px] font-bold text-slate-500 tracking-wider uppercase">
               TOTAL TOKO
             </h3>
-            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center shrink-0">
-              <Store className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-50 text-sky-700 border border-sky-100 shadow-2xs">
+                Semua Cabang
+              </span>
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                <Store className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              </div>
             </div>
           </div>
-          <div className="mt-3 sm:mt-4">
+          <div className="mt-3 sm:mt-4 relative z-10">
             <div className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
               {stats.total}
             </div>
+            <p className="text-[11px] text-slate-400 mt-1">
+              Unit cabang terdaftar di workspace
+            </p>
           </div>
         </div>
 
         {/* Card 2: TOKO AKTIF */}
-        <div className="bg-[#fefdfa] rounded-xl border border-slate-200 p-4 sm:p-5 shadow-2xs flex flex-col justify-between">
-          <div className="flex justify-between items-start">
+        <div className="relative overflow-hidden bg-white rounded-xl border border-slate-200/90 p-4 sm:p-5 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all flex flex-col justify-between group">
+          <div className="absolute -top-10 -right-10 w-28 h-28 rounded-full bg-gradient-to-br from-emerald-400/15 via-emerald-300/5 to-transparent blur-xl pointer-events-none group-hover:scale-125 transition-transform duration-500" />
+          <div className="flex justify-between items-start relative z-10">
             <h3 className="text-[11px] font-bold text-slate-500 tracking-wider uppercase">
               TOKO AKTIF
             </h3>
-            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
-              <Check className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.5]" />
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/70 shadow-2xs">
+                <TrendingUp className="w-2.5 h-2.5 stroke-[2.5]" />
+                <span>{stats.activePercentage}% aktif</span>
+              </span>
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                <Check className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.5]" />
+              </div>
             </div>
           </div>
-          <div className="mt-3 sm:mt-4 flex items-baseline gap-2">
-            <span className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
+          <div className="mt-3 sm:mt-4 relative z-10">
+            <div className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
               {stats.active}
-            </span>
-            <span className="inline-flex items-center gap-1 text-emerald-600 text-[11px] font-semibold">
-              <TrendingUp className="w-3 h-3" />
-              <span>{stats.activePercentage}% dari total</span>
-            </span>
+            </div>
+            <p className="text-[11px] text-emerald-600 font-medium mt-1">
+              {stats.active} dari {stats.total} toko beroperasi normal
+            </p>
           </div>
         </div>
 
         {/* Card 3: TOKO NONAKTIF */}
-        <div className="bg-[#fefdfa] rounded-xl border border-slate-200 p-4 sm:p-5 shadow-2xs flex flex-col justify-between">
-          <div className="flex justify-between items-start">
+        <div className="relative overflow-hidden bg-white rounded-xl border border-slate-200/90 p-4 sm:p-5 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all flex flex-col justify-between group">
+          <div className="absolute -top-10 -right-10 w-28 h-28 rounded-full bg-gradient-to-br from-rose-400/12 via-rose-300/5 to-transparent blur-xl pointer-events-none group-hover:scale-125 transition-transform duration-500" />
+          <div className="flex justify-between items-start relative z-10">
             <h3 className="text-[11px] font-bold text-slate-500 tracking-wider uppercase">
               TOKO NONAKTIF
             </h3>
-            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-red-50 text-red-500 flex items-center justify-center shrink-0">
-              <XCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200/70 shadow-2xs">
+                {stats.total > 0 ? 100 - stats.activePercentage : 0}% nonaktif
+              </span>
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-red-50 text-red-500 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                <XCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              </div>
             </div>
           </div>
-          <div className="mt-3 sm:mt-4">
+          <div className="mt-3 sm:mt-4 relative z-10">
             <div className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
               {stats.inactive}
             </div>
+            <p className="text-[11px] text-slate-400 mt-1">
+              Operasional ditutup / dihentikan
+            </p>
           </div>
         </div>
       </div>
@@ -460,31 +494,22 @@ export default function TokoPage() {
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
               {isLoading ? (
-                <tr>
-                  <td colSpan={6} className="py-16 text-center text-slate-400">
-                    <div className="flex flex-col items-center justify-center gap-2">
-                      <Loader2 className="w-6 h-6 text-[#193f53] animate-spin" />
-                      <span className="text-xs font-semibold text-slate-700">
-                        Memuat data toko...
-                      </span>
-                      <span className="text-[11px] text-slate-400">
-                        Menghubungkan ke ({currentWorkspaceName})
-                      </span>
-                    </div>
-                  </td>
-                </tr>
+                <TableSkeleton rows={itemsPerPage} cols={6} hasThumbnail={false} />
               ) : paginatedStores.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="py-12 text-center text-slate-400">
-                    <Store className="w-8 h-8 mx-auto mb-2 text-slate-300 stroke-[1.5]" />
-                    <p className="font-semibold text-slate-600 text-sm">
-                      Tidak ada toko ditemukan di {currentWorkspaceName}
-                    </p>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      Belum ada toko yang terdaftar atau coba sesuaikan kata kunci pencarian.
-                    </p>
-                  </td>
-                </tr>
+                <EmptyStateTable
+                  colSpan={6}
+                  icon={<Store className="w-6 h-6 text-slate-400 stroke-[1.8]" />}
+                  title={isFiltered ? "Tidak Ada Toko Yang Cocok" : `Tidak Ada Toko di ${currentWorkspaceName}`}
+                  description={
+                    isFiltered
+                      ? "Tidak ada toko yang sesuai dengan kata kunci pencarian atau filter status yang dipilih."
+                      : "Belum ada cabang toko yang terdaftar di workspace ini. Tambahkan toko baru sekarang."
+                  }
+                  isFiltered={isFiltered}
+                  onResetFilters={isFiltered ? handleResetFilters : undefined}
+                  onAction={() => setIsCreateModalOpen(true)}
+                  actionLabel="Tambah Toko Baru"
+                />
               ) : (
                 paginatedStores.map((store) => {
                   const initialLetter =
@@ -497,7 +522,8 @@ export default function TokoPage() {
                       className="hover:bg-slate-50/70 transition-colors group"
                     >
                       {/* NAMA TOKO */}
-                      <td className={`py-3.5 px-4 font-semibold text-slate-900 whitespace-nowrap ${isInactive ? "opacity-40 grayscale" : ""}`}>
+                      <td className={`relative py-3.5 px-4 font-semibold text-slate-900 whitespace-nowrap ${isInactive ? "opacity-40 grayscale" : ""}`}>
+                        <div className="absolute left-0 top-1.5 bottom-1.5 w-1 bg-[#193f53] rounded-r opacity-0 group-hover:opacity-100 transition-opacity" />
                         <div className="flex items-center gap-3">
                           <div className="w-8 h-8 rounded-lg bg-slate-100 border border-slate-200/80 text-slate-700 font-bold text-xs flex items-center justify-center shrink-0 overflow-hidden shadow-2xs relative">
                             {store.storePicture ? (
@@ -608,59 +634,16 @@ export default function TokoPage() {
         </div>
 
         {/* Pagination Controls */}
-        <div className="p-3.5 sm:p-4 border-t border-slate-100 flex flex-wrap gap-4 items-center justify-between">
-          <p className="text-[11px] text-slate-500">
-            Menampilkan{" "}
-            <span className="font-bold text-slate-900">
-              {filteredStores.length === 0 ? 0 : startIndex}-{endIndex}
-            </span>{" "}
-            dari{" "}
-            <span className="font-bold text-slate-900">
-              {filteredStores.length}
-            </span>{" "}
-            toko
-          </p>
-
-          <div className="flex gap-1 text-[11px] ml-auto">
-            {/* Prev Button */}
-            <button
-              type="button"
-              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-              disabled={currentPage === 1}
-              className="w-7 h-7 flex items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
-              title="Halaman Sebelumnya"
-            >
-              <ChevronLeft className="w-3.5 h-3.5" />
-            </button>
-
-            {/* Page Numbers */}
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
-              <button
-                key={pageNum}
-                type="button"
-                onClick={() => setCurrentPage(pageNum)}
-                className={`w-7 h-7 flex items-center justify-center rounded-md text-xs font-bold transition-colors cursor-pointer ${
-                  currentPage === pageNum
-                    ? "bg-[#193f53] text-white shadow-2xs"
-                    : "border border-slate-200 text-slate-600 hover:bg-slate-50"
-                }`}
-              >
-                {pageNum}
-              </button>
-            ))}
-
-            {/* Next Button */}
-            <button
-              type="button"
-              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-              disabled={currentPage === totalPages}
-              className="px-3 h-7 flex items-center gap-1 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors font-bold ml-1 cursor-pointer"
-            >
-              <span>Selanjutnya</span>
-              <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
+        <SmartAuditPagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={filteredStores.length}
+          itemsPerPage={itemsPerPage}
+          onPageChange={setCurrentPage}
+          onItemsPerPageChange={setItemsPerPage}
+          pageSizeOptions={[7, 14, 21, 35]}
+          itemName="toko"
+        />
       </div>
 
       {/* Create Store Modal */}

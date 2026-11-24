@@ -17,6 +17,9 @@ import SoftDeleteModal from "./components/SoftDeleteModal";
 import RestoreHolidayModal from "./components/RestoreHolidayModal";
 import ActionButtons from "@/components/ui/ActionButtons";
 import HolidayCalendarWidget from "./components/HolidayCalendarWidget";
+import SmartAuditPagination from "@/components/ui/SmartAuditPagination";
+import TableSkeleton from "@/components/ui/TableSkeleton";
+import EmptyStateTable from "@/components/ui/EmptyStateTable";
  
 export default function LiburTokoPage() {
   const [holidays, setHolidays] = useState<Holiday[]>([]);
@@ -50,7 +53,15 @@ export default function LiburTokoPage() {
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 5;
+  const [itemsPerPage, setItemsPerPage] = useState(7);
+
+  const isFiltered = Boolean(searchTerm.trim() || filterStatus !== "Semua" || selectedDate);
+  const handleResetFilters = () => {
+    setSearchTerm("");
+    setFilterStatus("Semua");
+    setSelectedDate(null);
+    setCurrentPage(1);
+  };
 
   // Workspace Switcher States
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -209,7 +220,7 @@ export default function LiburTokoPage() {
   const paginatedHolidays = useMemo(() => {
     const start = (currentPage - 1) * itemsPerPage;
     return filteredHolidays.slice(start, start + itemsPerPage);
-  }, [filteredHolidays, currentPage]);
+  }, [filteredHolidays, currentPage, itemsPerPage]);
 
   const startIndex = filteredHolidays.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0;
   const endIndex = Math.min(currentPage * itemsPerPage, filteredHolidays.length);
@@ -312,48 +323,94 @@ export default function LiburTokoPage() {
       {/* Stats and Calendar Section */}
       <div className="flex flex-col lg:flex-row gap-5 mb-8 items-start">
         {/* Metric Cards (Left Side) */}
-        <div className="flex-1 w-full grid grid-cols-1 sm:grid-cols-3 gap-5 transition-all duration-500 ease-in-out">
-          {/* Card 1 */}
-          <div className="bg-[#fefdfa] rounded-xl border border-slate-200 p-5 shadow-xs flex flex-col">
-            <div className="flex justify-between items-start">
-              <h3 className="text-[11px] font-bold text-slate-500 tracking-wider uppercase">TOTAL LIBUR</h3>
-              <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
-                <CalendarIcon className="w-4 h-4" />
+        <div className="flex-1 w-full grid grid-cols-1 sm:grid-cols-3 gap-3.5 sm:gap-4 transition-all duration-500 ease-in-out">
+          {/* Card 1: TOTAL LIBUR */}
+          <div className="relative overflow-hidden bg-white rounded-xl border border-slate-200/90 p-3.5 sm:p-4 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all flex flex-col justify-between group min-h-[118px]">
+            <div className="absolute -top-10 -right-10 w-28 h-28 rounded-full bg-gradient-to-br from-emerald-400/12 via-emerald-300/5 to-transparent blur-xl pointer-events-none group-hover:scale-125 transition-transform duration-500" />
+            
+            {/* Header: Judul & Ikon (Satu baris, aman dari bentrok) */}
+            <div className="flex items-center justify-between relative z-10 gap-2">
+              <span className="text-[10px] sm:text-[11px] font-bold text-slate-500 tracking-wider uppercase truncate">
+                TOTAL LIBUR
+              </span>
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                <CalendarIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               </div>
             </div>
-            <div className="mt-4">
-              <div className="text-2xl font-extrabold text-slate-900">{stats.total}</div>
-              <p className="text-xs text-emerald-500 mt-1">Semua libur tercatat</p>
+
+            {/* Body: Angka Besar + Pill Badge Bersebelahan */}
+            <div className="mt-2.5 relative z-10">
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight leading-none">
+                  {stats.total}
+                </span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-100 shadow-2xs whitespace-nowrap">
+                  Agenda Libur
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1 truncate" title="Semua libur cabang tercatat">
+                Semua libur cabang tercatat
+              </p>
             </div>
           </div>
 
-          {/* Card 2 */}
-          <div className="bg-[#fefdfa] rounded-xl border border-slate-200 p-5 shadow-xs flex flex-col">
-            <div className="flex justify-between items-start">
-              <h3 className="text-[11px] font-bold text-slate-500 tracking-wider uppercase">LIBUR AKTIF</h3>
-              <div className="w-8 h-8 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center">
-                <CheckCircle2 className="w-4 h-4" />
+          {/* Card 2: LIBUR AKTIF */}
+          <div className="relative overflow-hidden bg-white rounded-xl border border-slate-200/90 p-3.5 sm:p-4 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all flex flex-col justify-between group min-h-[118px]">
+            <div className="absolute -top-10 -right-10 w-28 h-28 rounded-full bg-gradient-to-br from-purple-400/15 via-purple-300/5 to-transparent blur-xl pointer-events-none group-hover:scale-125 transition-transform duration-500" />
+            
+            {/* Header: Judul & Ikon */}
+            <div className="flex items-center justify-between relative z-10 gap-2">
+              <span className="text-[10px] sm:text-[11px] font-bold text-slate-500 tracking-wider uppercase truncate">
+                LIBUR AKTIF
+              </span>
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               </div>
             </div>
-            <div className="mt-4">
-              <div className="text-2xl font-extrabold text-slate-900">{stats.active}</div>
-              <div className="flex items-center gap-1 mt-1 text-purple-600 text-xs font-medium">
-                {stats.total > 0 ? `${Math.round((stats.active / stats.total) * 100)}% dari total` : "0% dari total"}
+
+            {/* Body: Angka Besar + Pill Badge Bersebelahan */}
+            <div className="mt-2.5 relative z-10">
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight leading-none">
+                  {stats.active}
+                </span>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200/70 shadow-2xs whitespace-nowrap">
+                  {stats.total > 0 ? `${Math.round((stats.active / stats.total) * 100)}% aktif` : "0% aktif"}
+                </span>
               </div>
+              <p className="text-[11px] text-purple-600 font-medium mt-1 truncate" title={`${stats.active} hari libur berlaku aktif`}>
+                {stats.active} hari libur aktif
+              </p>
             </div>
           </div>
 
-          {/* Card 3 */}
-          <div className="bg-[#fefdfa] rounded-xl border border-slate-200 p-5 shadow-xs flex flex-col">
-            <div className="flex justify-between items-start">
-              <h3 className="text-[11px] font-bold text-slate-500 tracking-wider uppercase">DIBATALKAN</h3>
-              <div className="w-8 h-8 rounded-lg bg-red-50 text-red-600 flex items-center justify-center">
-                <XCircle className="w-4 h-4" />
+          {/* Card 3: DIBATALKAN */}
+          <div className="relative overflow-hidden bg-white rounded-xl border border-slate-200/90 p-3.5 sm:p-4 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all flex flex-col justify-between group min-h-[118px]">
+            <div className="absolute -top-10 -right-10 w-28 h-28 rounded-full bg-gradient-to-br from-rose-400/12 via-rose-300/5 to-transparent blur-xl pointer-events-none group-hover:scale-125 transition-transform duration-500" />
+            
+            {/* Header: Judul & Ikon */}
+            <div className="flex items-center justify-between relative z-10 gap-2">
+              <span className="text-[10px] sm:text-[11px] font-bold text-slate-500 tracking-wider uppercase truncate">
+                DIBATALKAN
+              </span>
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-rose-50 text-rose-500 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                <XCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               </div>
             </div>
-            <div className="mt-4">
-              <div className="text-2xl font-extrabold text-slate-900">{stats.cancelled}</div>
-              <p className="text-xs text-red-500 mt-1">Dibatalkan tercatat</p>
+
+            {/* Body: Angka Besar + Pill Badge Bersebelahan */}
+            <div className="mt-2.5 relative z-10">
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight leading-none">
+                  {stats.cancelled}
+                </span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200/70 shadow-2xs whitespace-nowrap">
+                  {stats.total > 0 ? `${Math.round((stats.cancelled / stats.total) * 100)}% batal` : "0%"}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1 truncate" title="Jadwal libur yang dibatalkan">
+                Jadwal libur dibatalkan
+              </p>
             </div>
           </div>
         </div>
@@ -509,42 +566,27 @@ export default function LiburTokoPage() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {isLoading ? (
-                <tr>
-                  <td colSpan={6} className="py-16 text-center text-slate-400">
-                    <div className="flex flex-col items-center justify-center gap-2">
-                      <Loader2 className="w-6 h-6 text-[#193f53] animate-spin" />
-                      <span className="text-xs font-semibold text-slate-700">
-                        Memuat data libur toko & pengecualian jadwal...
-                      </span>
-                      <span className="text-[11px] text-slate-400">
-                        Menghubungkan ke database
-                      </span>
-                    </div>
-                  </td>
-                </tr>
+                <TableSkeleton rows={itemsPerPage} cols={6} hasThumbnail={false} />
               ) : paginatedHolidays.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="py-12 text-center text-slate-400">
-                    <CalendarIcon className="w-8 h-8 mx-auto mb-2 text-slate-300 stroke-[1.5]" />
-                    <p className="font-semibold text-slate-600 text-sm">Tidak ada jadwal libur ditemukan di {currentWorkspaceName}</p>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      {selectedDate
-                        ? `Tidak ada jadwal libur toko pada tanggal ${format(selectedDate, "d MMMM yyyy")}.`
-                        : "Coba sesuaikan kata kunci pencarian atau filter status."}
-                    </p> 
-                    {selectedDate && (
-                      <button
-                        onClick={() => {
-                          setSelectedDate(null);
-                          setCurrentPage(1);
-                        }}
-                        className="mt-3 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
-                      >
-                        Tampilkan Semua Jadwal
-                      </button>
-                    )}
-                  </td>
-                </tr>
+                <EmptyStateTable
+                  colSpan={6}
+                  icon={<CalendarIcon className="w-6 h-6 text-slate-400 stroke-[1.8]" />}
+                  title={isFiltered ? "Tidak Ada Jadwal Libur Yang Cocok" : `Tidak Ada Jadwal Libur di ${currentWorkspaceName}`}
+                  description={
+                    isFiltered
+                      ? selectedDate
+                        ? `Tidak ada jadwal libur toko pada tanggal ${format(selectedDate, "d MMMM yyyy")}. Coba atur ulang tanggal atau filter pencarian.`
+                        : "Coba sesuaikan kata kunci pencarian atau filter status."
+                      : "Belum ada jadwal libur toko yang didaftarkan untuk workspace ini."
+                  }
+                  isFiltered={isFiltered}
+                  onResetFilters={isFiltered ? handleResetFilters : undefined}
+                  onAction={() => {
+                    setSelectedHolidayToEdit(null);
+                    setIsCreatingView(true);
+                  }}
+                  actionLabel="Tambah Libur Toko"
+                />
               ) : (
                 paginatedHolidays.map((row) => {
                   const colors = getStatusColor(row.status);
@@ -553,8 +595,9 @@ export default function LiburTokoPage() {
                   const isGrayedOut = isSoftDeleted || isCompleted;
 
                   return (
-                    <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className={`px-4 py-3.5 ${isGrayedOut ? 'opacity-40 grayscale' : ''}`}>
+                    <tr key={row.id} className="group hover:bg-slate-50/70 transition-colors">
+                      <td className={`relative px-4 py-3.5 ${isGrayedOut ? 'opacity-40 grayscale' : ''}`}>
+                        <div className="absolute left-0 top-1.5 bottom-1.5 w-1 bg-[#193f53] rounded-r opacity-0 group-hover:opacity-100 transition-opacity" />
                         <div className="min-w-0">
                           <p className="text-xs font-bold text-slate-900 leading-tight line-clamp-2 break-words" title={row.storeName}>
                             {row.storeName}
@@ -626,52 +669,16 @@ export default function LiburTokoPage() {
         </div>
 
         {/* Table Footer & Pagination */}
-        <div className="p-3.5 sm:p-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-500">
-          <div>
-            Menampilkan <span className="font-semibold text-slate-700">{startIndex}-{endIndex}</span> dari{" "}
-            <span className="font-semibold text-slate-700">{filteredHolidays.length}</span> jadwal libur
-          </div>
-
-          <div className="flex items-center gap-1.5 self-center sm:self-auto">
-            {/* Previous Button */}
-            <button
-              type="button"
-              onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
-              disabled={currentPage === 1}
-              className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
-              title="Halaman Sebelumnya"
-            >
-              <ChevronLeft className="w-3.5 h-3.5" />
-            </button>
-
-            {/* Number Buttons */}
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
-              <button
-                key={pageNum}
-                type="button"
-                onClick={() => setCurrentPage(pageNum)}
-                className={`w-7 h-7 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  currentPage === pageNum
-                    ? "bg-[#193f53] text-white shadow-2xs"
-                    : "text-slate-600 hover:bg-slate-100 border border-transparent"
-                }`}
-              >
-                {pageNum}
-              </button>
-            ))}
-
-            {/* Next Button */}
-            <button
-              type="button"
-              onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
-              disabled={currentPage === totalPages}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer text-xs font-medium"
-            >
-              <span>Selanjutnya</span>
-              <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
+        <SmartAuditPagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={filteredHolidays.length}
+          itemsPerPage={itemsPerPage}
+          onPageChange={setCurrentPage}
+          onItemsPerPageChange={setItemsPerPage}
+          pageSizeOptions={[7, 14, 21, 35]}
+          itemName="jadwal libur"
+        />
       </div>
         </>
       )}

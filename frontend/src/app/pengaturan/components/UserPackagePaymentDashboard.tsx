@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import {
   CreditCard,
   CheckCircle2,
@@ -15,16 +16,21 @@ import {
   ChevronRight,
   X,
   ChevronDown,
+  TrendingUp,
 } from "lucide-react";
 import { toast } from "sonner";
 import SparkPayCheckoutModal, { SparkPayCheckoutData } from "./SparkPayCheckoutModal";
+import TableSkeleton from "@/components/ui/TableSkeleton";
+import EmptyStateTable from "@/components/ui/EmptyStateTable";
 
 // Interface untuk Data Pembayaran / Invoice Paket
 export interface UserSubscriptionItem {
   id: string;
+  superAdminId?: string;
   name: string;
   email: string;
   role: string;
+  phone?: string;
   avatar?: string;
   packageName: "Starter" | "Pro" | "Enterprise";
   nominal: number;
@@ -98,6 +104,7 @@ const INITIAL_USER_SUBSCRIPTIONS: UserSubscriptionItem[] = [
 ];
 
 export default function UserPackagePaymentDashboard() {
+  const router = useRouter();
   // State Data
   const [usersList, setUsersList] = useState<UserSubscriptionItem[]>(INITIAL_USER_SUBSCRIPTIONS);
   const [payerInfo, setPayerInfo] = useState<{
@@ -132,9 +139,11 @@ export default function UserPackagePaymentDashboard() {
           if (Array.isArray(json.data.users) && json.data.users.length > 0) {
             const mappedUsers: UserSubscriptionItem[] = json.data.users.map((u: any) => ({
               id: u.id,
+              superAdminId: u.superAdminId,
               name: u.name || "Anton Kurniawan",
               email: u.email || "admin@auditcorp.com",
               role: u.role || "Super Admin",
+              phone: u.phone,
               packageName: u.packageName,
               nominal: u.nominal,
               billingCycle: u.billingCycle || "Bulanan",
@@ -164,6 +173,13 @@ export default function UserPackagePaymentDashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState<"Semua" | "Lunas" | "Menunggu Bayar" | "Kadaluarsa">("Semua");
   const [filterPackage, setFilterPackage] = useState<"Semua" | "Starter" | "Pro" | "Enterprise">("Semua");
+
+  const isFiltered = Boolean(searchQuery.trim() || filterStatus !== "Semua" || filterPackage !== "Semua");
+  const handleResetFilters = () => {
+    setSearchQuery("");
+    setFilterStatus("Semua");
+    setFilterPackage("Semua");
+  };
 
   // Modal State untuk Checkout SparkPay
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
@@ -220,57 +236,92 @@ export default function UserPackagePaymentDashboard() {
     });
   }, [usersList, searchQuery, filterStatus, filterPackage]);
 
-  // Handle Klik Bayar via SparkPay
+  // Handle Klik Bayar via SparkPay -> Arahkan ke Halaman Checkout Dedicated
   const handleInitiatePayment = (user: UserSubscriptionItem) => {
-    setPayingUser(user);
-    setCheckoutData({
-      slug: `paket-${user.packageName.toLowerCase()}`,
-      external_reference: user.invoiceNumber,
-      title: `Pembayaran Paket Langganan ${user.packageName} (${user.billingCycle})`,
-      amount: user.nominal,
-      currency: "IDR",
-      customer: {
-        name: user.name || payerInfo.name || "Anton Kurniawan",
-        email: user.email || payerInfo.email || "admin@auditcorp.com",
-        phone: payerInfo.phone || "081234567890",
-      },
-      items: [
-        {
-          name: `Paket Langganan ${user.packageName} (${user.billingCycle})`,
-          quantity: 1,
-          price: user.nominal,
-        },
-      ],
+    // Jika Super Admin sudah lunas, jangan pernah mengeluarkan pop up pembayaran!
+    if (user.status === "Lunas") {
+      toast.info(`Akun Super Admin ${user.name} sudah berstatus LUNAS.`);
+      return;
+    }
+
+    try {
+      localStorage.setItem("audit_pro_checkout_item", JSON.stringify(user));
+    } catch {}
+
+    const params = new URLSearchParams({
+      id: user.id,
+      superAdminId: user.superAdminId || "",
+      name: user.name || payerInfo.name || "Anton Kurniawan",
+      email: user.email || payerInfo.email || "admin@auditcorp.com",
+      package: user.packageName || "Standard Plan",
+      nominal: String(user.nominal || 150000),
+      invoice: user.invoiceNumber || "",
+      cycle: user.billingCycle || "Bulanan",
     });
-    setIsCheckoutOpen(true);
+
+    router.push(`/checkout?${params.toString()}`);
   };
 
-  // Handle Sukses Pembayaran SparkPay
-  const handlePaymentSuccess = (result: any) => {
+  // Handle Sukses Pembayaran SparkPay (Simpan ke Database PostgreSQL tabel super_admin)
+  const handlePaymentSuccess = async (result: any) => {
     if (payingUser) {
+      const paymentMethodChosen = result?.paymentMethod || "QRIS SparkPay";
+      try {
+        // Simpan status Lunas ke database super_admin
+        const res = await fetch("http://localhost:5000/api/sparkpay/confirm-payment", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            superAdminId: payingUser.superAdminId,
+            email: payingUser.email,
+            invoiceNumber: payingUser.invoiceNumber,
+            packageName: payingUser.packageName,
+            nominal: payingUser.nominal,
+            paymentMethod: paymentMethodChosen,
+          }),
+        });
+
+        if (res.ok) {
+          toast.success(
+            `Pembayaran ${payingUser.invoiceNumber} berhasil! Status Super Admin ${payingUser.name} telah disimpan ke database sebagai LUNAS.`
+          );
+        }
+      } catch (err) {
+        console.error("Gagal sinkronisasi pembayaran ke database:", err);
+      }
+
+      const nowStr =
+        new Date().toLocaleString("id-ID", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        }) + " WIB";
+
       setUsersList((prev) =>
         prev.map((item) => {
-          if (item.id === payingUser.id) {
+          if (
+            item.id === payingUser.id ||
+            (payingUser.superAdminId && item.superAdminId === payingUser.superAdminId) ||
+            (payingUser.email && item.email === payingUser.email)
+          ) {
             return {
               ...item,
               status: "Lunas",
-              paymentMethod: result.paymentMethod || "QRIS SparkPay",
-              lastPaymentDate:
-                new Date().toLocaleString("id-ID", {
-                  day: "2-digit",
-                  month: "short",
-                  year: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                }) + " WIB",
+              paymentMethod: paymentMethodChosen,
+              lastPaymentDate: nowStr,
             };
           }
           return item;
         })
       );
-      toast.success(
-        `Pembayaran ${payingUser.invoiceNumber} sebesar ${formatRupiah(payingUser.nominal)} berhasil dilunasi oleh Anton Kurniawan!`
-      );
+
+      setTimeout(() => {
+        fetchDbUsers();
+      }, 500);
     }
     setIsCheckoutOpen(false);
   };
@@ -282,16 +333,22 @@ export default function UserPackagePaymentDashboard() {
       {/* ============================================================== */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Card 1: Total Akumulasi Tagihan */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-xs transition-shadow">
-          <div className="flex items-center justify-between">
+        <div className="relative overflow-hidden bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all group flex flex-col justify-between">
+          <div className="absolute -top-10 -right-10 w-28 h-28 rounded-full bg-gradient-to-br from-indigo-400/12 via-indigo-300/5 to-transparent blur-xl pointer-events-none group-hover:scale-125 transition-transform duration-500" />
+          <div className="flex items-center justify-between relative z-10">
             <span className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">
-              Total Tagihan Paket
+              Total Tagihan
             </span>
-            <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
-              <CreditCard className="w-4 h-4" />
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100 shadow-2xs">
+                Sistem SaaS
+              </span>
+              <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                <CreditCard className="w-4 h-4" />
+              </div>
             </div>
           </div>
-          <div className="mt-2">
+          <div className="mt-3 relative z-10">
             <h3 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
               {formatRupiah(summaryStats.totalNominal)}
             </h3>
@@ -302,58 +359,83 @@ export default function UserPackagePaymentDashboard() {
         </div>
 
         {/* Card 2: Tagihan Lunas */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-xs transition-shadow">
-          <div className="flex items-center justify-between">
+        <div className="relative overflow-hidden bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all group flex flex-col justify-between">
+          <div className="absolute -top-10 -right-10 w-28 h-28 rounded-full bg-gradient-to-br from-emerald-400/15 via-emerald-300/5 to-transparent blur-xl pointer-events-none group-hover:scale-125 transition-transform duration-500" />
+          <div className="flex items-center justify-between relative z-10">
             <span className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">
               Tagihan Lunas
             </span>
-            <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
-              <CheckCircle2 className="w-4 h-4" />
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/70 shadow-2xs">
+                <TrendingUp className="w-2.5 h-2.5 stroke-[2.5]" />
+                <span>
+                  {summaryStats.totalCount > 0
+                    ? `${Math.round((summaryStats.lunasCount / summaryStats.totalCount) * 100)}% lunas`
+                    : "0%"}
+                </span>
+              </span>
+              <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                <CheckCircle2 className="w-4 h-4" />
+              </div>
             </div>
           </div>
-          <div className="mt-2">
+          <div className="mt-3 relative z-10">
             <h3 className="text-xl sm:text-2xl font-black text-emerald-950 tracking-tight">
               {summaryStats.lunasCount} Paket
             </h3>
-            <p className="text-[11px] text-slate-400 mt-1">
+            <p className="text-[11px] text-emerald-700 font-medium mt-1">
               {formatRupiah(summaryStats.lunasNominal)} berhasil terbayar
             </p>
           </div>
         </div>
 
         {/* Card 3: Menunggu Pembayaran */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-xs transition-shadow">
-          <div className="flex items-center justify-between">
+        <div className="relative overflow-hidden bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all group flex flex-col justify-between">
+          <div className="absolute -top-10 -right-10 w-28 h-28 rounded-full bg-gradient-to-br from-amber-400/12 via-amber-300/5 to-transparent blur-xl pointer-events-none group-hover:scale-125 transition-transform duration-500" />
+          <div className="flex items-center justify-between relative z-10">
             <span className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">
-              Menunggu Pembayaran
+              Menunggu Bayar
             </span>
-            <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
-              <Clock className="w-4 h-4" />
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200/70 shadow-2xs">
+                {summaryStats.totalCount > 0
+                  ? `${Math.round((summaryStats.pendingCount / summaryStats.totalCount) * 100)}% pending`
+                  : "0%"}
+              </span>
+              <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                <Clock className="w-4 h-4" />
+              </div>
             </div>
           </div>
-          <div className="mt-2">
+          <div className="mt-3 relative z-10">
             <h3 className="text-xl sm:text-2xl font-black text-amber-950 tracking-tight">
               {summaryStats.pendingCount} Paket
             </h3>
-            <p className="text-[11px] text-slate-400 mt-1">
+            <p className="text-[11px] text-amber-700 font-medium mt-1">
               {formatRupiah(summaryStats.pendingNominal)} perlu diselesaikan
             </p>
           </div>
         </div>
 
         {/* Card 4: Penanggung Jawab Pembayar */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-xs transition-shadow">
-          <div className="flex items-center justify-between">
+        <div className="relative overflow-hidden bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all group flex flex-col justify-between">
+          <div className="absolute -top-10 -right-10 w-28 h-28 rounded-full bg-gradient-to-br from-sky-400/12 via-sky-300/5 to-transparent blur-xl pointer-events-none group-hover:scale-125 transition-transform duration-500" />
+          <div className="flex items-center justify-between relative z-10">
             <span className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">
               Total Pembayar
             </span>
-            <div className="w-8 h-8 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center shrink-0">
-              <ShieldCheck className="w-4 h-4" />
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-50 text-sky-700 border border-sky-100 shadow-2xs">
+                Super Admin
+              </span>
+              <div className="w-8 h-8 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                <ShieldCheck className="w-4 h-4" />
+              </div>
             </div>
           </div>
-          <div className="mt-2">
+          <div className="mt-3 relative z-10">
             <h3 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-              {summaryStats.uniquePayers} Super Admin
+              {summaryStats.uniquePayers} Akun
             </h3>
             <p className="text-[11px] text-slate-400 mt-1 truncate">
               {payerInfo.name} & {Math.max(0, summaryStats.uniquePayers - 1)} akun lainnya
@@ -456,12 +538,21 @@ export default function UserPackagePaymentDashboard() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
-              {filteredUsers.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="text-center py-8 text-slate-400">
-                    Tidak ada data tagihan yang sesuai dengan filter pencarian.
-                  </td>
-                </tr>
+              {isLoadingDb ? (
+                <TableSkeleton rows={7} cols={9} hasThumbnail={false} />
+              ) : filteredUsers.length === 0 ? (
+                <EmptyStateTable
+                  colSpan={9}
+                  icon={<CreditCard className="w-6 h-6 text-slate-400 stroke-[1.8]" />}
+                  title={isFiltered ? "Tidak Ada Tagihan Yang Cocok" : "Tidak Ada Riwayat Tagihan"}
+                  description={
+                    isFiltered
+                      ? "Tidak ada data tagihan paket langganan yang cocok dengan filter atau kata kunci pencarian Anda."
+                      : "Belum ada catatan tagihan paket SparkPay yang diterbitkan saat ini."
+                  }
+                  isFiltered={isFiltered}
+                  onResetFilters={isFiltered ? handleResetFilters : undefined}
+                />
               ) : (
                 filteredUsers.map((user, idx) => (
                   <tr
@@ -469,7 +560,8 @@ export default function UserPackagePaymentDashboard() {
                     className="hover:bg-slate-50/70 transition-colors group"
                   >
                     {/* Kolom 0: NO */}
-                    <td className="py-3 px-4 text-center font-mono text-[11px] text-slate-400">
+                    <td className="relative py-3 px-4 text-center font-mono text-[11px] text-slate-400">
+                      <div className="absolute left-0 top-1.5 bottom-1.5 w-1 bg-[#193f53] rounded-r opacity-0 group-hover:opacity-100 transition-opacity" />
                       {idx + 1}
                     </td>
 
@@ -587,15 +679,21 @@ export default function UserPackagePaymentDashboard() {
                           <span>Bayar via SparkPay</span>
                         </button>
                       ) : (
-                        <button
-                          type="button"
-                          onClick={() => setSelectedInvoice(user)}
-                          className="inline-flex items-center gap-1 text-xs font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer"
-                        >
-                          <FileText className="w-3.5 h-3.5" />
-                          <span>Detail Invoice</span>
-                          <ChevronRight className="w-3 h-3" />
-                        </button>
+                        <div className="flex items-center justify-center gap-1.5">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Lunas</span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedInvoice(user)}
+                            className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 hover:text-indigo-800 p-1.5 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
+                            title="Lihat Detail Kwitansi"
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                            <span>Kwitansi</span>
+                          </button>
+                        </div>
                       )}
                     </td>
                   </tr>

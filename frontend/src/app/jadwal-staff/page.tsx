@@ -30,7 +30,9 @@ import { AuthService, AuthUser } from "@/lib/auth";
 import { apiFetch } from "@/lib/api-client";
 import StaffAuthGuard from "@/components/auth/StaffAuthGuard";
 import StaffBottomNav from "./components/StaffBottomNav";
+import { StaffScheduleListSkeleton } from "./components/StaffSkeleton";
 import DecryptedImage from "@/components/DecryptedImage";
+import AuthVerificationLoading from "@/components/auth/AuthVerificationLoading";
 
 interface StaffScheduleItem {
   id: string;
@@ -100,6 +102,7 @@ function JadwalStaffContent() {
   const [isOfflineMode, setIsOfflineMode] = useState<boolean>(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<string>("");
   const [showProfileMenu, setShowProfileMenu] = useState<boolean>(false);
+  const [isLoggingOut, setIsLoggingOut] = useState<boolean>(false);
   const [isFullscreenMode, setIsFullscreenMode] = useState<boolean>(false);
 
   // State data jadwal dengan initial state bersih (diisi dari akun staf & database)
@@ -434,16 +437,8 @@ function JadwalStaffContent() {
 
   const handleLogout = async () => {
     setShowProfileMenu(false);
-    triggerSuccessToast(
-      "Berhasil Logout",
-      "Anda telah berhasil keluar dari akun. Mengalihkan..."
-    );
-    await AuthService.logoutAsync({ broadcast: true });
-    if (typeof window !== "undefined") {
-      window.location.replace("/login?reason=logout");
-    } else {
-      router.replace("/login?reason=logout");
-    }
+    setIsLoggingOut(true);
+    await AuthService.logoutWithTransition("logout", 3000);
   };
 
   const displayName =
@@ -465,6 +460,10 @@ function JadwalStaffContent() {
     if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
     return (parts[0][0] + parts[1][0]).toUpperCase();
   };
+
+  if (isLoggingOut) {
+    return <AuthVerificationLoading message="Loading..." />;
+  }
 
   return (
     <div className="fixed inset-0 flex flex-col overflow-hidden bg-[#f4f6fc] sm:relative sm:inset-auto sm:min-h-screen sm:bg-[#f3f4fa] sm:flex sm:items-center sm:justify-center sm:py-6 sm:px-4 font-sans antialiased">
@@ -540,12 +539,21 @@ function JadwalStaffContent() {
                 <StoreIcon className="w-4 h-4 stroke-[2.2]" />
               </div>
               <div className="min-w-0 flex-1">
-                <h1 className="text-sm sm:text-base font-bold text-slate-900 leading-tight">
-                  {displayStore}
-                </h1>
-                <p className="text-[11px] font-medium text-slate-500 leading-snug mt-1">
-                  {displayLocation}
-                </p>
+                {loading && scheduleData.schedules.length === 0 ? (
+                  <div className="space-y-1.5 animate-pulse pt-0.5">
+                    <div className="h-4 w-36 rounded-md bg-slate-200/90" />
+                    <div className="h-3 w-48 rounded-md bg-slate-200/60" />
+                  </div>
+                ) : (
+                  <>
+                    <h1 className="text-sm sm:text-base font-bold text-slate-900 leading-tight">
+                      {displayStore}
+                    </h1>
+                    <p className="text-[11px] font-medium text-slate-500 leading-snug mt-1">
+                      {displayLocation}
+                    </p>
+                  </>
+                )}
               </div>
             </div>
 
@@ -676,16 +684,24 @@ function JadwalStaffContent() {
                 <span className="text-[11px] font-bold text-slate-400 tracking-wider uppercase">
                   PROGRES SHIFT
                 </span>
-                <span className="text-[11px] font-semibold text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-100/60">
-                  {scheduleData.progress.label}
-                </span>
+                {loading && scheduleData.schedules.length === 0 ? (
+                  <div className="h-5 w-24 rounded-full bg-slate-200/80 animate-pulse" />
+                ) : (
+                  <span className="text-[11px] font-semibold text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-100/60">
+                    {scheduleData.progress.label}
+                  </span>
+                )}
               </div>
               {/* Progress Bar Track */}
               <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-[#193f53] rounded-full transition-all duration-700 ease-out"
-                  style={{ width: `${scheduleData.progress.percentage}%` }}
-                />
+                {loading && scheduleData.schedules.length === 0 ? (
+                  <div className="h-full w-1/3 bg-slate-200 rounded-full animate-pulse" />
+                ) : (
+                  <div
+                    className="h-full bg-[#193f53] rounded-full transition-all duration-700 ease-out"
+                    style={{ width: `${scheduleData.progress.percentage}%` }}
+                  />
+                )}
               </div>
             </div>
           </div>
@@ -714,13 +730,7 @@ function JadwalStaffContent() {
           {/* 6. Schedule Cards List */}
           <div className="space-y-3">
             {loading && scheduleData.schedules.length === 0 ? (
-              <div className="bg-white rounded-3xl p-6 text-center border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] space-y-2">
-                <RotateCw className="w-8 h-8 text-[#193f53] animate-spin mx-auto" />
-                <h4 className="text-sm font-bold text-slate-700">Memuat Jadwal Tugas...</h4>
-                <p className="text-xs text-slate-400">
-                  Menyinkronkan jadwal audit hari ini dari database server.
-                </p>
-              </div>
+              <StaffScheduleListSkeleton count={3} />
             ) : scheduleData.schedules.length === 0 ? (
               <div className="bg-white rounded-3xl p-6 text-center border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)]">
                 <Calendar className="w-10 h-10 text-slate-300 mx-auto mb-2" />

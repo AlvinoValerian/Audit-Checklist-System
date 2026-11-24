@@ -23,12 +23,59 @@ import {
   Lock,
   Camera,
 } from "lucide-react";
+import { AuthService, AuthUser } from "@/lib/auth";
+import { getHomeRouteForRole } from "@/lib/routes-acl";
+import { CryptoService } from "@/lib/crypto";
+
+function getInitials(name?: string): string {
+  if (!name || name === "Admin Utama" || name === "Admin") return "SA";
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+  return name.slice(0, 2).toUpperCase();
+}
 
 export default function LandingPage() {
   const [activeFaq, setActiveFaq] = useState<number | null>(0);
   const [showBackToTop, setShowBackToTop] = useState(false);
   const [isYearly, setIsYearly] = useState(false);
   const [isOverDark, setIsOverDark] = useState(false);
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [userAvatar, setUserAvatar] = useState<string | null>(null);
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+    const user = AuthService.getCurrentUser();
+    setCurrentUser(user);
+
+    if (user) {
+      const rawAvatar =
+        (typeof window !== "undefined" && localStorage.getItem("audit_pro_avatar")) ||
+        user.profilePicture;
+      if (rawAvatar) {
+        if (CryptoService.isEncrypted(rawAvatar)) {
+          CryptoService.decryptImage(rawAvatar)
+            .then((dec) => setUserAvatar(dec))
+            .catch(() => setUserAvatar(null));
+        } else {
+          setUserAvatar(rawAvatar);
+        }
+      }
+    }
+
+    // Auto-scroll smooth jika halaman dibuka dengan anchor hash (contoh: /#pricing dari menu Langganan)
+    if (typeof window !== "undefined" && window.location.hash) {
+      const hash = window.location.hash;
+      setTimeout(() => {
+        const el = document.querySelector(hash);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth" });
+        }
+      }, 150);
+    }
+  }, []);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -91,6 +138,37 @@ export default function LandingPage() {
         window.history.pushState(null, "", targetId);
       }
     }
+  };
+
+  const getPackageActionUrl = (
+    planName: "Lite Plan" | "Standard Plan" | "Pro Plan",
+    monthlyPrice: number,
+    yearlyPrice: number
+  ) => {
+    if (isMounted && currentUser) {
+      const nominal = isYearly ? yearlyPrice : monthlyPrice;
+      const cycle = isYearly ? "Tahunan" : "Bulanan";
+      const saId =
+        currentUser.rawId ||
+        (currentUser.id ? String(currentUser.id).replace(/^sa-/, "") : "") ||
+        "";
+      const params = new URLSearchParams({
+        package: planName,
+        nominal: String(nominal),
+        cycle: cycle,
+        superAdminId: saId,
+        email: currentUser.email || "",
+        name: currentUser.fullName || "",
+      });
+      return `/checkout?${params.toString()}`;
+    }
+
+    const planSlug = planName.toLowerCase().includes("lite")
+      ? "lite"
+      : planName.toLowerCase().includes("pro")
+      ? "pro"
+      : "standard";
+    return `/register?plan=${planSlug}&billing=${isYearly ? "yearly" : "monthly"}`;
   };
 
   const toggleFaq = (index: number) => {
@@ -325,27 +403,75 @@ export default function LandingPage() {
             </a>
           </nav>
 
-          {/* Right Action: Masuk + Registrasi Button */}
-          <div className="flex items-center gap-3">
-            <Link
-              href="/login"
-              className={`text-xs font-semibold px-2.5 py-1 transition-colors ${
-                isOverDark ? "text-white/90 hover:text-white" : "text-slate-700 hover:text-[#26455E]"
-              }`}
-            >
-              Masuk
-            </Link>
-            <Link
-              href="/register"
-              className={`px-4 sm:px-5 py-2 text-xs font-bold rounded-full shadow-sm hover:shadow transition-all whitespace-nowrap ${
-                isOverDark
-                  ? "bg-white hover:bg-slate-100 text-[#26455E]"
-                  : "bg-[#26455E] hover:bg-[#1a3143] text-white"
-              }`}
-            >
-              Registrasi
-            </Link>
-          </div>
+          {/* Right Action: Masuk + Registrasi Button / Profil Super Admin */}
+          {isMounted && currentUser ? (
+            <div className="flex items-center gap-2">
+              <Link
+                href={getHomeRouteForRole(currentUser.role)}
+                className={`group flex items-center gap-2.5 pl-1.5 pr-3.5 py-1.5 rounded-full transition-all border shadow-xs ${
+                  isOverDark
+                    ? "bg-white/15 hover:bg-white/25 border-white/25 text-white shadow-[0_4px_16px_rgba(0,0,0,0.2)]"
+                    : "bg-white/85 hover:bg-white border-slate-200/90 text-slate-800 shadow-xs hover:shadow-md"
+                }`}
+                title="Buka Dashboard / Workspace"
+              >
+                {/* Avatar */}
+                <div className="w-7 h-7 rounded-full bg-[#26455E] text-white text-[11px] font-bold flex items-center justify-center overflow-hidden shrink-0 shadow-xs ring-1 ring-white/30">
+                  {userAvatar ? (
+                    <img
+                      src={userAvatar}
+                      alt={currentUser.fullName || "User"}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span>{getInitials(currentUser.fullName || "Super Admin")}</span>
+                  )}
+                </div>
+
+                {/* Name & Role */}
+                <div className="flex flex-col text-left leading-tight max-w-[110px] sm:max-w-[150px]">
+                  <span className="text-xs font-bold truncate">
+                    {currentUser.fullName || "Super Admin"}
+                  </span>
+                  <span
+                    className={`text-[10px] font-medium truncate ${
+                      isOverDark ? "text-white/75" : "text-slate-500"
+                    }`}
+                  >
+                    {currentUser.role || "Super Admin"}
+                  </span>
+                </div>
+
+                {/* Arrow Icon */}
+                <ChevronRight
+                  className={`w-3.5 h-3.5 shrink-0 ml-0.5 transition-transform duration-200 group-hover:translate-x-0.5 ${
+                    isOverDark ? "text-white/70" : "text-slate-400"
+                  }`}
+                />
+              </Link>
+            </div>
+          ) : (
+            <div className="flex items-center gap-3">
+              <Link
+                href="/login"
+                className={`text-xs font-semibold px-2.5 py-1 transition-colors ${
+                  isOverDark ? "text-white/90 hover:text-white" : "text-slate-700 hover:text-[#26455E]"
+                }`}
+              >
+                Masuk
+              </Link>
+              <Link
+                href="/register"
+                className={`px-4 sm:px-5 py-2 text-xs font-bold rounded-full shadow-sm hover:shadow transition-all whitespace-nowrap ${
+                  isOverDark
+                    ? "bg-white hover:bg-slate-100 text-[#26455E]"
+                    : "bg-[#26455E] hover:bg-[#1a3143] text-white"
+                }`}
+              >
+                Registrasi
+              </Link>
+            </div>
+          )}
         </div>
       </header>
 
@@ -379,19 +505,40 @@ export default function LandingPage() {
 
             {/* CTA Buttons */}
             <div className="mt-8 sm:mt-10 flex flex-col sm:flex-row items-center justify-center gap-3.5 sm:gap-4">
-              <Link
-                href="/register"
-                className="w-full sm:w-auto px-7 py-3.5 rounded-xl bg-[#26455E] hover:bg-[#1b3245] text-white font-bold text-sm shadow-[0_4px_20px_rgba(38,69,94,0.3)] hover:shadow-[0_6px_25px_rgba(38,69,94,0.45)] hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center justify-center gap-2.5 group"
-              >
-                <span>Daftar Akun Baru</span>
-                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-              </Link>
-              <Link
-                href="/login"
-                className="w-full sm:w-auto px-7 py-3.5 rounded-xl bg-white hover:bg-slate-50 text-slate-800 font-bold text-sm border border-slate-200/90 shadow-xs hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center justify-center gap-2"
-              >
-                <span>Masuk ke Akun</span>
-              </Link>
+              {isMounted && currentUser ? (
+                <>
+                  <Link
+                    href={getHomeRouteForRole(currentUser.role)}
+                    className="w-full sm:w-auto px-7 py-3.5 rounded-xl bg-[#26455E] hover:bg-[#1b3245] text-white font-bold text-sm shadow-[0_4px_20px_rgba(38,69,94,0.3)] hover:shadow-[0_6px_25px_rgba(38,69,94,0.45)] hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center justify-center gap-2.5 group"
+                  >
+                    <span>Masuk ke Workspace</span>
+                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                  </Link>
+                  <Link
+                    href="/langganan"
+                    className="w-full sm:w-auto px-7 py-3.5 rounded-xl bg-white hover:bg-slate-50 text-slate-800 font-bold text-sm border border-slate-200/90 shadow-xs hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center justify-center gap-2"
+                  >
+                    <Sparkles className="w-4 h-4 text-amber-500" />
+                    <span>Status Langganan</span>
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <Link
+                    href="/register"
+                    className="w-full sm:w-auto px-7 py-3.5 rounded-xl bg-[#26455E] hover:bg-[#1b3245] text-white font-bold text-sm shadow-[0_4px_20px_rgba(38,69,94,0.3)] hover:shadow-[0_6px_25px_rgba(38,69,94,0.45)] hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center justify-center gap-2.5 group"
+                  >
+                    <span>Daftar Akun Baru</span>
+                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                  </Link>
+                  <Link
+                    href="/login"
+                    className="w-full sm:w-auto px-7 py-3.5 rounded-xl bg-white hover:bg-slate-50 text-slate-800 font-bold text-sm border border-slate-200/90 shadow-xs hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center justify-center gap-2"
+                  >
+                    <span>Masuk ke Akun</span>
+                  </Link>
+                </>
+              )}
             </div>
 
             {/* Micro Trust Points (Stripe style) */}
@@ -966,7 +1113,7 @@ export default function LandingPage() {
                 {/* Bottom CTA Button */}
                 <div className="mt-8 pt-4">
                   <Link
-                    href={`/register?plan=lite&billing=${isYearly ? "yearly" : "monthly"}`}
+                    href={getPackageActionUrl("Lite Plan", 50000, 480000)}
                     className="w-full py-3 px-4 rounded-full border-2 border-[#26455E] bg-blue-50/80 group-hover:bg-[#26455E] text-[#26455E] group-hover:text-white text-xs font-bold tracking-wide transition-all duration-300 text-center block shadow-xs group-hover:shadow-[0_4px_18px_rgba(38,69,94,0.35)]"
                   >
                     Pilih Paket Lite
@@ -1047,7 +1194,7 @@ export default function LandingPage() {
                 {/* Bottom CTA Button */}
                 <div className="mt-8 pt-4">
                   <Link
-                    href={`/register?plan=standard&billing=${isYearly ? "yearly" : "monthly"}`}
+                    href={getPackageActionUrl("Standard Plan", 150000, 1440000)}
                     className="w-full py-3 px-4 rounded-full border-2 border-[#26455E] bg-blue-50/80 group-hover:bg-[#26455E] text-[#26455E] group-hover:text-white text-xs font-bold tracking-wide transition-all duration-300 text-center block shadow-xs group-hover:shadow-[0_4px_18px_rgba(38,69,94,0.35)]"
                   >
                     Pilih Paket Standard
@@ -1128,7 +1275,7 @@ export default function LandingPage() {
                 {/* Bottom CTA Button */}
                 <div className="mt-8 pt-4">
                   <Link
-                    href={`/register?plan=pro&billing=${isYearly ? "yearly" : "monthly"}`}
+                    href={getPackageActionUrl("Pro Plan", 360000, 3480000)}
                     className="w-full py-3 px-4 rounded-full border-2 border-[#26455E] bg-blue-50/80 group-hover:bg-[#26455E] text-[#26455E] group-hover:text-white text-xs font-bold tracking-wide transition-all duration-300 text-center block shadow-xs group-hover:shadow-[0_4px_18px_rgba(38,69,94,0.35)]"
                   >
                     Pilih Paket Pro

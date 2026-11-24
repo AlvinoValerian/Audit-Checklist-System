@@ -13,8 +13,9 @@ router.post('/payment-callback/simulate', sparkpayController.simulateWebhook);
 // Status konfigurasi Sandbox
 router.get('/config', sparkpayController.getConfig);
 
-// Data Rekap Pembayaran User dari PostgreSQL DB
+// Data Rekap Pembayaran User dari PostgreSQL DB & Konfirmasi Pembayaran
 router.get('/user-subscriptions', sparkpayController.getUserSubscriptions);
+router.post('/confirm-payment', sparkpayController.confirmPayment);
 
 module.exports = router;
 
