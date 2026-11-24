@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
+import { motion, AnimatePresence } from "motion/react";
 import {
   Monitor,
   CheckCircle2,
@@ -44,6 +45,29 @@ export default function LandingPage() {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [userAvatar, setUserAvatar] = useState<string | null>(null);
   const [isMounted, setIsMounted] = useState(false);
+
+  const [titleNumber, setTitleNumber] = useState(0);
+  const titles = useMemo(
+    () => [
+      "Toko Ritel",
+      "Restoran & Kafe",
+      "Minimarket",
+      "Bisnis Franchise",
+      "Jaringan Cabang",
+    ],
+    []
+  );
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (titleNumber === titles.length - 1) {
+        setTitleNumber(0);
+      } else {
+        setTitleNumber(titleNumber + 1);
+      }
+    }, 2200);
+    return () => clearTimeout(timeoutId);
+  }, [titleNumber, titles]);
 
   useEffect(() => {
     setIsMounted(true);
@@ -166,8 +190,8 @@ export default function LandingPage() {
     const planSlug = planName.toLowerCase().includes("lite")
       ? "lite"
       : planName.toLowerCase().includes("pro")
-      ? "pro"
-      : "standard";
+        ? "pro"
+        : "standard";
     return `/register?plan=${planSlug}&billing=${isYearly ? "yearly" : "monthly"}`;
   };
 
@@ -275,11 +299,10 @@ export default function LandingPage() {
          ========================================================================= */}
       <header className="fixed top-5 left-0 right-0 z-50 flex justify-center px-4 pointer-events-none">
         <div
-          className={`pointer-events-auto flex items-center justify-between gap-3 sm:gap-6 px-3.5 sm:px-5 py-2 rounded-full backdrop-blur-2xl transition-all duration-300 max-w-4xl w-full ${
-            isOverDark
-              ? "bg-white/15 border border-white/30 shadow-[0_8px_32px_rgba(0,0,0,0.35)]"
-              : "bg-slate-900/10 hover:bg-slate-900/15 border border-white/60 shadow-[0_8px_32px_rgba(38,69,94,0.12)]"
-          }`}
+          className={`pointer-events-auto flex items-center justify-between gap-3 sm:gap-6 px-3.5 sm:px-5 py-2 rounded-full backdrop-blur-2xl transition-all duration-300 max-w-4xl w-full ${isOverDark
+            ? "bg-white/15 border border-white/30 shadow-[0_8px_32px_rgba(0,0,0,0.35)]"
+            : "bg-slate-900/10 hover:bg-slate-900/15 border border-white/60 shadow-[0_8px_32px_rgba(38,69,94,0.12)]"
+            }`}
         >
           {/* Brand Logo & Name */}
           <div className="flex items-center gap-3">
@@ -289,116 +312,100 @@ export default function LandingPage() {
               className="flex items-center gap-2.5 cursor-pointer group select-none"
             >
               <div
-                className={`w-8 h-8 rounded-full flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform ${
-                  isOverDark ? "bg-white text-[#26455E]" : "bg-[#26455E] text-white"
-                }`}
+                className={`w-8 h-8 rounded-full flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform ${isOverDark ? "bg-white text-[#26455E]" : "bg-[#26455E] text-white"
+                  }`}
               >
                 <Monitor className="w-4 h-4 stroke-[2.2]" />
               </div>
               <span
-                className={`text-sm sm:text-base font-bold tracking-tight transition-colors duration-300 ${
-                  isOverDark ? "text-white" : "text-slate-900"
-                }`}
+                className={`text-sm sm:text-base font-bold tracking-tight transition-colors duration-300 ${isOverDark ? "text-white" : "text-slate-900"
+                  }`}
               >
                 Audit Pro
               </span>
             </a>
             {/* Divider */}
             <div
-              className={`hidden md:block w-px h-4 mx-1 transition-colors duration-300 ${
-                isOverDark ? "bg-white/30" : "bg-slate-400/40"
-              }`}
+              className={`hidden md:block w-px h-4 mx-1 transition-colors duration-300 ${isOverDark ? "bg-white/30" : "bg-slate-400/40"
+                }`}
             />
           </div>
 
           {/* Navigation Links (Pill Inside with Dynamic Contrast) */}
           <nav
-            className={`hidden md:flex items-center gap-6 lg:gap-8 text-xs sm:text-[13px] font-medium transition-colors duration-300 ${
-              isOverDark ? "text-slate-200" : "text-slate-700"
-            }`}
+            className={`hidden md:flex items-center gap-6 lg:gap-8 text-xs sm:text-[13px] font-medium transition-colors duration-300 ${isOverDark ? "text-slate-200" : "text-slate-700"
+              }`}
           >
             <a
               href="#home"
               onClick={(e) => scrollToSection(e, "#home")}
-              className={`relative py-1 transition-colors group ${
-                isOverDark ? "hover:text-white" : "hover:text-[#26455E]"
-              }`}
+              className={`relative py-1 transition-colors group ${isOverDark ? "hover:text-white" : "hover:text-[#26455E]"
+                }`}
             >
               <span>Home</span>
               <span
-                className={`absolute bottom-0 left-0 w-full h-0.5 scale-x-0 origin-left transition-transform duration-300 ease-out group-hover:scale-x-100 rounded-full ${
-                  isOverDark ? "bg-white" : "bg-[#26455E]"
-                }`}
+                className={`absolute bottom-0 left-0 w-full h-0.5 scale-x-0 origin-left transition-transform duration-300 ease-out group-hover:scale-x-100 rounded-full ${isOverDark ? "bg-white" : "bg-[#26455E]"
+                  }`}
               />
             </a>
             <a
               href="#fitur"
               onClick={(e) => scrollToSection(e, "#fitur")}
-              className={`relative py-1 transition-colors group ${
-                isOverDark ? "hover:text-white" : "hover:text-[#26455E]"
-              }`}
+              className={`relative py-1 transition-colors group ${isOverDark ? "hover:text-white" : "hover:text-[#26455E]"
+                }`}
             >
               <span>Fitur</span>
               <span
-                className={`absolute bottom-0 left-0 w-full h-0.5 scale-x-0 origin-left transition-transform duration-300 ease-out group-hover:scale-x-100 rounded-full ${
-                  isOverDark ? "bg-white" : "bg-[#26455E]"
-                }`}
+                className={`absolute bottom-0 left-0 w-full h-0.5 scale-x-0 origin-left transition-transform duration-300 ease-out group-hover:scale-x-100 rounded-full ${isOverDark ? "bg-white" : "bg-[#26455E]"
+                  }`}
               />
             </a>
             <a
               href="#alur"
               onClick={(e) => scrollToSection(e, "#alur")}
-              className={`relative py-1 transition-colors group ${
-                isOverDark ? "hover:text-white" : "hover:text-[#26455E]"
-              }`}
+              className={`relative py-1 transition-colors group ${isOverDark ? "hover:text-white" : "hover:text-[#26455E]"
+                }`}
             >
               <span>Alur Kerja</span>
               <span
-                className={`absolute bottom-0 left-0 w-full h-0.5 scale-x-0 origin-left transition-transform duration-300 ease-out group-hover:scale-x-100 rounded-full ${
-                  isOverDark ? "bg-white" : "bg-[#26455E]"
-                }`}
+                className={`absolute bottom-0 left-0 w-full h-0.5 scale-x-0 origin-left transition-transform duration-300 ease-out group-hover:scale-x-100 rounded-full ${isOverDark ? "bg-white" : "bg-[#26455E]"
+                  }`}
               />
             </a>
             <a
               href="#keunggulan"
               onClick={(e) => scrollToSection(e, "#keunggulan")}
-              className={`relative py-1 transition-colors group ${
-                isOverDark ? "hover:text-white" : "hover:text-[#26455E]"
-              }`}
+              className={`relative py-1 transition-colors group ${isOverDark ? "hover:text-white" : "hover:text-[#26455E]"
+                }`}
             >
               <span>Keunggulan</span>
               <span
-                className={`absolute bottom-0 left-0 w-full h-0.5 scale-x-0 origin-left transition-transform duration-300 ease-out group-hover:scale-x-100 rounded-full ${
-                  isOverDark ? "bg-white" : "bg-[#26455E]"
-                }`}
+                className={`absolute bottom-0 left-0 w-full h-0.5 scale-x-0 origin-left transition-transform duration-300 ease-out group-hover:scale-x-100 rounded-full ${isOverDark ? "bg-white" : "bg-[#26455E]"
+                  }`}
               />
             </a>
             <a
               href="#pricing"
               onClick={(e) => scrollToSection(e, "#pricing")}
-              className={`relative py-1 transition-colors group ${
-                isOverDark ? "hover:text-white" : "hover:text-[#26455E]"
-              }`}
+              className={`relative py-1 transition-colors group ${isOverDark ? "hover:text-white" : "hover:text-[#26455E]"
+                }`}
             >
               <span>Harga</span>
               <span
-                className={`absolute bottom-0 left-0 w-full h-0.5 scale-x-0 origin-left transition-transform duration-300 ease-out group-hover:scale-x-100 rounded-full ${
-                  isOverDark ? "bg-white" : "bg-[#26455E]"
-                }`}
+                className={`absolute bottom-0 left-0 w-full h-0.5 scale-x-0 origin-left transition-transform duration-300 ease-out group-hover:scale-x-100 rounded-full ${isOverDark ? "bg-white" : "bg-[#26455E]"
+                  }`}
               />
             </a>
             <a
               href="#faq"
               onClick={(e) => scrollToSection(e, "#faq")}
-              className={`relative py-1 transition-colors group ${
-                isOverDark ? "hover:text-white" : "hover:text-[#26455E]"
-              }`}
+              className={`relative py-1 transition-colors group ${isOverDark ? "hover:text-white" : "hover:text-[#26455E]"
+                }`}
             >
               <span>FAQ</span>
               <span
-                className={`absolute bottom-0 left-0 w-full h-0.5 scale-x-0 origin-left transition-transform duration-300 ease-out group-hover:scale-x-100 rounded-full ${
-                  isOverDark ? "bg-white" : "bg-[#26455E]"
-                }`}
+                className={`absolute bottom-0 left-0 w-full h-0.5 scale-x-0 origin-left transition-transform duration-300 ease-out group-hover:scale-x-100 rounded-full ${isOverDark ? "bg-white" : "bg-[#26455E]"
+                  }`}
               />
             </a>
           </nav>
@@ -408,11 +415,10 @@ export default function LandingPage() {
             <div className="flex items-center gap-2">
               <Link
                 href={getHomeRouteForRole(currentUser.role)}
-                className={`group flex items-center gap-2.5 pl-1.5 pr-3.5 py-1.5 rounded-full transition-all border shadow-xs ${
-                  isOverDark
-                    ? "bg-white/15 hover:bg-white/25 border-white/25 text-white shadow-[0_4px_16px_rgba(0,0,0,0.2)]"
-                    : "bg-white/85 hover:bg-white border-slate-200/90 text-slate-800 shadow-xs hover:shadow-md"
-                }`}
+                className={`group flex items-center gap-2.5 pl-1.5 pr-3.5 py-1.5 rounded-full transition-all border shadow-xs ${isOverDark
+                  ? "bg-white/15 hover:bg-white/25 border-white/25 text-white shadow-[0_4px_16px_rgba(0,0,0,0.2)]"
+                  : "bg-white/85 hover:bg-white border-slate-200/90 text-slate-800 shadow-xs hover:shadow-md"
+                  }`}
                 title="Buka Dashboard / Workspace"
               >
                 {/* Avatar */}
@@ -434,9 +440,8 @@ export default function LandingPage() {
                     {currentUser.fullName || "Super Admin"}
                   </span>
                   <span
-                    className={`text-[10px] font-medium truncate ${
-                      isOverDark ? "text-white/75" : "text-slate-500"
-                    }`}
+                    className={`text-[10px] font-medium truncate ${isOverDark ? "text-white/75" : "text-slate-500"
+                      }`}
                   >
                     {currentUser.role || "Super Admin"}
                   </span>
@@ -444,9 +449,8 @@ export default function LandingPage() {
 
                 {/* Arrow Icon */}
                 <ChevronRight
-                  className={`w-3.5 h-3.5 shrink-0 ml-0.5 transition-transform duration-200 group-hover:translate-x-0.5 ${
-                    isOverDark ? "text-white/70" : "text-slate-400"
-                  }`}
+                  className={`w-3.5 h-3.5 shrink-0 ml-0.5 transition-transform duration-200 group-hover:translate-x-0.5 ${isOverDark ? "text-white/70" : "text-slate-400"
+                    }`}
                 />
               </Link>
             </div>
@@ -454,19 +458,17 @@ export default function LandingPage() {
             <div className="flex items-center gap-3">
               <Link
                 href="/login"
-                className={`text-xs font-semibold px-2.5 py-1 transition-colors ${
-                  isOverDark ? "text-white/90 hover:text-white" : "text-slate-700 hover:text-[#26455E]"
-                }`}
+                className={`text-xs font-semibold px-2.5 py-1 transition-colors ${isOverDark ? "text-white/90 hover:text-white" : "text-slate-700 hover:text-[#26455E]"
+                  }`}
               >
                 Masuk
               </Link>
               <Link
                 href="/register"
-                className={`px-4 sm:px-5 py-2 text-xs font-bold rounded-full shadow-sm hover:shadow transition-all whitespace-nowrap ${
-                  isOverDark
-                    ? "bg-white hover:bg-slate-100 text-[#26455E]"
-                    : "bg-[#26455E] hover:bg-[#1a3143] text-white"
-                }`}
+                className={`px-4 sm:px-5 py-2 text-xs font-bold rounded-full shadow-sm hover:shadow transition-all whitespace-nowrap ${isOverDark
+                  ? "bg-white hover:bg-slate-100 text-[#26455E]"
+                  : "bg-[#26455E] hover:bg-[#1a3143] text-white"
+                  }`}
               >
                 Registrasi
               </Link>
@@ -487,17 +489,30 @@ export default function LandingPage() {
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
           <div className="text-center max-w-3xl mx-auto">
-            {/* Headline with High-Impact Typography & Gradient Accent */}
-            <h1 className="text-4xl sm:text-6xl lg:text-[68px] font-black tracking-tight sm:tracking-tighter text-slate-900 leading-[1.08]">
+            {/* Headline with Animated Hero Word-Rotating Typography */}
+            <h1 className="text-4xl sm:text-6xl lg:text-[68px] font-black tracking-tight sm:tracking-tighter text-slate-900 leading-[1.12]">
               Optimalkan Kepatuhan &amp;{" "}
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#26455E] via-sky-600 to-[#142636]">
                 Standar Operasional
-              </span>{" "}
-              Toko Ritel
+              </span>
+              <span className="relative flex w-full justify-center items-center overflow-hidden text-center h-[42px] sm:h-[60px] lg:h-[70px] mt-2 sm:mt-3">
+                <AnimatePresence mode="wait">
+                  <motion.span
+                    key={titleNumber}
+                    initial={{ y: 25, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    exit={{ y: -25, opacity: 0 }}
+                    transition={{ duration: 0.35, ease: "easeInOut" }}
+                    className="absolute text-3xl sm:text-5xl lg:text-[58px] font-black text-slate-900 tracking-tight leading-none"
+                  >
+                    {titles[titleNumber]}
+                  </motion.span>
+                </AnimatePresence>
+              </span>
             </h1>
 
             {/* Subtitle */}
-            <p className="mt-6 text-base sm:text-lg lg:text-xl text-slate-600 font-normal leading-relaxed max-w-2xl mx-auto">
+            <p className="mt-3 sm:mt-4 text-base sm:text-lg lg:text-xl text-slate-600 font-normal leading-relaxed max-w-2xl mx-auto">
               Tingkatkan efisiensi inspeksi cabang toko, validasi temuan dengan bukti foto
               dan GPS real-time, serta analisa kepatuhan seluruh jaringan dalam satu
               platform terpusat.
@@ -1014,30 +1029,27 @@ export default function LandingPage() {
               <button
                 type="button"
                 onClick={() => setIsYearly(false)}
-                className={`px-5 py-2 rounded-full text-xs sm:text-sm font-bold transition-all duration-300 cursor-pointer ${
-                  !isYearly
-                    ? "bg-[#26455E] text-white shadow-md shadow-[#26455E]/20"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
+                className={`px-5 py-2 rounded-full text-xs sm:text-sm font-bold transition-all duration-300 cursor-pointer ${!isYearly
+                  ? "bg-[#26455E] text-white shadow-md shadow-[#26455E]/20"
+                  : "text-slate-600 hover:text-slate-900"
+                  }`}
               >
                 Bulanan
               </button>
               <button
                 type="button"
                 onClick={() => setIsYearly(true)}
-                className={`flex items-center gap-2 px-5 py-2 rounded-full text-xs sm:text-sm font-bold transition-all duration-300 cursor-pointer ${
-                  isYearly
-                    ? "bg-[#26455E] text-white shadow-md shadow-[#26455E]/20"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
+                className={`flex items-center gap-2 px-5 py-2 rounded-full text-xs sm:text-sm font-bold transition-all duration-300 cursor-pointer ${isYearly
+                  ? "bg-[#26455E] text-white shadow-md shadow-[#26455E]/20"
+                  : "text-slate-600 hover:text-slate-900"
+                  }`}
               >
                 <span>Tahunan</span>
                 <span
-                  className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full transition-colors ${
-                    isYearly
-                      ? "bg-sky-400 text-[#142636]"
-                      : "bg-emerald-100 text-emerald-800 border border-emerald-200"
-                  }`}
+                  className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full transition-colors ${isYearly
+                    ? "bg-sky-400 text-[#142636]"
+                    : "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                    }`}
                 >
                   Hemat 20%
                 </span>
@@ -1315,11 +1327,10 @@ export default function LandingPage() {
               return (
                 <div
                   key={idx}
-                  className={`rounded-2xl border transition-all duration-300 overflow-hidden ${
-                    isOpen
-                      ? "border-[#26455E]/50 bg-white shadow-md ring-1 ring-[#26455E]/15"
-                      : "border-slate-200/90 hover:border-slate-300 bg-white hover:bg-white/95 shadow-sm hover:shadow-md"
-                  }`}
+                  className={`rounded-2xl border transition-all duration-300 overflow-hidden ${isOpen
+                    ? "border-[#26455E]/50 bg-white shadow-md ring-1 ring-[#26455E]/15"
+                    : "border-slate-200/90 hover:border-slate-300 bg-white hover:bg-white/95 shadow-sm hover:shadow-md"
+                    }`}
                 >
                   <button
                     type="button"
@@ -1327,26 +1338,23 @@ export default function LandingPage() {
                     className="w-full flex items-center justify-between px-6 py-4.5 sm:py-5 text-left cursor-pointer group select-none"
                   >
                     <span
-                      className={`font-semibold text-sm sm:text-[15px] pr-4 transition-colors ${
-                        isOpen ? "text-[#26455E]" : "text-slate-800 group-hover:text-[#26455E]"
-                      }`}
+                      className={`font-semibold text-sm sm:text-[15px] pr-4 transition-colors ${isOpen ? "text-[#26455E]" : "text-slate-800 group-hover:text-[#26455E]"
+                        }`}
                     >
                       {faq.question}
                     </span>
                     <ChevronDown
-                      className={`w-4 h-4 shrink-0 transition-transform duration-300 ${
-                        isOpen ? "rotate-180 text-[#26455E]" : "text-slate-400 group-hover:text-slate-600"
-                      }`}
+                      className={`w-4 h-4 shrink-0 transition-transform duration-300 ${isOpen ? "rotate-180 text-[#26455E]" : "text-slate-400 group-hover:text-slate-600"
+                        }`}
                     />
                   </button>
 
                   {/* Expandable Answer with smooth CSS grid transition */}
                   <div
-                    className={`grid transition-all duration-300 ease-in-out ${
-                      isOpen
-                        ? "grid-rows-[1fr] opacity-100"
-                        : "grid-rows-[0fr] opacity-0 pointer-events-none"
-                    }`}
+                    className={`grid transition-all duration-300 ease-in-out ${isOpen
+                      ? "grid-rows-[1fr] opacity-100"
+                      : "grid-rows-[0fr] opacity-0 pointer-events-none"
+                      }`}
                   >
                     <div className="overflow-hidden">
                       <div className="px-6 pb-5 pt-1 text-slate-600 text-sm leading-relaxed border-t border-slate-100">
