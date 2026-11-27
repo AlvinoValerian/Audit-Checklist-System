@@ -167,8 +167,8 @@ export default function TopBar({
             const lower = String(plan).toLowerCase();
             const formatted = lower.includes("lite")
               ? "Lite Plan"
-              : lower.includes("pro")
-              ? "Pro Plan"
+              : lower.includes("enterprise") || lower.includes("pro")
+              ? "Enterprise"
               : "Standard Plan";
             setPurchasedPlan(formatted);
           } else {
@@ -198,8 +198,8 @@ export default function TopBar({
                 const lower = String(freshPlan).toLowerCase();
                 const formatted = lower.includes("lite")
                   ? "Lite Plan"
-                  : lower.includes("pro")
-                  ? "Pro Plan"
+                  : lower.includes("enterprise") || lower.includes("pro")
+                  ? "Enterprise"
                   : "Standard Plan";
                 setPurchasedPlan(formatted);
                 localStorage.setItem("superadmin_paid", "true");

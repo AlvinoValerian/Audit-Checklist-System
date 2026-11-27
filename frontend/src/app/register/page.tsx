@@ -88,23 +88,30 @@ export default function RegisterPage() {
         const params = new URLSearchParams(window.location.search);
         const planParam = params.get("plan");
         const billingParam = params.get("billing")?.toLowerCase();
-        const isYear =
-          billingParam === "yearly" ||
-          billingParam === "annual" ||
-          billingParam === "tahunan";
+        let isYear = false;
+        if (billingParam) {
+          isYear =
+            billingParam === "yearly" ||
+            billingParam === "annual" ||
+            billingParam === "tahunan";
+        } else {
+          const savedBilling = (localStorage.getItem("selected_billing_cycle") || "").toLowerCase();
+          isYear = savedBilling === "yearly" || savedBilling === "tahunan" || savedBilling === "annual";
+        }
 
         setIsYearlyBilling(isYear);
         localStorage.setItem("selected_billing_cycle", isYear ? "yearly" : "monthly");
+        localStorage.setItem("subscription_duration_days", isYear ? "365" : "30");
 
-        if (planParam && ["lite", "standard", "pro"].includes(planParam.toLowerCase())) {
-          const planNorm = planParam.toLowerCase();
+        if (planParam && ["lite", "standard", "pro", "enterprise"].includes(planParam.toLowerCase())) {
+          const planNorm = planParam.toLowerCase() === "pro" ? "enterprise" : planParam.toLowerCase();
           setSelectedPlan(planNorm);
           localStorage.setItem("selected_checkout_plan", planNorm);
           localStorage.setItem("show_payment_modal_on_workspace", "true");
           localStorage.setItem("pending_superadmin_payment", "true");
         } else {
           const saved = localStorage.getItem("selected_checkout_plan");
-          if (saved) setSelectedPlan(saved);
+          if (saved) setSelectedPlan(saved.toLowerCase() === "pro" ? "enterprise" : saved);
         }
       }
     } catch {}
@@ -250,6 +257,7 @@ export default function RegisterPage() {
       try {
         localStorage.setItem("selected_checkout_plan", selectedPlan);
         localStorage.setItem("selected_billing_cycle", isYearlyBilling ? "yearly" : "monthly");
+        localStorage.setItem("subscription_duration_days", isYearlyBilling ? "365" : "30");
         localStorage.setItem("show_payment_modal_on_workspace", "true");
         localStorage.setItem("pending_superadmin_payment", "true");
         localStorage.removeItem("superadmin_paid");
