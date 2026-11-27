@@ -254,7 +254,7 @@ export default function UserPackagePaymentDashboard() {
       name: user.name || payerInfo.name || "Anton Kurniawan",
       email: user.email || payerInfo.email || "admin@auditcorp.com",
       package: user.packageName || "Standard Plan",
-      nominal: String(user.nominal || 150000),
+      nominal: String(user.nominal || 199000),
       invoice: user.invoiceNumber || "",
       cycle: user.billingCycle || "Bulanan",
     });

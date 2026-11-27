@@ -59,6 +59,17 @@ const getStaffExtra = async (staffId) => {
  * Helper untuk format response Super Admin
  */
 const formatAuthSuperAdmin = (sa, token) => {
+  let billingCycle = 'Bulanan';
+  if (sa.paid_at && sa.expiry_date) {
+    const diffMs = new Date(sa.expiry_date).getTime() - new Date(sa.paid_at).getTime();
+    const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+    if (diffDays > 60) {
+      billingCycle = 'Tahunan';
+    } else {
+      billingCycle = 'Bulanan';
+    }
+  }
+
   return {
     token,
     user: {
@@ -73,6 +84,7 @@ const formatAuthSuperAdmin = (sa, token) => {
       profilePicture: sa.profile_picture || null,
       paymentStatus: sa.payment_status || 'Menunggu Bayar',
       paymentPackage: sa.payment_package || 'Starter',
+      billingCycle: billingCycle,
       paidAt: sa.paid_at || null,
       expiryDate: sa.expiry_date || null,
       isPaid: sa.payment_status === 'Lunas',
@@ -225,8 +237,8 @@ exports.register = async (req, res) => {
     const initialPlan = (req.body.plan || req.body.selectedPlan || req.body.packageName || 'Standard Plan').toString().toLowerCase();
     const formattedPlan = initialPlan.includes('lite')
       ? 'Lite Plan'
-      : initialPlan.includes('pro')
-      ? 'Pro Plan'
+      : initialPlan.includes('enterprise') || initialPlan.includes('pro')
+      ? 'Enterprise'
       : 'Standard Plan';
 
     // 1. Simpan akun ke tabel super_admin
