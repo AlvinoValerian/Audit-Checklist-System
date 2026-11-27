@@ -24,12 +24,12 @@ export default function SubscriptionPricingView() {
     {
       id: "lite",
       name: "Lite Plan",
-      monthlyPrice: 50000,
-      yearlyPrice: 480000,
-      monthlyPriceFormatted: "Rp 50.000",
-      yearlyPriceFormatted: "Rp 480.000",
+      monthlyPrice: 79000,
+      yearlyPrice: 758400,
+      monthlyPriceFormatted: "Rp 79.000",
+      yearlyPriceFormatted: "Rp 758.400",
       monthlySubtext: "Fleksibel bayar per bulan",
-      yearlySubtext: "Setara Rp 40.000/bln (Hemat Rp 120.000)",
+      yearlySubtext: "Setara Rp 63.200/bln (Hemat Rp 189.600)",
       description: "Cocok untuk UMKM atau gerai awal",
       features: [
         "Hingga 2 cabang toko aktif",
@@ -43,12 +43,12 @@ export default function SubscriptionPricingView() {
     {
       id: "standard",
       name: "Standard Plan",
-      monthlyPrice: 150000,
-      yearlyPrice: 1440000,
-      monthlyPriceFormatted: "Rp 150.000",
-      yearlyPriceFormatted: "Rp 1.440.000",
+      monthlyPrice: 199000,
+      yearlyPrice: 1910400,
+      monthlyPriceFormatted: "Rp 199.000",
+      yearlyPriceFormatted: "Rp 1.910.400",
       monthlySubtext: "Paling populer untuk jaringan cabang",
-      yearlySubtext: "Setara Rp 120.000/bln (Hemat Rp 360.000)",
+      yearlySubtext: "Setara Rp 159.200/bln (Hemat Rp 477.600)",
       description: "Solusi terlengkap & paling populer untuk jaringan toko",
       features: [
         "Hingga 15 cabang toko aktif",
@@ -61,14 +61,14 @@ export default function SubscriptionPricingView() {
       isPopular: true,
     },
     {
-      id: "pro",
-      name: "Pro Plan",
-      monthlyPrice: 360000,
-      yearlyPrice: 3480000,
-      monthlyPriceFormatted: "Rp 360.000",
-      yearlyPriceFormatted: "Rp 3.480.000",
+      id: "enterprise",
+      name: "Enterprise",
+      monthlyPrice: 399000,
+      yearlyPrice: 3830400,
+      monthlyPriceFormatted: "Rp 399.000",
+      yearlyPriceFormatted: "Rp 3.830.400",
       monthlySubtext: "Solusi tanpa batas enterprise",
-      yearlySubtext: "Setara Rp 290.000/bln (Hemat Rp 840.000)",
+      yearlySubtext: "Setara Rp 319.200/bln (Hemat Rp 957.600)",
       description: "Untuk enterprise skala besar tanpa batas",
       features: [
         "Cabang toko & auditor tanpa batas",
@@ -85,6 +85,12 @@ export default function SubscriptionPricingView() {
     const nominal = isYearly ? plan.yearlyPrice : plan.monthlyPrice;
     const cycle = isYearly ? "Tahunan" : "Bulanan";
     const currentUser = AuthService.getCurrentUser();
+
+    try {
+      localStorage.setItem("selected_checkout_plan", plan.name);
+      localStorage.setItem("selected_billing_cycle", isYearly ? "yearly" : "monthly");
+      localStorage.setItem("subscription_duration_days", isYearly ? "365" : "30");
+    } catch {}
 
     const params = new URLSearchParams({
       package: plan.name,

@@ -144,20 +144,37 @@ async function markSuperAdminAsPaid({ superAdminId, email, invoiceNumber, packag
   }
 
   const cycleStr = String(billingCycle || '').toLowerCase();
+  const isExplicitMonthly =
+    cycleStr.includes('bulan') ||
+    cycleStr.includes('month') ||
+    cycleStr === '1' ||
+    cycleStr === '30';
+
   const isYearly =
-    cycleStr.includes('tahun') ||
-    cycleStr.includes('year') ||
-    cycleStr.includes('12') ||
-    (nominal && Number(nominal) >= 400000);
+    !isExplicitMonthly &&
+    (cycleStr.includes('tahun') ||
+      cycleStr.includes('year') ||
+      cycleStr.includes('12') ||
+      cycleStr === '365' ||
+      (nominal && Number(nominal) >= 700000));
   const durationDays = isYearly ? 365 : 30;
   const expiryDate = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000);
 
   if (target) {
+    let finalPackageName = packageName || target.payment_package || 'Standard Plan';
+    if (finalPackageName.toLowerCase().includes('enterprise') || finalPackageName.toLowerCase().includes('pro')) {
+      finalPackageName = 'Enterprise';
+    } else if (finalPackageName.toLowerCase().includes('lite')) {
+      finalPackageName = 'Lite Plan';
+    } else if (finalPackageName.toLowerCase().includes('standard')) {
+      finalPackageName = 'Standard Plan';
+    }
+
     const updated = await prisma.super_admin.update({
       where: { super_admin_id: target.super_admin_id },
       data: {
         payment_status: 'Lunas',
-        payment_package: packageName || target.payment_package || 'Standard Plan',
+        payment_package: finalPackageName,
         payment_method: paymentMethod || 'QRIS SparkPay',
         paid_at: new Date(),
         expiry_date: expiryDate,

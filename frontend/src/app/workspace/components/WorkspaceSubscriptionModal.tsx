@@ -32,7 +32,7 @@ interface WorkspaceSubscriptionModalProps {
 }
 
 interface PlanOption {
-  id: "lite" | "standard" | "pro";
+  id: "lite" | "standard" | "enterprise" | "pro";
   name: string;
   monthlyPrice: number;
   yearlyPrice: number;
@@ -48,12 +48,12 @@ const PLANS: PlanOption[] = [
   {
     id: "lite",
     name: "Lite Plan",
-    monthlyPrice: 50000,
-    yearlyPrice: 480000,
+    monthlyPrice: 79000,
+    yearlyPrice: 758400,
     monthlyPeriod: "/bulan",
     yearlyPeriod: "/tahun",
     monthlyDescription: "Cocok untuk UMKM atau gerai awal",
-    yearlyDescription: "Setara Rp 40.000/bln (Hemat Rp 120.000)",
+    yearlyDescription: "Setara Rp 63.200/bln (Hemat Rp 189.600)",
     features: [
       "Hingga 2 cabang toko aktif",
       "Checklist audit digital dasar",
@@ -64,12 +64,12 @@ const PLANS: PlanOption[] = [
   {
     id: "standard",
     name: "Standard Plan",
-    monthlyPrice: 150000,
-    yearlyPrice: 1440000,
+    monthlyPrice: 199000,
+    yearlyPrice: 1910400,
     monthlyPeriod: "/bulan",
     yearlyPeriod: "/tahun",
     monthlyDescription: "Solusi terlengkap & paling populer untuk jaringan toko",
-    yearlyDescription: "Setara Rp 120.000/bln (Hemat Rp 360.000)",
+    yearlyDescription: "Setara Rp 159.200/bln (Hemat Rp 477.600)",
     isPopular: true,
     features: [
       "Hingga 15 cabang toko aktif",
@@ -80,14 +80,14 @@ const PLANS: PlanOption[] = [
     ],
   },
   {
-    id: "pro",
-    name: "Pro Plan",
-    monthlyPrice: 360000,
-    yearlyPrice: 3480000,
+    id: "enterprise",
+    name: "Enterprise",
+    monthlyPrice: 399000,
+    yearlyPrice: 3830400,
     monthlyPeriod: "/bulan",
     yearlyPeriod: "/tahun",
     monthlyDescription: "Untuk enterprise skala besar tanpa batas",
-    yearlyDescription: "Setara Rp 290.000/bln (Hemat Rp 840.000)",
+    yearlyDescription: "Setara Rp 319.200/bln (Hemat Rp 957.600)",
     features: [
       "Cabang toko & auditor tanpa batas",
       "Analitik transaksi & performa audit",
@@ -105,7 +105,7 @@ export default function WorkspaceSubscriptionModal({
   onSuccess,
 }: WorkspaceSubscriptionModalProps) {
   const router = useRouter();
-  const [selectedPlanId, setSelectedPlanId] = useState<"lite" | "standard" | "pro">("standard");
+  const [selectedPlanId, setSelectedPlanId] = useState<"lite" | "standard" | "enterprise" | "pro">("standard");
   const [isYearly, setIsYearly] = useState<boolean>(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
@@ -117,9 +117,13 @@ export default function WorkspaceSubscriptionModal({
   React.useEffect(() => {
     if (!isOpen) return;
     try {
-      const savedPlan = localStorage.getItem("selected_checkout_plan");
-      if (savedPlan && (savedPlan === "lite" || savedPlan === "standard" || savedPlan === "pro")) {
-        setSelectedPlanId(savedPlan as "lite" | "standard" | "pro");
+      const savedPlan = (localStorage.getItem("selected_checkout_plan") || "").toLowerCase();
+      if (savedPlan.includes("enterprise") || savedPlan === "pro") {
+        setSelectedPlanId("enterprise");
+      } else if (savedPlan.includes("lite")) {
+        setSelectedPlanId("lite");
+      } else if (savedPlan.includes("standard")) {
+        setSelectedPlanId("standard");
       }
       const savedBilling = String(localStorage.getItem("selected_billing_cycle") || "").toLowerCase();
       if (savedBilling.includes("year") || savedBilling.includes("tahun") || savedBilling.includes("annual")) {
@@ -158,6 +162,11 @@ export default function WorkspaceSubscriptionModal({
    */
   const handleInitiatePayment = () => {
     onClose();
+    try {
+      localStorage.setItem("selected_checkout_plan", selectedPlan.name);
+      localStorage.setItem("selected_billing_cycle", isYearly ? "yearly" : "monthly");
+      localStorage.setItem("subscription_duration_days", isYearly ? "365" : "30");
+    } catch {}
     const externalReference = `INV-WS-${workspaceId}-${Date.now().toString().slice(-6)}`;
     const params = new URLSearchParams({
       package: selectedPlan.name,

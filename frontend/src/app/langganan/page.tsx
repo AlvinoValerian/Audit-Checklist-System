@@ -89,15 +89,15 @@ export default function LanggananPage() {
     "Standard Plan";
 
   const lowerPlan = storedPlan.toLowerCase();
-  const displayPackageName = lowerPlan.includes("business")
-    ? "Business"
-    : lowerPlan.includes("pro")
-    ? "Pro Plan"
+  const displayPackageName = lowerPlan.includes("enterprise") || lowerPlan.includes("pro")
+    ? "Enterprise"
+    : lowerPlan.includes("business")
+    ? "Enterprise"
     : lowerPlan.includes("lite")
     ? "Lite Plan"
     : lowerPlan.includes("standard")
     ? "Standard Plan"
-    : storedPlan || "Business";
+    : storedPlan || "Enterprise";
 
   // Resolusi periode
   const storedCycle =
@@ -110,19 +110,31 @@ export default function LanggananPage() {
   const diffDays =
     paidAtTime && expiryTime ? Math.round((expiryTime - paidAtTime) / (1000 * 60 * 60 * 24)) : 0;
 
+  const cycleLower = storedCycle.toLowerCase();
+  const durationDaysStored =
+    typeof window !== "undefined" ? localStorage.getItem("subscription_duration_days") : null;
+
+  const isExplicitMonthly =
+    cycleLower.includes("bulan") ||
+    cycleLower.includes("month") ||
+    durationDaysStored === "30" ||
+    (diffDays > 0 && diffDays <= 60);
+
   const isYearly =
-    storedCycle.toLowerCase().includes("tahun") ||
-    storedCycle.toLowerCase().includes("12") ||
-    diffDays > 60 ||
-    (typeof window !== "undefined" && localStorage.getItem("subscription_duration_days") === "365") ||
-    true; // Default tahunan sesuai desain
+    !isExplicitMonthly &&
+    (cycleLower.includes("tahun") ||
+      cycleLower.includes("year") ||
+      cycleLower.includes("annual") ||
+      cycleLower.includes("12") ||
+      diffDays > 60 ||
+      durationDaysStored === "365");
 
   const periodLabel = isYearly ? "12 Bulan" : "1 Bulan";
 
   // Kode paket resmi Audit Pro: [PAKET]-SUB-[DURASI]
   const cleanPackage = displayPackageName.toLowerCase().replace(/\s+plan$/i, "").trim();
-  const prefix = cleanPackage.includes("pro")
-    ? "PRO"
+  const prefix = cleanPackage.includes("enterprise") || cleanPackage.includes("pro")
+    ? "ENT"
     : cleanPackage.includes("lite")
     ? "LITE"
     : cleanPackage.includes("standard")

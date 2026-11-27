@@ -150,26 +150,35 @@ export default function ProfileModal({
           const expiryFromDb = (currentUser as any)?.expiryDate || (currentUser as any)?.expiry_date;
           const paidFromDb = (currentUser as any)?.paidAt || (currentUser as any)?.paid_at;
           let isDbYearly = false;
+          let isDbMonthly = false;
           if (expiryFromDb && paidFromDb) {
             const diffDays = Math.round((new Date(expiryFromDb).getTime() - new Date(paidFromDb).getTime()) / (1000 * 60 * 60 * 24));
             if (diffDays > 60) isDbYearly = true;
+            else if (diffDays > 0) isDbMonthly = true;
           }
 
           const rawCycle = String(billingCycle || (currentUser as any)?.billingCycle || "").toLowerCase();
+          const isExplicitMonthly =
+            rawCycle.includes("bulan") ||
+            rawCycle.includes("month") ||
+            durationDaysStored === "30" ||
+            isDbMonthly;
+
           const isYearly =
-            rawCycle.includes("tahun") ||
-            rawCycle.includes("year") ||
-            rawCycle.includes("annual") ||
-            rawCycle.includes("12") ||
-            durationDaysStored === "365" ||
-            isDbYearly;
+            !isExplicitMonthly &&
+            (rawCycle.includes("tahun") ||
+              rawCycle.includes("year") ||
+              rawCycle.includes("annual") ||
+              rawCycle.includes("12") ||
+              durationDaysStored === "365" ||
+              isDbYearly);
           const durationDays = durationDaysStored ? parseInt(durationDaysStored, 10) : isYearly ? 365 : 30;
 
           const basePlanName = plan
             ? String(plan).toLowerCase().includes("lite")
               ? "Lite Plan"
-              : String(plan).toLowerCase().includes("pro")
-              ? "Pro Plan"
+              : String(plan).toLowerCase().includes("enterprise") || String(plan).toLowerCase().includes("pro")
+              ? "Enterprise"
               : "Standard Plan"
             : "Standard Plan";
 
