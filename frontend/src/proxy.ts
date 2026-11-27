@@ -25,12 +25,15 @@ function verifyJwtCookie(token: string): VerifiedJwtPayload | null {
     return null;
   }
 
-  // Dukung kandidat secret terdaftar agar proxy tetap sinkron dengan backend
-  // bahkan jika developer lokal belum me-restart Next.js atau belum setup .env.local
+  // Ambil JWT_SECRET dari environment (.env.local / server env) tanpa hardcoded fallback di source code
+  const legacySecrets = (process.env.LEGACY_JWT_SECRETS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
   const candidateSecrets = [
-    process.env.JWT_SECRET,
-    "0d19aa3c5fa8ff257ff3b1fec5483da4b85b755d26bbc1407b9db756416e2899",
-    "audit_checklist_system_jwt_secret_key_2024",
+    process.env.JWT_SECRET?.trim(),
+    ...legacySecrets,
   ].filter(Boolean) as string[];
 
   if (candidateSecrets.length === 0) {

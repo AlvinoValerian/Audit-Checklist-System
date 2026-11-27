@@ -30,7 +30,13 @@ function verifyWebhookSignature(rawBody, signatureHeader, webhookSecret) {
  */
 exports.createPaymentLink = async (req, res) => {
   try {
-    const serverKey = process.env.SPARKPAY_SERVER_KEY || 'sk_test_51687cb2e81ee70b1c634b90e79e4917057cf212505bad90';
+    const serverKey = (process.env.SPARKPAY_SERVER_KEY || '').trim();
+    if (!serverKey) {
+      return res.status(500).json({
+        status: 'error',
+        message: 'Konfigurasi SPARKPAY_SERVER_KEY belum diatur di environment (.env) server.'
+      });
+    }
     const env = process.env.SPARKPAY_ENV || 'sandbox';
     const baseUrl = env === 'production' 
       ? 'https://snap.sparkpay.id' 
@@ -169,7 +175,7 @@ async function markSuperAdminAsPaid({ superAdminId, email, invoiceNumber, packag
  */
 exports.handleWebhookCallback = async (req, res) => {
   try {
-    const webhookSecret = process.env.SPARKPAY_WEBHOOK_SECRET || 'f38db35a6479f8cb5cb5ba902a979c99cc957fde523386b10c1da093476a3e38';
+    const webhookSecret = (process.env.SPARKPAY_WEBHOOK_SECRET || '').trim();
     const signatureHeader = req.headers['x-sparkpay-signature'];
     
     // Ambil raw body jika ada buffer atau fallback ke JSON stringify
@@ -235,7 +241,13 @@ exports.getWebhookEvents = (req, res) => {
  */
 exports.simulateWebhook = async (req, res) => {
   try {
-    const webhookSecret = process.env.SPARKPAY_WEBHOOK_SECRET || 'f38db35a6479f8cb5cb5ba902a979c99cc957fde523386b10c1da093476a3e38';
+    const webhookSecret = (process.env.SPARKPAY_WEBHOOK_SECRET || '').trim();
+    if (!webhookSecret) {
+      return res.status(500).json({
+        status: 'error',
+        message: 'Konfigurasi SPARKPAY_WEBHOOK_SECRET belum diatur di environment (.env) server.'
+      });
+    }
     const { event, external_reference, slug, amount } = req.body;
 
     const payloadObj = {
@@ -340,8 +352,8 @@ exports.confirmPayment = async (req, res) => {
  * GET /api/sparkpay/config - Status konfigurasi kredensial (tanpa mengekspos full key)
  */
 exports.getConfig = (req, res) => {
-  const serverKey = process.env.SPARKPAY_SERVER_KEY || 'sk_test_51687cb2e81ee70b1c634b90e79e4917057cf212505bad90';
-  const webhookSecret = process.env.SPARKPAY_WEBHOOK_SECRET || 'f38db35a6479f8cb5cb5ba902a979c99cc957fde523386b10c1da093476a3e38';
+  const serverKey = (process.env.SPARKPAY_SERVER_KEY || '').trim();
+  const webhookSecret = (process.env.SPARKPAY_WEBHOOK_SECRET || '').trim();
   const env = process.env.SPARKPAY_ENV || 'sandbox';
 
   const maskedKey = serverKey ? `${serverKey.substring(0, 12)}...${serverKey.substring(serverKey.length - 8)}` : 'Belum diatur';

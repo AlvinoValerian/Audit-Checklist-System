@@ -157,23 +157,24 @@ function CheckoutContent() {
     };
 
     try {
-      // Panggil backend Express /api/payment-links
+      // Panggil backend Express /api/payment-links (Server Key dibaca aman di backend .env)
       let res: Response;
       const headers = {
         "Content-Type": "application/json",
-        Authorization: "Bearer sk_test_51687cb2e81ee70b1c634b90e79e4917057cf212505bad90",
       };
 
       try {
-        res = await fetch("http://localhost:5000/api/payment-links", {
-          method: "POST",
-          headers,
-          body: JSON.stringify(payload),
-        });
-      } catch {
         res = await fetch("/api/payment-links", {
           method: "POST",
           headers,
+          credentials: "include",
+          body: JSON.stringify(payload),
+        });
+      } catch {
+        res = await fetch("http://localhost:5000/api/payment-links", {
+          method: "POST",
+          headers,
+          credentials: "include",
           body: JSON.stringify(payload),
         });
       }
