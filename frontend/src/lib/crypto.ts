@@ -75,16 +75,7 @@ export const CryptoService = {
       if (isAuthError) {
         throw err;
       }
-      console.warn("⚠️ [CryptoService] Enkripsi via API gagal, mencoba Web Crypto AES-256-GCM lokal:", err);
-      try {
-        const { encryptImageData } = await import("@/lib/image-crypto");
-        const localEncrypted = await encryptImageData(plainImage);
-        if (localEncrypted && localEncrypted !== plainImage && this.isEncrypted(localEncrypted)) {
-          return localEncrypted;
-        }
-      } catch (localErr) {
-        console.warn("⚠️ [CryptoService] Web Crypto AES-256-GCM lokal gagal:", localErr);
-      }
+      console.warn("⚠️ [CryptoService] Enkripsi via API gagal:", err);
       throw err instanceof Error ? err : new Error("Gagal mengenkripsi gambar.");
     }
   },
@@ -108,20 +99,6 @@ export const CryptoService = {
 
     const decryptPromise = (async () => {
       try {
-        // Jika format ENC:v1:, gunakan Web Crypto API lokal terlebih dahulu
-        if (encryptedImage.startsWith(PREFIX_ALT)) {
-          try {
-            const { decryptImageData } = await import("@/lib/image-crypto");
-            const dec = await decryptImageData(encryptedImage);
-            if (dec && dec !== encryptedImage) {
-              decryptCache.set(encryptedImage, dec);
-              return dec;
-            }
-          } catch {
-            // Fallback ke backend decrypt
-          }
-        }
-
         // Backward compatibility untuk data lama format fallback client
         if (encryptedImage.startsWith(`${PREFIX}client:`)) {
           try {

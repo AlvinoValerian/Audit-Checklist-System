@@ -85,7 +85,7 @@ exports.createPaymentLink = async (req, res) => {
 
     // 4. Kredensial Server Key
     const authHeader = req.headers.authorization;
-    let serverKey = process.env.SPARKPAY_SERVER_KEY || 'sk_test_51687cb2e81ee70b1c634b90e79e4917057cf212505bad90';
+    let serverKey = (process.env.SPARKPAY_SERVER_KEY || '').trim();
     if (authHeader && authHeader.startsWith('Bearer ')) {
       serverKey = authHeader.split(' ')[1];
     }
@@ -195,7 +195,7 @@ exports.createPaymentLink = async (req, res) => {
 exports.handleWebhookCallback = async (req, res) => {
   try {
     const signatureHeader = req.headers['x-sparkpay-signature'];
-    const webhookSecret = process.env.SPARKPAY_WEBHOOK_SECRET || 'whsec_test_39f0293da82bc47190e';
+    const webhookSecret = (process.env.SPARKPAY_WEBHOOK_SECRET || '').trim();
 
     const body = req.body && typeof req.body === 'object' ? req.body : {};
     const rawBody =
@@ -205,13 +205,13 @@ exports.handleWebhookCallback = async (req, res) => {
         ? JSON.stringify(req.body)
         : '{}';
 
-    const expectedSignature =
-      'sha256=' +
-      crypto.createHmac('sha256', webhookSecret).update(rawBody || '{}').digest('hex');
+    const expectedSignature = webhookSecret
+      ? 'sha256=' + crypto.createHmac('sha256', webhookSecret).update(rawBody || '{}').digest('hex')
+      : '';
 
     let isValid = false;
     try {
-      if (signatureHeader && typeof signatureHeader === 'string') {
+      if (webhookSecret && signatureHeader && typeof signatureHeader === 'string') {
         const sigBuf = Buffer.from(signatureHeader);
         const expBuf = Buffer.from(expectedSignature);
         if (sigBuf.length === expBuf.length) {

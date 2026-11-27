@@ -1,7 +1,17 @@
 const crypto = require('crypto');
 
-const SECRET_KEY_PASSPHRASE = 'audit_gacoan_secure_vault_key_2024_auth';
-const key = crypto.createHash('sha256').update(SECRET_KEY_PASSPHRASE).digest();
+const getImageCryptoKey = () => {
+  const passphrase = (
+    process.env.IMAGE_CRYPTO_SECRET ||
+    process.env.ENCRYPTION_SECRET ||
+    process.env.JWT_SECRET ||
+    ''
+  ).trim();
+  if (!passphrase) {
+    throw new Error('Konfigurasi enkripsi gambar tidak ditemukan di .env (IMAGE_CRYPTO_SECRET / ENCRYPTION_SECRET).');
+  }
+  return crypto.createHash('sha256').update(passphrase).digest();
+};
 
 /**
  * Enkripsi Base64 gambar menggunakan AES-256-GCM
@@ -11,6 +21,7 @@ function encryptImageData(plainBase64) {
   if (plainBase64.startsWith('ENC:v1:') || plainBase64.startsWith('enc:v1:')) return plainBase64;
 
   try {
+    const key = getImageCryptoKey();
     const iv = crypto.randomBytes(12);
     const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
     const encrypted = Buffer.concat([cipher.update(plainBase64, 'utf8'), cipher.final()]);
@@ -48,6 +59,7 @@ function decryptImageData(encryptedData) {
     const tag = combined.subarray(combined.length - 16);
     const ciphertext = combined.subarray(0, combined.length - 16);
 
+    const key = getImageCryptoKey();
     const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
     decipher.setAuthTag(tag);
 

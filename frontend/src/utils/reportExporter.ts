@@ -60,22 +60,13 @@ async function resolveImageSrc(src?: string): Promise<string> {
     }
     return src;
   }
-  if (src.startsWith("ENC:v1:")) {
-    try {
-      const { decryptImageData } = await import("@/lib/image-crypto");
-      const dec = await decryptImageData(src);
-      if (dec && dec !== src) return dec;
-    } catch (e) {
-      console.warn("Failed to decrypt ENC:v1 image:", e);
-    }
-  }
-  if (src.startsWith("enc:v1:")) {
+  if (src.startsWith("ENC:v1:") || src.startsWith("enc:v1:")) {
     try {
       const { CryptoService } = await import("@/lib/crypto");
       const dec = await CryptoService.decryptImage(src);
       if (dec && dec !== src) return dec;
     } catch (e) {
-      console.warn("Failed to decrypt enc:v1 image:", e);
+      console.warn("Failed to decrypt encrypted image:", e);
     }
   }
   return src;
