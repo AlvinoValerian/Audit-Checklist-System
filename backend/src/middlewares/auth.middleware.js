@@ -2,8 +2,13 @@ const jwt = require('jsonwebtoken');
 const prisma = require('../config/prisma');
 
 const AUTH_COOKIE_NAME = 'audit_pro_token';
-const getJwtSecret = () =>
-  (process.env.JWT_SECRET || 'audit_checklist_system_jwt_secret_key_2024').trim().replace(/^["']|["']$/g, '');
+const getJwtSecret = () => {
+  const secret = (process.env.JWT_SECRET || '').trim().replace(/^["']|["']$/g, '');
+  if (!secret) {
+    throw new Error('Konfigurasi server belum lengkap: JWT_SECRET wajib diisi di environment (.env).');
+  }
+  return secret;
+};
 
 const getStaffExtras = async (staffId) => {
   try {

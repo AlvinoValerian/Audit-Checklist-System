@@ -342,13 +342,7 @@ exports.login = async (req, res) => {
     ]);
 
     if (superAdmin) {
-      let isMatch = await bcrypt.compare(password, superAdmin.password);
-      if (!isMatch) {
-        const pLower = password.toLowerCase();
-        if (pLower === 'password123' || pLower === 'password' || password === '12345678' || pLower === 'admin123') {
-          isMatch = true;
-        }
-      }
+      const isMatch = await bcrypt.compare(password, superAdmin.password);
       if (!isMatch) {
         return res.status(401).json({
           status: 'error',
@@ -394,12 +388,6 @@ exports.login = async (req, res) => {
         isMatch = admin.password === password;
       }
 
-      if (!isMatch && (admin.role === 'Divisi Teknis' || admin.role === 'Teknis' || cleanEmail.includes('teknis'))) {
-        const pLower = password.toLowerCase();
-        if (pLower === 'password123' || pLower === 'password' || password === '12345678' || pLower === 'admin123') {
-          isMatch = true;
-        }
-      }
       if (!isMatch) {
         return res.status(401).json({
           status: 'error',

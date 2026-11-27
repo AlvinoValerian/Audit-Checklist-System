@@ -6,10 +6,10 @@ const PREFIX = 'enc:v1:';
 const deriveKey = (secret) => crypto.createHash('sha256').update(String(secret)).digest();
 
 const getPrimaryKey = () => {
-  const raw =
-    process.env.ENCRYPTION_SECRET ||
-    process.env.JWT_SECRET ||
-    'audit_pro_secure_master_key_2026';
+  const raw = (process.env.ENCRYPTION_SECRET || process.env.JWT_SECRET || '').trim();
+  if (!raw) {
+    throw new Error('Konfigurasi enkripsi tidak ditemukan: ENCRYPTION_SECRET atau JWT_SECRET wajib diatur di .env.');
+  }
   return deriveKey(raw);
 };
 
@@ -18,11 +18,15 @@ const getPrimaryKey = () => {
  * agar foto/data lama yang terenkripsi sebelum rotasi secret tetap bisa dibuka.
  */
 const getDecryptKeyCandidates = () => {
+  const legacyList = (process.env.LEGACY_ENCRYPTION_SECRETS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
   const secrets = [
     process.env.ENCRYPTION_SECRET,
     process.env.JWT_SECRET,
-    'audit_checklist_system_jwt_secret_key_2024',
-    'audit_pro_secure_master_key_2026',
+    ...legacyList,
   ].filter(Boolean);
 
   const uniqueHex = new Set();
