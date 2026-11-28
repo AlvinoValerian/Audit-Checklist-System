@@ -13,12 +13,14 @@ import {
   HelpCircle,
   Square,
 } from "lucide-react";
-import { AIService, QUICK_PROMPT_SUGGESTIONS } from "@/services/ai.service";
+import { AIService, getQuickPromptSuggestions } from "@/services/ai.service";
 import { AuthService } from "@/lib/auth";
 import { ChatMessage } from "@/types/ai";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { motion } from "motion/react";
+import { LoadingState } from "@/components/ui/loading-state";
 
 
 // Helper untuk membersihkan tanda pagar berulang di dalam judul heading
@@ -37,7 +39,9 @@ export default function TanyaAIPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputPrompt, setInputPrompt] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<string>("");
 
   type RenderStage = "input-only" | "chat-entering" | "ready";
 
@@ -49,6 +53,12 @@ export default function TanyaAIPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isMountedRef = useRef(true);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const rafIdRef = useRef<number | null>(null);
+  const revealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const streamingTargetRef = useRef<string>("");
+  const streamingDisplayedLenRef = useRef<number>(0);
+  const sessionLoadSeqRef = useRef<number>(0);
+  const MAX_QUESTION_LENGTH = 1500;
 
   // Scroll HANYA untuk container internal pesan obrolan (tidak menggulung halaman luar)
   const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
@@ -60,37 +70,69 @@ export default function TanyaAIPage() {
     }
   };
 
+  const stopTypingLoop = () => {
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+    if (revealTimerRef.current !== null) {
+      clearTimeout(revealTimerRef.current);
+      revealTimerRef.current = null;
+    }
+  };
+
   useEffect(() => {
     isMountedRef.current = true;
     setRenderStage("ready");
 
-    // Selalu reset messages ke array kosong saat pertama kali dibuka
-    // agar tidak pernah ada sisa state memori dari akun yang baru saja logout!
-    setMessages([]);
+    const loadActiveSession = () => {
+      const loadSeq = ++sessionLoadSeqRef.current;
+      // Reset messages agar tidak ada sisa riwayat dari akun/workspace sebelumnya
+      setMessages([]);
 
-    const user = AuthService.getCurrentUser();
-    const activeEmail = user?.email || "";
+      const user = AuthService.getCurrentUser();
+      const activeEmail = user?.email || "";
+      setUserRole(user?.role || "");
 
-    AIService.getActiveSession()
-      .then((savedMessages) => {
-        if (isMountedRef.current) {
-          const currentUserNow = AuthService.getCurrentUser();
-          if (currentUserNow?.email === activeEmail) {
-            setMessages(savedMessages || []);
-          } else {
+      AIService.getActiveSession()
+        .then((savedMessages) => {
+          if (isMountedRef.current && loadSeq === sessionLoadSeqRef.current) {
+            const currentUserNow = AuthService.getCurrentUser();
+            if (currentUserNow?.email === activeEmail) {
+              setMessages(savedMessages || []);
+            } else {
+              setMessages([]);
+            }
+          }
+        })
+        .catch((err) => {
+          console.warn("Gagal mengambil sesi aktif AI:", err);
+          if (isMountedRef.current && loadSeq === sessionLoadSeqRef.current) {
             setMessages([]);
           }
-        }
-      })
-      .catch((err) => {
-        console.warn("Gagal mengambil sesi aktif AI:", err);
-        if (isMountedRef.current) {
-          setMessages([]);
-        }
-      });
+        });
+    };
+
+    const handleWorkspaceChange = () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+      stopTypingLoop();
+      streamingTargetRef.current = "";
+      streamingDisplayedLenRef.current = 0;
+      setStreamingMessageId(null);
+      setIsGenerating(false);
+      loadActiveSession();
+    };
+
+    loadActiveSession();
+    window.addEventListener("workspace-changed", handleWorkspaceChange);
 
     return () => {
       isMountedRef.current = false;
+      window.removeEventListener("workspace-changed", handleWorkspaceChange);
+      stopTypingLoop();
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
@@ -101,11 +143,11 @@ export default function TanyaAIPage() {
   useEffect(() => {
     if (messages.length > 0) {
       const timer = setTimeout(() => {
-        scrollToBottom("smooth");
-      }, 50);
+        scrollToBottom(streamingMessageId ? "auto" : "smooth");
+      }, 40);
       return () => clearTimeout(timer);
     }
-  }, [messages.length, isGenerating]);
+  }, [messages.length, isGenerating, streamingMessageId]);
 
   // Handle Stop AI generation
   const handleStop = () => {
@@ -113,6 +155,8 @@ export default function TanyaAIPage() {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
+    stopTypingLoop();
+    setStreamingMessageId(null);
     setIsGenerating(false);
     toast.info("Respon AI berhasil dihentikan.");
     setTimeout(() => {
@@ -122,10 +166,14 @@ export default function TanyaAIPage() {
     }, 100);
   };
 
-  // Handle Send message
+  // Handle Send message (dengan SSE Streaming + Smooth Typing ala ChatGPT)
   const handleSend = async (customPrompt?: string) => {
     const promptToSend = customPrompt || inputPrompt;
     if (!promptToSend.trim() || isGenerating) return;
+    if (promptToSend.trim().length > MAX_QUESTION_LENGTH) {
+      toast.error(`Pertanyaan maksimal ${MAX_QUESTION_LENGTH} karakter.`);
+      return;
+    }
 
     const now = new Date();
     const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(
@@ -140,6 +188,18 @@ export default function TanyaAIPage() {
       content: promptToSend.trim(),
     };
 
+    const MIN_LOADING_MS = 1500;
+    const loadingStartedAt = performance.now();
+    const tempAiId = `ai-stream-${Date.now()}`;
+    let hasInsertedAiBubble = false;
+    let canRevealBubble = false;
+    let streamFinished = false;
+    let finalAiPayload: ChatMessage | null = null;
+
+    streamingTargetRef.current = "";
+    streamingDisplayedLenRef.current = 0;
+    stopTypingLoop();
+
     setMessages((prev) => [...prev, userMessage]);
     setInputPrompt("");
     setIsGenerating(true);
@@ -147,29 +207,169 @@ export default function TanyaAIPage() {
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
-    try {
-      const aiResponse = await AIService.generateResponse(promptToSend, controller.signal);
-      if (!isMountedRef.current || controller.signal.aborted) return;
-      setMessages((prev) => [...prev, aiResponse]);
-    } catch (err: any) {
-      if (err?.name === "AbortError" || controller.signal.aborted) {
-        // Pengguna sengaja menekan tombol berhenti
-        return;
-      }
+    const finalizeStreamingUi = () => {
+      stopTypingLoop();
       if (!isMountedRef.current) return;
-      toast.error("Gagal memproses pesan AI. Silakan coba lagi.");
-    } finally {
+
+      if (finalAiPayload) {
+        const settledMsg = finalAiPayload;
+        setMessages((prev) => {
+          const exists = prev.some((m) => m.id === tempAiId);
+          if (exists) {
+            return prev.map((m) => (m.id === tempAiId ? { ...settledMsg, id: tempAiId } : m));
+          }
+          return [...prev, { ...settledMsg, id: tempAiId }];
+        });
+      }
+
+      setStreamingMessageId(null);
+      setIsGenerating(false);
       if (abortControllerRef.current === controller) {
         abortControllerRef.current = null;
       }
-      if (isMountedRef.current) {
-        setIsGenerating(false);
-        setTimeout(() => {
-          if (isMountedRef.current) {
-            textareaRef.current?.focus({ preventScroll: true });
+      setTimeout(() => {
+        if (isMountedRef.current) {
+          textareaRef.current?.focus({ preventScroll: true });
+        }
+      }, 100);
+    };
+
+    const ensureTypingLoopStarted = () => {
+      if (rafIdRef.current !== null) return;
+
+      const stepFrame = () => {
+        rafIdRef.current = null;
+        if (!isMountedRef.current || controller.signal.aborted) {
+          return;
+        }
+
+        const targetText = streamingTargetRef.current;
+        const currentLen = streamingDisplayedLenRef.current;
+
+        if (currentLen < targetText.length) {
+          const remaining = targetText.length - currentLen;
+          // Exponential ease-out 60fps via requestAnimationFrame: sangat mulus & cepat seperti ChatGPT
+          const baseStep = streamFinished
+            ? Math.max(18, Math.ceil(remaining * 0.42))
+            : Math.max(10, Math.ceil(remaining * 0.25));
+
+          let nextLen = Math.min(targetText.length, currentLen + baseStep);
+          // Snap ke batas spasi terdekat agar kemunculan kata tetap alami
+          if (nextLen < targetText.length) {
+            const nextSpace = targetText.indexOf(" ", nextLen);
+            if (nextSpace !== -1 && nextSpace - nextLen <= 14) {
+              nextLen = nextSpace + 1;
+            }
           }
-        }, 100);
+
+          streamingDisplayedLenRef.current = nextLen;
+          const partialContent = targetText.slice(0, nextLen);
+
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === tempAiId ? { ...m, content: partialContent } : m
+            )
+          );
+
+          if (scrollContainerRef.current) {
+            const el = scrollContainerRef.current;
+            const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+            if (distanceFromBottom < 180) {
+              el.scrollTop = el.scrollHeight;
+            }
+          }
+
+          rafIdRef.current = requestAnimationFrame(stepFrame);
+        } else if (streamFinished) {
+          finalizeStreamingUi();
+        }
+      };
+
+      rafIdRef.current = requestAnimationFrame(stepFrame);
+    };
+
+    const revealOutputBubble = () => {
+      if (!isMountedRef.current || controller.signal.aborted) return;
+      canRevealBubble = true;
+
+      if (!hasInsertedAiBubble && streamingTargetRef.current.length > 0) {
+        hasInsertedAiBubble = true;
+        setStreamingMessageId(tempAiId);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: tempAiId,
+            sender: "assistant",
+            senderName: "Audit Pro Assistant",
+            timestamp: timeStr,
+            isDraft: finalAiPayload?.isDraft ?? false,
+            content: "",
+          },
+        ]);
       }
+
+      if (streamingTargetRef.current.length > 0) {
+        ensureTypingLoopStarted();
+      } else if (streamFinished) {
+        finalizeStreamingUi();
+      }
+    };
+
+    const scheduleOrReveal = () => {
+      if (canRevealBubble) {
+        revealOutputBubble();
+        return;
+      }
+      const elapsed = performance.now() - loadingStartedAt;
+      if (elapsed >= MIN_LOADING_MS) {
+        revealOutputBubble();
+      } else if (revealTimerRef.current === null) {
+        revealTimerRef.current = setTimeout(() => {
+          revealTimerRef.current = null;
+          revealOutputBubble();
+        }, Math.ceil(MIN_LOADING_MS - elapsed));
+      }
+    };
+
+    try {
+      const aiResponse = await AIService.streamResponse(promptToSend, {
+        signal: controller.signal,
+        onChunk: (chunk) => {
+          if (!isMountedRef.current || controller.signal.aborted || !chunk) return;
+          streamingTargetRef.current += chunk;
+          scheduleOrReveal();
+        },
+      });
+
+      if (!isMountedRef.current || controller.signal.aborted) return;
+
+      finalAiPayload = aiResponse;
+      if (aiResponse.content) {
+        // Pastikan panjang target akhir sinkron dengan jawaban tersanitasi
+        if (streamingTargetRef.current.length < aiResponse.content.length || streamingDisplayedLenRef.current === 0) {
+          streamingTargetRef.current = aiResponse.content;
+        }
+      }
+
+      streamFinished = true;
+      scheduleOrReveal();
+
+      // Hanya finalize langsung jika waktu minimal loading terpenuhi dan seluruh teks selesai diketik
+      if (canRevealBubble && streamingDisplayedLenRef.current >= streamingTargetRef.current.length) {
+        finalizeStreamingUi();
+      }
+    } catch (err: any) {
+      stopTypingLoop();
+      if (err?.name === "AbortError" || controller.signal.aborted) {
+        return;
+      }
+      if (!isMountedRef.current) return;
+      setStreamingMessageId(null);
+      setIsGenerating(false);
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
+      toast.error("Gagal memproses pesan AI. Silakan coba lagi.");
     }
   };
 
@@ -304,12 +504,16 @@ export default function TanyaAIPage() {
                       Audit Pro Assistant
                     </h3>
                     <p className="text-xs text-slate-500 mt-1 max-w-xs leading-relaxed">
-                      Asisten cerdas untuk analisis data kepatuhan gerai, ringkasan temuan audit, atau pembuatan memo tindak lanjut CAPA.
+                      {userRole.toLowerCase() === "super admin"
+                        ? "Asisten eksekutif untuk memantau kepatuhan antar cabang, rekap temuan audit, dan evaluasi operasional."
+                        : userRole.toLowerCase().includes("teknis")
+                        ? "Asisten teknis untuk memantau jadwal, laporan, template, dan temuan pada lingkungan sandbox."
+                        : "Asisten cerdas untuk analisis data kepatuhan gerai, ringkasan temuan audit, atau pembuatan memo tindak lanjut CAPA."}
                     </p>
 
-                    {/* Starter Suggestions Grid */}
+                    {/* Starter Suggestions Grid (disesuaikan dengan role aktif) */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-4 w-full text-left">
-                      {QUICK_PROMPT_SUGGESTIONS.slice(0, 4).map((sug, idx) => (
+                      {getQuickPromptSuggestions(userRole).slice(0, 4).map((sug, idx) => (
                         <button
                           key={idx}
                           type="button"
@@ -347,7 +551,12 @@ export default function TanyaAIPage() {
                         </div>
                       ) : (
                         /* Assistant Message Bubble */
-                        <div className="flex items-start gap-2.5 max-w-xl sm:max-w-2xl w-full">
+                        <motion.div
+                          initial={{ opacity: 0, y: 6 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.22, ease: "easeOut" }}
+                          className="flex items-start gap-2.5 max-w-xl sm:max-w-2xl w-full"
+                        >
                           {/* Assistant Avatar */}
                           <div className="w-7 h-7 rounded-md bg-[#193f53] text-white flex items-center justify-center shrink-0 mt-0.5 shadow-2xs">
                             <Sparkles className="w-3.5 h-3.5 text-sky-300" />
@@ -399,35 +608,43 @@ export default function TanyaAIPage() {
                                 >
                                   {msg.content.replace(/^([#]{1,6})\s*(?:[#]{1,6}\s*)+/gm, '$1 ').replace(/([^\n])\n(#{1,6}\s+)/g, '$1\n\n$2')}
                                 </ReactMarkdown>
+                                {streamingMessageId === msg.id && (
+                                  <span
+                                    aria-hidden="true"
+                                    className="inline-block w-2 h-3.5 ml-1 align-middle bg-[#193f53]/80 animate-pulse rounded-full"
+                                  />
+                                )}
                               </div>
 
                               {/* Message Action Footer */}
-                              <div className="pt-2.5 mt-2.5 border-t border-slate-100 flex items-center justify-between gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => handleCopyMessage(msg.id, msg.content)}
-                                  className="inline-flex items-center gap-1 text-[10.5px] font-semibold text-slate-500 hover:text-slate-800 transition-colors cursor-pointer"
-                                >
-                                  {copiedId === msg.id ? (
-                                    <>
-                                      <Check className="w-3 h-3 text-emerald-600" />
-                                      <span className="text-emerald-600">Tersalin</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Copy className="w-3 h-3" />
-                                      <span>Salin Jawaban</span>
-                                    </>
-                                  )}
-                                </button>
+                              {streamingMessageId !== msg.id && (
+                                <div className="pt-2.5 mt-2.5 border-t border-slate-100 flex items-center justify-between gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCopyMessage(msg.id, msg.content)}
+                                    className="inline-flex items-center gap-1 text-[10.5px] font-semibold text-slate-500 hover:text-slate-800 transition-colors cursor-pointer"
+                                  >
+                                    {copiedId === msg.id ? (
+                                      <>
+                                        <Check className="w-3 h-3 text-emerald-600" />
+                                        <span className="text-emerald-600">Tersalin</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Copy className="w-3 h-3" />
+                                        <span>Salin Jawaban</span>
+                                      </>
+                                    )}
+                                  </button>
 
-                                {msg.isDraft && (
-                                  <span className="inline-flex items-center gap-1 text-[9.5px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
-                                    <FileText className="w-3 h-3" />
-                                    Format Memo Resmi
-                                  </span>
-                                )}
-                              </div>
+                                  {msg.isDraft && (
+                                    <span className="inline-flex items-center gap-1 text-[9.5px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                                      <FileText className="w-3 h-3" />
+                                      Format Memo Resmi
+                                    </span>
+                                  )}
+                                </div>
+                              )}
                             </div>
 
                             {/* Timestamp & Sender */}
@@ -436,7 +653,7 @@ export default function TanyaAIPage() {
                             </p>
 
                             {/* Follow-up Suggestions Chips */}
-                            {msg.suggestions && msg.suggestions.length > 0 && (
+                            {streamingMessageId !== msg.id && msg.suggestions && msg.suggestions.length > 0 && (
                               <div className="flex flex-wrap items-center gap-1.5 mt-2 pl-0.5">
                                 {msg.suggestions.map((sug, idx) => (
                                   <button
@@ -452,34 +669,19 @@ export default function TanyaAIPage() {
                               </div>
                             )}
                           </div>
-                        </div>
+                        </motion.div>
                       )}
                     </div>
                   ))
                 )}
 
-                {/* AI Typing Indicator */}
-                {isGenerating && (
-                  <div className="flex items-start gap-2.5 max-w-xl sm:max-w-2xl">
-                    <div className="w-7 h-7 rounded-md bg-[#193f53] text-white flex items-center justify-center shrink-0 mt-0.5 shadow-2xs">
-                      <Sparkles className="w-3.5 h-3.5 text-sky-300 animate-spin" />
-                    </div>
-                    <div className="bg-white border border-slate-200 rounded-xl rounded-tl-xs px-3 py-2 shadow-2xs flex items-center gap-2">
-                      <div className="flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" />
-                        <span
-                          className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce"
-                          style={{ animationDelay: "150ms" }}
-                        />
-                        <span
-                          className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce"
-                          style={{ animationDelay: "300ms" }}
-                        />
-                      </div>
-                      <span className="text-[11px] text-slate-400 font-medium">
-                        Menganalisis data laporan audit...
-                      </span>
-                    </div>
+                {/* AI Loading State (tampil bersih tanpa avatar AI sebelum output muncul) */}
+                {isGenerating && !streamingMessageId && (
+                  <div className="flex items-start max-w-xl sm:max-w-2xl">
+                    <LoadingState
+                      status="Menganalisis data audit..."
+                      hint="Mengambil konteks laporan & menyusun jawaban"
+                    />
                   </div>
                 )}
               </div>
@@ -498,6 +700,7 @@ export default function TanyaAIPage() {
               <textarea
                 ref={textareaRef}
                 value={inputPrompt}
+                maxLength={MAX_QUESTION_LENGTH}
                 onChange={(e) => setInputPrompt(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
@@ -512,13 +715,26 @@ export default function TanyaAIPage() {
               />
 
               <div className="flex items-center justify-between gap-2 pt-1.5 mt-1 border-t border-slate-100">
-                <span className="text-[10.5px] text-slate-400 font-medium hidden sm:inline">
-                  {!isGenerating && (
-                    <>
-                      Tekan <kbd className="px-1 py-0.2 bg-slate-100 rounded text-[9.5px] border border-slate-200 font-mono">Enter ↵</kbd> untuk kirim
-                    </>
+                <div className="flex items-center gap-2 text-[10.5px] text-slate-400 font-medium">
+                  <span className="hidden sm:inline">
+                    {!isGenerating && (
+                      <>
+                        Tekan <kbd className="px-1 py-0.2 bg-slate-100 rounded text-[9.5px] border border-slate-200 font-mono">Enter ↵</kbd> untuk kirim
+                      </>
+                    )}
+                  </span>
+                  {inputPrompt.length > 1200 && (
+                    <span
+                      className={`font-mono ${
+                        inputPrompt.length >= MAX_QUESTION_LENGTH
+                          ? "text-rose-500 font-semibold"
+                          : "text-amber-600"
+                      }`}
+                    >
+                      {inputPrompt.length}/{MAX_QUESTION_LENGTH}
+                    </span>
                   )}
-                </span>
+                </div>
 
                 {isGenerating ? (
                   <button

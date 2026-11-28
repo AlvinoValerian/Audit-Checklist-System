@@ -11,6 +11,9 @@ router.get('/session', AIController.getActiveSession);
 // Route untuk mengirim pertanyaan ke AI
 router.post('/ask', AIController.handleAskAI);
 
+// Route SSE streaming realtime untuk pengalaman ketikan bertahap
+router.post('/ask-stream', AIController.handleAskAIStream);
+
 // Route untuk mereset sesi chat (arsip sesi lama dan mulai baru)
 router.post('/reset', AIController.handleResetSession);
 
