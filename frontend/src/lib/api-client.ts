@@ -8,6 +8,10 @@ let isHandlingAuthFailure = false;
 
 export type AuthFailureReason = "expired" | "inactive";
 
+export function isForcedLogoutInProgress(): boolean {
+  return isHandlingAuthFailure;
+}
+
 function shouldSkipUnauthorizedHandling(url?: string): boolean {
   if (!url) return false;
   return (

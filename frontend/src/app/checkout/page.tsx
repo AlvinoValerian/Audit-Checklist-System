@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { AuthService } from "@/lib/auth";
+import { apiFetch } from "@/lib/api-client";
 import SparkPayCheckoutModal, {
   SparkPayCheckoutData,
 } from "@/app/pengaturan/components/SparkPayCheckoutModal";
@@ -161,27 +162,14 @@ function CheckoutContent() {
     };
 
     try {
-      // Panggil backend Express /api/payment-links (Server Key dibaca aman di backend .env)
-      let res: Response;
-      const headers = {
-        "Content-Type": "application/json",
-      };
-
-      try {
-        res = await fetch("/api/payment-links", {
-          method: "POST",
-          headers,
-          credentials: "include",
-          body: JSON.stringify(payload),
-        });
-      } catch {
-        res = await fetch("http://localhost:5000/api/payment-links", {
-          method: "POST",
-          headers,
-          credentials: "include",
-          body: JSON.stringify(payload),
-        });
-      }
+      // Panggil backend Express /api/payment-links lewat apiFetch agar JWT & cookie ikut terkirim
+      const res = await apiFetch("/api/payment-links", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
 
       const json = await res.json().catch(() => ({}));
 
@@ -230,25 +218,18 @@ function CheckoutContent() {
         superAdminId: superAdminId,
         email: customerEmail,
         invoiceNumber: invoiceNumber,
+        slug: result?.slug,
         packageName: packageName,
         nominal: totalNominal,
         paymentMethod: chosenMethod,
         billingCycle: isYearlyPlan ? "Tahunan" : "Bulanan",
       };
 
-      const res = await fetch("/api/sparkpay/confirm-payment", {
+      await apiFetch("/api/sparkpay/confirm-payment", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(confirmPayload),
       }).catch(() => null);
-
-      if (!res || !res.ok) {
-        await fetch("http://localhost:5000/api/sparkpay/confirm-payment", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(confirmPayload),
-        }).catch(() => null);
-      }
     } catch (err) {
       console.error("Gagal update status di backend:", err);
     }

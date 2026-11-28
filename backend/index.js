@@ -63,6 +63,8 @@ app.use(
       'X-Requested-With',
       'x-workspace-id',
       'x-store-id',
+      'x-sparkpay-server-key',
+      'x-sparkpay-signature',
     ],
   })
 );
@@ -107,7 +109,19 @@ const createRateLimiter = ({ windowMs = 60000, max = 20, message = 'Terlalu bany
 };
 
 app.use(morgan('dev'));
-app.use(express.json({ limit: '20mb' }));
+app.use(
+  express.json({
+    limit: '20mb',
+    verify: (req, res, buf) => {
+      if (
+        req.originalUrl &&
+        (req.originalUrl.includes('payment-callback') || req.originalUrl.includes('webhook'))
+      ) {
+        req.rawBody = buf.toString('utf8');
+      }
+    },
+  })
+);
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 app.use(cookieParser());
 

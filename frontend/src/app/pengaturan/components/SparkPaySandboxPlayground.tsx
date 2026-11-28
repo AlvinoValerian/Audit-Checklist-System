@@ -20,6 +20,7 @@ import {
   Check,
 } from "lucide-react";
 import { toast } from "sonner";
+import { apiFetch } from "@/lib/api-client";
 import SparkPayCheckoutModal, { SparkPayCheckoutData } from "./SparkPayCheckoutModal";
 
 export default function SparkPaySandboxPlayground() { 
@@ -195,10 +196,10 @@ export default function SparkPaySandboxPlayground() {
         "Content-Type": "application/json",
       };
       if (serverKey.trim()) {
-        headers.Authorization = `Bearer ${serverKey.trim()}`;
+        headers["x-sparkpay-server-key"] = serverKey.trim();
       }
 
-      const res = await fetch("http://localhost:5000/api/payment-links", {
+      const res = await apiFetch("/api/payment-links", {
         method: "POST",
         headers,
         body: JSON.stringify(requestPayload),
@@ -351,7 +352,7 @@ export default function SparkPaySandboxPlayground() {
         body: JSON.stringify(webhookBody),
       });
 
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       addLog(
         "webhook",
         `Webhook POST Dispatch -> ${targetEndpoint} [${webhookEvent}] (Status: ${res.status})`,
@@ -371,7 +372,11 @@ export default function SparkPaySandboxPlayground() {
           2
         )
       );
-      toast.success(`Webhook (${webhookEvent}) berhasil dikirim ke ${targetEndpoint}!`);
+      if (res.ok) {
+        toast.success(`Webhook (${webhookEvent}) berhasil dikirim ke ${targetEndpoint}!`);
+      } else {
+        toast.error(json?.message || `Webhook ditolak server (HTTP ${res.status}). Periksa Webhook Secret.`);
+      }
     } catch {
       addLog(
         "webhook",
