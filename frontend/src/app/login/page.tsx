@@ -145,9 +145,9 @@ function LoginContent() {
         {/* Center: Main Headline & Description */}
         <div className="my-auto py-7 sm:py-10 lg:py-0 z-10 max-w-xl">
           <h1 className="text-2xl sm:text-4xl xl:text-[42px] font-bold text-white tracking-tight leading-[1.2]">
-            Standarisasi Operasional &amp;
+            Standarisasi Operasional
             <br />
-            Audit Checklist
+            dan Audit Checklist
           </h1>
           <p className="mt-3 sm:mt-5 text-xs sm:text-base text-slate-300 font-normal leading-relaxed max-w-md">
             Instrumen pelaksanaan inspeksi berkala, dokumentasi bukti fisik, dan
