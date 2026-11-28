@@ -7,6 +7,7 @@ const getBackendUrl = (): string => {
   return "http://127.0.0.1:5000";
 };
 const BACKEND_URL = getBackendUrl();
+let inFlightGetMePromise: Promise<AuthUser | null> | null = null;
 
 export interface RegisterPayload {
   fullName: string;
@@ -238,30 +239,45 @@ export const ApiAuthService = {
 
   /**
    * Mengambil data profil user terbaru langsung dari database PostgreSQL via backend (/api/auth/me)
+   * Dilengkapi in-flight deduplication dan pengecekan perubahan agar tidak memicu loop event "auth-changed"
    */
   async getMe(): Promise<AuthUser | null> {
-    try {
-      const token = LocalAuthService.getToken();
-      const headers: Record<string, string> = {};
-      if (token) {
-        headers["Authorization"] = `Bearer ${token}`;
-      }
-
-      const res = await apiFetch(`${BACKEND_URL}/api/auth/me`, {
-        method: "GET",
-        headers,
-      });
-
-      if (!res.ok) return null;
-      const json = await res.json().catch(() => ({}));
-      if (json?.data?.user) {
-        const user = json.data.user as AuthUser;
-        LocalAuthService.setCurrentUser(user);
-        return user;
-      }
-      return null;
-    } catch {
-      return null;
+    if (inFlightGetMePromise) {
+      return inFlightGetMePromise;
     }
+
+    inFlightGetMePromise = (async () => {
+      try {
+        const token = LocalAuthService.getToken();
+        const headers: Record<string, string> = {};
+        if (token) {
+          headers["Authorization"] = `Bearer ${token}`;
+        }
+
+        const res = await apiFetch(`${BACKEND_URL}/api/auth/me`, {
+          method: "GET",
+          headers,
+          cache: "no-store",
+        });
+
+        if (!res.ok) return null;
+        const json = await res.json().catch(() => ({}));
+        if (json?.data?.user) {
+          const user = json.data.user as AuthUser;
+          const prevUser = LocalAuthService.getCurrentUser();
+          if (JSON.stringify(prevUser) !== JSON.stringify(user)) {
+            LocalAuthService.setCurrentUser(user);
+          }
+          return user;
+        }
+        return null;
+      } catch {
+        return null;
+      } finally {
+        inFlightGetMePromise = null;
+      }
+    })();
+
+    return inFlightGetMePromise;
   },
 };

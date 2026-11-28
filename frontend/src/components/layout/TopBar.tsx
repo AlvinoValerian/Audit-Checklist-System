@@ -46,6 +46,7 @@ export default function TopBar({
   const [avatar, setAvatar] = useState<string | null>(null);
   const [purchasedPlan, setPurchasedPlan] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const lastMeSyncRef = useRef<number>(0);
 
   // Sync logged in user data, active workspace, and profile avatar
   const syncUserData = useCallback(() => {
@@ -176,38 +177,43 @@ export default function TopBar({
           }
         }
 
-        // Verifikasi langsung dengan data database PostgreSQL (/api/auth/me)
-        ApiAuthService.getMe()
-          .then((freshUser) => {
-            if (freshUser) {
-              const isFreshPaid =
-                freshUser.isPaid === true ||
-                freshUser.paymentStatus === "Lunas" ||
-                freshUser.payment_status === "Lunas";
+        // Verifikasi langsung dengan data database PostgreSQL (/api/auth/me) dengan cooldown 60 detik
+        // agar event "auth-changed" dari getMe() tidak memicu infinite loop
+        const nowMs = Date.now();
+        if (nowMs - lastMeSyncRef.current >= 60_000) {
+          lastMeSyncRef.current = nowMs;
+          ApiAuthService.getMe()
+            .then((freshUser) => {
+              if (freshUser) {
+                const isFreshPaid =
+                  freshUser.isPaid === true ||
+                  freshUser.paymentStatus === "Lunas" ||
+                  freshUser.payment_status === "Lunas";
 
-              if (!isFreshPaid) {
-                setPurchasedPlan(null);
-                localStorage.removeItem("active_subscription_plan");
-                localStorage.removeItem("superadmin_paid");
-              } else {
-                const freshPlan =
-                  freshUser.paymentPackage ||
-                  freshUser.payment_package ||
-                  localStorage.getItem("active_subscription_plan") ||
-                  "Standard Plan";
-                const lower = String(freshPlan).toLowerCase();
-                const formatted = lower.includes("lite")
-                  ? "Lite Plan"
-                  : lower.includes("enterprise") || lower.includes("pro")
-                  ? "Enterprise"
-                  : "Standard Plan";
-                setPurchasedPlan(formatted);
-                localStorage.setItem("superadmin_paid", "true");
-                localStorage.setItem("active_subscription_plan", formatted);
+                if (!isFreshPaid) {
+                  setPurchasedPlan(null);
+                  localStorage.removeItem("active_subscription_plan");
+                  localStorage.removeItem("superadmin_paid");
+                } else {
+                  const freshPlan =
+                    freshUser.paymentPackage ||
+                    freshUser.payment_package ||
+                    localStorage.getItem("active_subscription_plan") ||
+                    "Standard Plan";
+                  const lower = String(freshPlan).toLowerCase();
+                  const formatted = lower.includes("lite")
+                    ? "Lite Plan"
+                    : lower.includes("enterprise") || lower.includes("pro")
+                    ? "Enterprise"
+                    : "Standard Plan";
+                  setPurchasedPlan(formatted);
+                  localStorage.setItem("superadmin_paid", "true");
+                  localStorage.setItem("active_subscription_plan", formatted);
+                }
               }
-            }
-          })
-          .catch(() => {});
+            })
+            .catch(() => {});
+        }
       }
     } catch {
       setPurchasedPlan(null);
