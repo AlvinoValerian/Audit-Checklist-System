@@ -8,7 +8,6 @@ const {
   getJwtSecret,
   ensureTokenVersionColumns,
   getRecordTokenVersion,
-  bumpTokenVersion,
   extractUser,
 } = require('../middlewares/auth.middleware');
 const { sendSafeError, isStaffRole, isSuperAdminRole } = require('../utils/tenantScope');
@@ -540,14 +539,10 @@ exports.login = async (req, res) => {
 
 /**
  * POST /api/auth/logout
- * Memutus sesi aktif dengan menaikkan token_version user di DB dan menghapus cookie HttpOnly
+ * Menghapus cookie HttpOnly pada browser saat ini tanpa memutus sesi aktif di perangkat/browser lain
  */
 exports.logout = async (req, res) => {
   try {
-    const user = await extractUser(req);
-    if (user) {
-      await bumpTokenVersion(user);
-    }
     clearAuthCookie(req, res);
     return res.status(200).json({
       status: 'success',

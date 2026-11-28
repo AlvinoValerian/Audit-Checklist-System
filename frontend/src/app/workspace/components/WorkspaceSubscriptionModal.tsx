@@ -20,6 +20,7 @@ import {
 import { toast } from "sonner";
 import { Workspace } from "@/types/workspace";
 import { AuthService } from "@/lib/auth";
+import { apiFetch } from "@/lib/api-client";
 import SparkPayCheckoutModal, {
   SparkPayCheckoutData,
 } from "@/app/pengaturan/components/SparkPayCheckoutModal";
@@ -211,14 +212,15 @@ export default function WorkspaceSubscriptionModal({
         AuthService.setCurrentUser(user);
       }
 
-      // Simpan status Lunas ke database PostgreSQL super_admin
-      fetch("http://localhost:5000/api/sparkpay/confirm-payment", {
+      // Simpan status Lunas ke database PostgreSQL super_admin via jalur terautentikasi
+      apiFetch("/api/sparkpay/confirm-payment", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           superAdminId: user?.rawId || user?.id,
           email: customerEmail,
           invoiceNumber: result.external_reference,
+          slug: result.slug,
           packageName: selectedPlan.name,
           nominal: result.amount,
           paymentMethod: "QRIS SparkPay",
@@ -232,30 +234,6 @@ export default function WorkspaceSubscriptionModal({
         localStorage.setItem(`workspace_paid_${workspace.id}`, "PAID");
         localStorage.setItem(`workspace_paid_at_${workspace.id}`, new Date().toISOString());
       }
-    } catch {}
-
-    // Step 3 (Kirim notifikasi Webhook callback server-to-server)
-    try {
-      const webhookPayload = {
-        event: "PAID",
-        external_reference: result.external_reference,
-        slug: result.slug,
-        amount: String(result.amount),
-        currency: "IDR",
-        paid_at: new Date().toISOString(),
-      };
-
-      fetch("/api/payment-callback", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(webhookPayload),
-      }).catch(() => {
-        fetch("https://audit-checklist-system-production.up.railway.app/api/payment-callback", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(webhookPayload),
-        }).catch(console.warn);
-      });
     } catch {}
 
     onSuccess?.();

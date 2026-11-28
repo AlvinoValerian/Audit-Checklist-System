@@ -11,7 +11,7 @@ import {
   LOGOUT_EVENT_KEY,
   LOGOUT_TRANSITION_EVENT,
 } from "@/lib/auth";
-import { apiFetch } from "@/lib/api-client";
+import { apiFetch, isForcedLogoutInProgress } from "@/lib/api-client";
 import { canRoleAccessPath, getHomeRouteForRole, normalizeRole } from "@/lib/routes-acl";
 
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 menit
@@ -112,7 +112,13 @@ export default function SessionManager({ children }: { children: React.ReactNode
   // Recovery atau Redirect jika localStorage kosong / role tidak diizinkan
   useEffect(() => {
     if (!isHydrated || typeof window === "undefined") return;
-    if (isLoggingOutRef.current || AuthService.isManualLogoutInProgress()) return;
+    if (
+      isLoggingOutRef.current ||
+      AuthService.isManualLogoutInProgress() ||
+      isForcedLogoutInProgress()
+    ) {
+      return;
+    }
 
     if (!currentUser) {
       if (meAttemptedRef.current) return;
@@ -121,41 +127,69 @@ export default function SessionManager({ children }: { children: React.ReactNode
 
       let cancelled = false;
       (async () => {
-        try {
+        const fetchMeOnce = async () => {
           const token = AuthService.getToken();
           const headers: Record<string, string> = {};
           if (token) headers["Authorization"] = `Bearer ${token}`;
 
-          const res = await fetch("/api/auth/me", {
+          return fetch("/api/auth/me", {
             method: "GET",
             credentials: "include",
             headers,
             cache: "no-store",
           });
-          if (cancelled || isLoggingOutRef.current || AuthService.isManualLogoutInProgress()) return;
-          if (res.ok) {
-            const json = await res.json().catch(() => null);
-            const meUser = json?.data?.user;
-            const meToken = json?.data?.token;
-            if (meUser) {
-              if (meToken) AuthService.setToken(meToken);
-              AuthService.setCurrentUser(meUser);
-              if (meUser.workspaceId && !AuthService.getActiveWorkspace()) {
-                AuthService.setActiveWorkspace({
-                  id: meUser.workspaceId,
-                  name: meUser.workspaceName || "Workspace",
-                });
-              }
-              setIsRecoveringSession(false);
+        };
+
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const res = await fetchMeOnce();
+            if (
+              cancelled ||
+              isLoggingOutRef.current ||
+              AuthService.isManualLogoutInProgress() ||
+              isForcedLogoutInProgress()
+            ) {
               return;
             }
+            if (res.ok) {
+              const json = await res.json().catch(() => null);
+              const meUser = json?.data?.user;
+              const meToken = json?.data?.token;
+              if (meUser) {
+                if (meToken) AuthService.setToken(meToken);
+                AuthService.setCurrentUser(meUser);
+                if (meUser.workspaceId && !AuthService.getActiveWorkspace()) {
+                  AuthService.setActiveWorkspace({
+                    id: meUser.workspaceId,
+                    name: meUser.workspaceName || "Workspace",
+                  });
+                }
+                setIsRecoveringSession(false);
+                return;
+              }
+            }
+            // Jangan retry jika server memang menolak sesi secara eksplisit (401/403)
+            if (res.status === 401 || res.status === 403) {
+              break;
+            }
+          } catch {
+            // Abaikan error jaringan sesaat (mis. saat backend restart) sebelum retry
           }
-        } catch {
-          // Lanjutkan ke redirect login di bawah
+          if (attempt === 0) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 700));
+            if (cancelled) return;
+          }
         }
 
-        if (cancelled || isLoggingOutRef.current || AuthService.isManualLogoutInProgress()) return;
-        await AuthService.logoutAsync({ broadcast: false });
+        if (
+          cancelled ||
+          isLoggingOutRef.current ||
+          AuthService.isManualLogoutInProgress() ||
+          isForcedLogoutInProgress()
+        ) {
+          return;
+        }
+        AuthService.logout({ broadcast: false });
         const fullTarget = `${window.location.pathname}${window.location.search}`;
         window.location.replace(
           `/login?reason=expired&redirect=${encodeURIComponent(fullTarget)}`

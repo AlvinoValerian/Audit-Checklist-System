@@ -19,6 +19,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { toast } from "sonner";
+import { apiFetch } from "@/lib/api-client";
 import SparkPayCheckoutModal, { SparkPayCheckoutData } from "./SparkPayCheckoutModal";
 import TableSkeleton from "@/components/ui/TableSkeleton";
 import EmptyStateTable from "@/components/ui/EmptyStateTable";
@@ -129,7 +130,7 @@ export default function UserPackagePaymentDashboard() {
   const fetchDbUsers = async () => {
     setIsLoadingDb(true);
     try {
-      const res = await fetch("http://localhost:5000/api/sparkpay/user-subscriptions");
+      const res = await apiFetch("/api/sparkpay/user-subscriptions");
       if (res.ok) {
         const json = await res.json();
         if (json.status === "success" && json.data) {
@@ -267,8 +268,8 @@ export default function UserPackagePaymentDashboard() {
     if (payingUser) {
       const paymentMethodChosen = result?.paymentMethod || "QRIS SparkPay";
       try {
-        // Simpan status Lunas ke database super_admin
-        const res = await fetch("http://localhost:5000/api/sparkpay/confirm-payment", {
+        // Simpan status Lunas ke database super_admin lewat jalur terautentikasi
+        const res = await apiFetch("/api/sparkpay/confirm-payment", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -277,6 +278,7 @@ export default function UserPackagePaymentDashboard() {
             superAdminId: payingUser.superAdminId,
             email: payingUser.email,
             invoiceNumber: payingUser.invoiceNumber,
+            slug: result?.slug,
             packageName: payingUser.packageName,
             nominal: payingUser.nominal,
             paymentMethod: paymentMethodChosen,
