@@ -1399,6 +1399,16 @@ exports.getMySchedules = async (req, res) => {
     );
 
     // 5. Transformasi data jadwal real hari ini dari database
+    const resolveAdminInstruction = (schedule) => {
+      const scheduleNotes = typeof schedule?.notes === 'string' ? schedule.notes.trim() : '';
+      if (scheduleNotes) return scheduleNotes;
+      const templateDesc =
+        typeof schedule?.checklist_template?.description === 'string'
+          ? schedule.checklist_template.description.trim()
+          : '';
+      return templateDesc;
+    };
+
     const scheduleItems = todaySchedules.map((s) => {
       const startTimeStr = formatTimeString(s.start_time);
       const endTimeStr = formatTimeString(s.end_time);
@@ -1472,6 +1482,8 @@ exports.getMySchedules = async (req, res) => {
       let unlockText;
       let resolvedSubmitterName = null;
 
+      const adminInstruction = resolveAdminInstruction(s);
+
       if (completedReport) {
         status = 'Selesai';
         const isLateSubmission =
@@ -1525,6 +1537,9 @@ exports.getMySchedules = async (req, res) => {
         statusBadge = 'Siap Dimulai';
         canStart = true;
         actionText = 'Kerjakan Checklist →';
+        if (adminInstruction) {
+          infoNote = adminInstruction;
+        }
       }
 
       const activeReport = completedReport || uncompletedReport;
@@ -1535,6 +1550,8 @@ exports.getMySchedules = async (req, res) => {
         title: s.title,
         checklistInfo,
         infoNote,
+        notes: typeof s.notes === 'string' ? s.notes.trim() : '',
+        adminInstruction: adminInstruction || null,
         status,
         statusBadge,
         submittedInfo,
@@ -1872,6 +1889,13 @@ exports.getStaffScheduleDetail = async (req, res) => {
 
     const activeReport = completedReport || uncompletedReport;
     const completedSig = completedReport?.attachment?.find((a) => a.file_type === 'signature' || a.signer_name);
+    const scheduleNotes =
+      typeof currentSchedule.notes === 'string' ? currentSchedule.notes.trim() : '';
+    const templateDesc =
+      typeof currentSchedule.checklist_template?.description === 'string'
+        ? currentSchedule.checklist_template.description.trim()
+        : '';
+    const adminInstruction = scheduleNotes || templateDesc || null;
 
     return res.status(200).json({
       status: 'success',
@@ -1882,6 +1906,8 @@ exports.getStaffScheduleDetail = async (req, res) => {
         startTime: startTimeStr,
         endTime: endTimeStr,
         toleranceTime: toleranceTimeStr,
+        notes: scheduleNotes,
+        adminInstruction,
         status: scheduleStatus,
         statusBadge: scheduleBadge,
         startDate: currentSchedule.start_date,
