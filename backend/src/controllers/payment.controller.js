@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const axios = require('axios');
+const { isTeknisRole } = require('../utils/tenantScope');
 
 // In-memory store untuk menyimpan data transaksi sandbox jika DB sedang offline
 const transactionStore = new Map();
@@ -83,17 +84,22 @@ exports.createPaymentLink = async (req, res) => {
         ? `${finalItems[0].name}${finalItems.length > 1 ? ` (+${finalItems.length - 1} item lainnya)` : ` (x${finalItems[0].quantity})`}`
         : 'Pembayaran SparkPay');
 
-    // 4. Kredensial Server Key
-    const authHeader = req.headers.authorization;
+    // 4. Kredensial Server Key (baca dari .env; izinkan override sandbox key khusus Divisi Teknis via x-sparkpay-server-key)
+    const customServerKey = req.headers['x-sparkpay-server-key'];
     let serverKey = (process.env.SPARKPAY_SERVER_KEY || '').trim();
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      serverKey = authHeader.split(' ')[1];
+    if (
+      customServerKey &&
+      typeof customServerKey === 'string' &&
+      customServerKey.trim() &&
+      isTeknisRole(req.user)
+    ) {
+      serverKey = customServerKey.trim();
     }
 
     if (!serverKey) {
-      return res.status(401).json({
+      return res.status(500).json({
         status: 'error',
-        message: 'Server Key SparkPay tidak ditemukan. Sertakan header Authorization: Bearer <SERVER_KEY> atau set SPARKPAY_SERVER_KEY di .env backend.',
+        message: 'SPARKPAY_SERVER_KEY belum dikonfigurasi di .env backend.',
       });
     }
 
@@ -197,21 +203,28 @@ exports.handleWebhookCallback = async (req, res) => {
     const signatureHeader = req.headers['x-sparkpay-signature'];
     const webhookSecret = (process.env.SPARKPAY_WEBHOOK_SECRET || '').trim();
 
+    if (!webhookSecret) {
+      return res.status(500).json({
+        status: 'error',
+        message: 'Konfigurasi SPARKPAY_WEBHOOK_SECRET belum diatur di environment server.',
+      });
+    }
+
     const body = req.body && typeof req.body === 'object' ? req.body : {};
     const rawBody =
-      typeof req.body === 'string'
+      req.rawBody ||
+      (typeof req.body === 'string'
         ? req.body
         : req.body
         ? JSON.stringify(req.body)
-        : '{}';
+        : '{}');
 
-    const expectedSignature = webhookSecret
-      ? 'sha256=' + crypto.createHmac('sha256', webhookSecret).update(rawBody || '{}').digest('hex')
-      : '';
+    const expectedSignature =
+      'sha256=' + crypto.createHmac('sha256', webhookSecret).update(rawBody || '{}').digest('hex');
 
     let isValid = false;
     try {
-      if (webhookSecret && signatureHeader && typeof signatureHeader === 'string') {
+      if (signatureHeader && typeof signatureHeader === 'string') {
         const sigBuf = Buffer.from(signatureHeader);
         const expBuf = Buffer.from(expectedSignature);
         if (sigBuf.length === expBuf.length) {
@@ -223,10 +236,18 @@ exports.handleWebhookCallback = async (req, res) => {
     }
 
     console.log('📥 [SparkPay Webhook Callback Received]:', {
-      signatureHeader,
+      signatureHeader: signatureHeader ? '[PRESENT]' : null,
       isValid,
-      payload: body,
+      event: body.event || 'UNKNOWN',
     });
+
+    if (!isValid) {
+      return res.status(401).json({
+        status: 'error',
+        verified: false,
+        message: 'Signature webhook SparkPay tidak valid atau tidak disertakan.',
+      });
+    }
 
     const { event, external_reference, slug, amount } = body;
 

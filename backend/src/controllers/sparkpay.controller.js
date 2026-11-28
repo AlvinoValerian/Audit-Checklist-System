@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const https = require('https');
 const prisma = require('../config/prisma');
+const { isSuperAdminRole, isTeknisRole, sendSafeError } = require('../utils/tenantScope');
 
 // In-memory store untuk mencatat event webhook terbaru (maksimal 50 event)
 const recentWebhookEvents = [];
@@ -30,7 +31,16 @@ function verifyWebhookSignature(rawBody, signatureHeader, webhookSecret) {
  */
 exports.createPaymentLink = async (req, res) => {
   try {
-    const serverKey = (process.env.SPARKPAY_SERVER_KEY || '').trim();
+    const customServerKey = req.headers['x-sparkpay-server-key'];
+    let serverKey = (process.env.SPARKPAY_SERVER_KEY || '').trim();
+    if (
+      customServerKey &&
+      typeof customServerKey === 'string' &&
+      customServerKey.trim() &&
+      isTeknisRole(req.user)
+    ) {
+      serverKey = customServerKey.trim();
+    }
     if (!serverKey) {
       return res.status(500).json({
         status: 'error',
@@ -193,22 +203,28 @@ async function markSuperAdminAsPaid({ superAdminId, email, invoiceNumber, packag
 exports.handleWebhookCallback = async (req, res) => {
   try {
     const webhookSecret = (process.env.SPARKPAY_WEBHOOK_SECRET || '').trim();
+    if (!webhookSecret) {
+      return res.status(500).json({
+        status: 'error',
+        message: 'Konfigurasi SPARKPAY_WEBHOOK_SECRET belum diatur di environment (.env) server.'
+      });
+    }
+
     const signatureHeader = req.headers['x-sparkpay-signature'];
-    
-    // Ambil raw body jika ada buffer atau fallback ke JSON stringify
-    const rawBody = req.rawBody || JSON.stringify(req.body);
+    // Ambil raw body yang ditangkap express.json verify hook (atau fallback JSON stringify)
+    const rawBody = req.rawBody || JSON.stringify(req.body || {});
     const isVerified = verifyWebhookSignature(rawBody, signatureHeader, webhookSecret);
 
     const eventRecord = {
       id: 'WH-' + Date.now(),
       timestamp: new Date().toISOString(),
-      event: req.body.event || 'UNKNOWN',
-      external_reference: req.body.external_reference || null,
-      slug: req.body.slug || null,
-      amount: req.body.amount || null,
-      currency: req.body.currency || 'IDR',
+      event: req.body?.event || 'UNKNOWN',
+      external_reference: req.body?.external_reference || null,
+      slug: req.body?.slug || null,
+      amount: req.body?.amount || null,
+      currency: req.body?.currency || 'IDR',
       signature_valid: isVerified,
-      signature_header: signatureHeader || null,
+      signature_header: signatureHeader ? '[PRESENT]' : null,
       payload: req.body
     };
 
@@ -217,8 +233,16 @@ exports.handleWebhookCallback = async (req, res) => {
 
     console.log(`[SparkPay Webhook] Event: ${eventRecord.event} | Ref: ${eventRecord.external_reference} | Verified: ${isVerified}`);
 
-    // Jika event PAID, simpan otomatis status Lunas ke database super_admin
-    if (req.body.event === 'PAID') {
+    if (!isVerified) {
+      return res.status(401).json({
+        status: 'error',
+        verified: false,
+        message: 'Signature webhook SparkPay tidak valid atau tidak disertakan.'
+      });
+    }
+
+    // Jika event PAID dan signature terverifikasi, simpan otomatis status Lunas ke database super_admin
+    if (req.body?.event === 'PAID') {
       try {
         await markSuperAdminAsPaid({
           email: req.body.customer?.email,
@@ -234,11 +258,10 @@ exports.handleWebhookCallback = async (req, res) => {
     return res.status(200).json({
       status: 'success',
       message: 'Webhook received',
-      verified: isVerified
+      verified: true
     });
   } catch (err) {
-    console.error('[handleWebhookCallback Error]:', err);
-    return res.status(500).json({ status: 'error', message: err.message });
+    return sendSafeError(res, err, 'Gagal memproses webhook SparkPay.');
   }
 };
 
@@ -320,15 +343,101 @@ exports.simulateWebhook = async (req, res) => {
 };
 
 /**
+ * Helper untuk memverifikasi status pembayaran langsung ke API SparkPay (wajib pada mode production)
+ */
+function fetchSparkPayPaymentStatus(slug) {
+  return new Promise((resolve) => {
+    const serverKey = (process.env.SPARKPAY_SERVER_KEY || '').trim();
+    if (!serverKey || !slug) return resolve({ ok: false, status: null });
+
+    const env = (process.env.SPARKPAY_ENV || 'sandbox').toLowerCase();
+    const baseUrl = env === 'production'
+      ? 'https://snap.sparkpay.id'
+      : 'https://snap.sandbox.sparkpay.id';
+
+    const parsedUrl = new URL(`${baseUrl}/api/payment-links/${encodeURIComponent(slug)}`);
+    const req = https.request(
+      {
+        hostname: parsedUrl.hostname,
+        port: 443,
+        path: parsedUrl.pathname,
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${serverKey}`,
+          Accept: 'application/json',
+        },
+        timeout: 8000,
+      },
+      (apiRes) => {
+        let body = '';
+        apiRes.on('data', (chunk) => {
+          body += chunk;
+        });
+        apiRes.on('end', () => {
+          try {
+            const parsed = JSON.parse(body);
+            const paymentStatus = String(parsed?.data?.status || '').toUpperCase();
+            return resolve({
+              ok: apiRes.statusCode >= 200 && apiRes.statusCode < 300,
+              status: paymentStatus,
+              data: parsed?.data || null,
+            });
+          } catch {
+            return resolve({ ok: false, status: null });
+          }
+        });
+      }
+    );
+
+    req.on('error', () => resolve({ ok: false, status: null }));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve({ ok: false, status: null });
+    });
+    req.end();
+  });
+}
+
+/**
  * POST /api/sparkpay/confirm-payment - Konfirmasi pembayaran & simpan status Lunas ke database super_admin
+ * Terisolasi: Super Admin hanya bisa mengonfirmasi akunnya sendiri (dan di production wajib status PAID dari SparkPay)
  */
 exports.confirmPayment = async (req, res) => {
   try {
-    const { superAdminId, email, invoiceNumber, packageName, nominal, paymentMethod, billingCycle } = req.body;
+    const authUser = req.user;
+    const isTeknis = isTeknisRole(authUser);
+    const isSuperAdmin = isSuperAdminRole(authUser);
+
+    if (!authUser || (!isTeknis && !isSuperAdmin)) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Akses ditolak: Anda tidak memiliki izin untuk mengonfirmasi pembayaran.',
+      });
+    }
+
+    const { superAdminId, email, invoiceNumber, packageName, nominal, paymentMethod, billingCycle, slug } = req.body || {};
+
+    // Pada mode production, konfirmasi mandiri Super Admin wajib terverifikasi PAID langsung dari SparkPay
+    const sparkpayEnv = (process.env.SPARKPAY_ENV || 'sandbox').toLowerCase();
+    if (!isTeknis && sparkpayEnv === 'production') {
+      const check = await fetchSparkPayPaymentStatus(slug);
+      if (!check.ok || check.status !== 'PAID') {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Status pembayaran belum terkonfirmasi PAID oleh server SparkPay.',
+        });
+      }
+    }
+
+    // Super Admin mutlak terkunci ke identitas akunnya sendiri dari JWT (cegah modifikasi akun lain)
+    const targetSaId = isTeknis ? superAdminId : authUser.rawId;
+    const targetEmail = isTeknis ? email : authUser.email;
+    const targetInvoice = isTeknis ? invoiceNumber : undefined;
+
     const updated = await markSuperAdminAsPaid({
-      superAdminId,
-      email,
-      invoiceNumber,
+      superAdminId: targetSaId,
+      email: targetEmail,
+      invoiceNumber: targetInvoice,
       packageName,
       paymentMethod,
       billingCycle,
@@ -357,11 +466,7 @@ exports.confirmPayment = async (req, res) => {
       }
     });
   } catch (err) {
-    console.error('[confirmPayment Error]:', err);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Gagal menyimpan status pembayaran ke database: ' + err.message
-    });
+    return sendSafeError(res, err, 'Gagal menyimpan status pembayaran ke database.');
   }
 };
 

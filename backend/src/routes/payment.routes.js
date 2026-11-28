@@ -1,12 +1,18 @@
 const express = require('express');
 const router = express.Router();
 const paymentController = require('../controllers/payment.controller');
+const { requireAuth, requireRole } = require('../middlewares/auth.middleware');
 
-// Step 1: Buat Payment Link / Sesi Checkout
-router.post('/payment-links', paymentController.createPaymentLink);
-router.post('/checkout', paymentController.createPaymentLink);
+const requirePaymentAccess = [
+  requireAuth,
+  requireRole('Super Admin', 'Divisi Teknis', 'Teknis'),
+];
 
-// Step 3: Webhook Callback Server-to-Server (Method POST dari SparkPay)
+// Step 1: Buat Payment Link / Sesi Checkout (wajib user terautentikasi)
+router.post('/payment-links', ...requirePaymentAccess, paymentController.createPaymentLink);
+router.post('/checkout', ...requirePaymentAccess, paymentController.createPaymentLink);
+
+// Step 3: Webhook Callback Server-to-Server (Method POST dari SparkPay — verifikasi signature HMAC di controller)
 router.post('/payment-callback', paymentController.handleWebhookCallback);
 router.post('/webhook', paymentController.handleWebhookCallback);
 
@@ -24,7 +30,7 @@ const handleWebhookGet = (req, res) => {
 router.get('/payment-callback', handleWebhookGet);
 router.get('/webhook', handleWebhookGet);
 
-// Cek status transaksi via token (slug)
-router.get('/payment-links/:slug', paymentController.getPaymentStatus);
+// Cek status transaksi via token (slug) (wajib user terautentikasi)
+router.get('/payment-links/:slug', ...requirePaymentAccess, paymentController.getPaymentStatus);
 
 module.exports = router;
