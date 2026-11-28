@@ -37,7 +37,7 @@ function CheckoutContent() {
   // State checkout order (Default Standard Plan Audit Pro)
   const [packageName, setPackageName] = useState<string>("Standard Plan");
   const [packageSlug, setPackageSlug] = useState<string>("standard-plan-1");
-  const [totalNominal, setTotalNominal] = useState<number>(150000);
+  const [totalNominal, setTotalNominal] = useState<number>(199000);
   const [billingDuration, setBillingDuration] = useState<string>("Bulanan");
   const [durationMultiplier, setDurationMultiplier] = useState<number>(1);
   const [customerName, setCustomerName] = useState<string>("Anton Kurniawan");
@@ -72,10 +72,14 @@ function CheckoutContent() {
     const finalPackage =
       paramPackage || storedItem?.packageName || "Standard Plan";
     const rawNominal =
-      paramNominal ? parseInt(paramNominal, 10) : storedItem?.nominal || 150000;
-    const finalNominal = isNaN(rawNominal) || rawNominal <= 0 ? 150000 : rawNominal;
+      paramNominal ? parseInt(paramNominal, 10) : storedItem?.nominal || 199000;
+    const finalNominal = isNaN(rawNominal) || rawNominal <= 0 ? 199000 : rawNominal;
+    const savedCycle = typeof window !== "undefined" ? localStorage.getItem("selected_billing_cycle") : null;
+    const isSavedYearly = savedCycle && (savedCycle.includes("year") || savedCycle.includes("tahun"));
     const finalCycle =
-      paramCycle || storedItem?.billingCycle || (finalNominal === 850000 ? "6 Bulan" : "Bulanan");
+      paramCycle ||
+      storedItem?.billingCycle ||
+      (isSavedYearly ? "Tahunan" : "Bulanan");
     const finalInvoice =
       paramInvoice ||
       storedItem?.invoiceNumber ||
@@ -157,23 +161,24 @@ function CheckoutContent() {
     };
 
     try {
-      // Panggil backend Express /api/payment-links
+      // Panggil backend Express /api/payment-links (Server Key dibaca aman di backend .env)
       let res: Response;
       const headers = {
         "Content-Type": "application/json",
-        Authorization: "Bearer sk_test_51687cb2e81ee70b1c634b90e79e4917057cf212505bad90",
       };
 
       try {
-        res = await fetch("http://localhost:5000/api/payment-links", {
-          method: "POST",
-          headers,
-          body: JSON.stringify(payload),
-        });
-      } catch {
         res = await fetch("/api/payment-links", {
           method: "POST",
           headers,
+          credentials: "include",
+          body: JSON.stringify(payload),
+        });
+      } catch {
+        res = await fetch("http://localhost:5000/api/payment-links", {
+          method: "POST",
+          headers,
+          credentials: "include",
           body: JSON.stringify(payload),
         });
       }
@@ -252,8 +257,8 @@ function CheckoutContent() {
       localStorage.setItem("superadmin_paid", "true");
       const normalizedPlan = packageName.toLowerCase().includes("lite")
         ? "Lite Plan"
-        : packageName.toLowerCase().includes("pro")
-        ? "Pro Plan"
+        : packageName.toLowerCase().includes("enterprise") || packageName.toLowerCase().includes("pro")
+        ? "Enterprise"
         : "Standard Plan";
       localStorage.setItem("active_subscription_plan", normalizedPlan);
       localStorage.setItem("selected_checkout_plan", normalizedPlan);

@@ -1,7 +1,17 @@
 const crypto = require('crypto');
 
-const SECRET_KEY_PASSPHRASE = 'audit_gacoan_secure_vault_key_2024_auth';
-const primaryKey = crypto.createHash('sha256').update(SECRET_KEY_PASSPHRASE).digest();
+const getPrimaryKey = () => {
+  const passphrase = (
+    process.env.IMAGE_CRYPTO_SECRET ||
+    process.env.ENCRYPTION_SECRET ||
+    process.env.JWT_SECRET ||
+    ''
+  ).trim();
+  if (!passphrase) {
+    throw new Error('Konfigurasi enkripsi attachment biner tidak ditemukan di .env.');
+  }
+  return crypto.createHash('sha256').update(passphrase).digest();
+};
 
 const MAGIC_PREFIX = Buffer.from('BIN:v1:', 'ascii'); // 7 bytes
 const HEADER_LENGTH = 7 + 1 + 12 + 16; // 36 bytes
@@ -111,7 +121,7 @@ function encryptBinaryAttachment(input, defaultMime = 'image/jpeg') {
   try {
     const mimeCode = REV_MIME_MAP[mimeType.toLowerCase()] || 1;
     const iv = crypto.randomBytes(12);
-    const cipher = crypto.createCipheriv('aes-256-gcm', primaryKey, iv);
+    const cipher = crypto.createCipheriv('aes-256-gcm', getPrimaryKey(), iv);
     const ciphertext = Buffer.concat([cipher.update(rawBuffer), cipher.final()]);
     const tag = cipher.getAuthTag(); // 16 bytes
 
@@ -143,7 +153,7 @@ function decryptBinaryAttachment(input) {
     const tag = buf.subarray(20, 36);
     const ciphertext = buf.subarray(36);
 
-    const decipher = crypto.createDecipheriv('aes-256-gcm', primaryKey, iv);
+    const decipher = crypto.createDecipheriv('aes-256-gcm', getPrimaryKey(), iv);
     decipher.setAuthTag(tag);
     const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
 

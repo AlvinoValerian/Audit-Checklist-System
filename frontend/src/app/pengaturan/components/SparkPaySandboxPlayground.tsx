@@ -25,8 +25,8 @@ import SparkPayCheckoutModal, { SparkPayCheckoutData } from "./SparkPayCheckoutM
 export default function SparkPaySandboxPlayground() { 
   // Environment & Credentials
   const [environment, setEnvironment] = useState<"sandbox" | "production">("sandbox");
-  const [serverKey, setServerKey] = useState("sk_test_51687cb2e81ee70b1c634b90e79e4917057cf212505bad90");
-  const [webhookSecret, setWebhookSecret] = useState("f38db35a6479f8cb5cb5ba902a979c99cc957fde523386b10c1da093476a3e38");
+  const [serverKey, setServerKey] = useState("");
+  const [webhookSecret, setWebhookSecret] = useState("");
   const [webhookUrl, setWebhookUrl] = useState("http://localhost:5000/api/payment-callback");
   const [showServerKey, setShowServerKey] = useState(false);
   const [showWebhookSecret, setShowWebhookSecret] = useState(false);
@@ -180,7 +180,7 @@ export default function SparkPaySandboxPlayground() {
       JSON.stringify(
         {
           headers: {
-            Authorization: `Bearer ${serverKey.substring(0, 10)}...`,
+            ...(serverKey.trim() ? { Authorization: `Bearer ${serverKey.substring(0, 10)}...` } : {}),
             "Content-Type": "application/json",
           },
           body: requestPayload,
@@ -191,12 +191,16 @@ export default function SparkPaySandboxPlayground() {
     );
 
     try {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (serverKey.trim()) {
+        headers.Authorization = `Bearer ${serverKey.trim()}`;
+      }
+
       const res = await fetch("http://localhost:5000/api/payment-links", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${serverKey}`,
-          "Content-Type": "application/json",
-        },
+        headers,
         body: JSON.stringify(requestPayload),
       });
 
@@ -422,8 +426,8 @@ export default function SparkPaySandboxPlayground() {
             type="button"
             onClick={() => {
               setEnvironment("sandbox");
-              setServerKey("sk_test_51687cb2e81ee70b1c634b90e79e4917057cf212505bad90");
-              addLog("info", "Environment Switched", "Beralih ke mode 🧪 Sandbox.");
+              setServerKey("");
+              addLog("info", "Environment Switched", "Beralih ke mode 🧪 Sandbox (menggunakan konfigurasi backend .env).");
             }}
             className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer ${
               environment === "sandbox"
@@ -437,7 +441,7 @@ export default function SparkPaySandboxPlayground() {
             type="button"
             onClick={() => {
               setEnvironment("production");
-              setServerKey("sk_live_sparkpay_849201bc44ae910382ab");
+              setServerKey("");
               addLog("info", "Environment Switched", "Beralih ke mode 🚀 Production.");
             }}
             className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer ${
