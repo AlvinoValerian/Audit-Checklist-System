@@ -40,6 +40,8 @@ interface StaffScheduleItem {
   title: string;
   checklistInfo?: string;
   infoNote?: string;
+  notes?: string;
+  adminInstruction?: string | null;
   status: "Selesai" | "Siap Dimulai" | "Terlambat" | "Libur" | "Terkunci" | "Kedaluwarsa" | "Tidak Dikerjakan";
   statusBadge: string;
   submittedInfo?: string;
@@ -92,6 +94,15 @@ interface StaffScheduleData {
     late?: number;
   };
   schedules: StaffScheduleItem[];
+}
+
+function getAdminInstruction(item: StaffScheduleItem): string | null {
+  const direct = (item.adminInstruction || item.notes || "").trim();
+  if (direct) return direct;
+  if (item.status === "Siap Dimulai" && item.infoNote?.trim()) {
+    return item.infoNote.trim();
+  }
+  return null;
 }
 
 function JadwalStaffContent() {
@@ -889,6 +900,22 @@ function JadwalStaffContent() {
                         </p>
                       </div>
 
+                      {(() => {
+                        const adminInstr = getAdminInstruction(item);
+                        if (!adminInstr) return null;
+                        return (
+                          <div className="mt-2.5 p-3 bg-[#fef9c3]/70 border border-amber-200/70 rounded-xl space-y-0.5">
+                            <div className="flex items-center gap-1.5 text-amber-900 text-xs font-bold">
+                              <span>📢</span>
+                              <span>Instruksi Khusus Admin</span>
+                            </div>
+                            <p className="text-[11px] text-amber-900/90 leading-relaxed whitespace-pre-line">
+                              {adminInstr}
+                            </p>
+                          </div>
+                        );
+                      })()}
+
                       {/* Tombol Kerjakan Checklist Terlambat */}
                       <button
                         type="button"
@@ -932,17 +959,22 @@ function JadwalStaffContent() {
                         </p>
                       )}
 
-                      {/* Instruksi Khusus Admin Callout matching image */}
-                      <div className="mt-3 p-3 bg-[#fef9c3]/70 border border-amber-200/70 rounded-xl space-y-0.5">
-                        <div className="flex items-center gap-1.5 text-amber-900 text-xs font-bold">
-                          <span>📢</span>
-                          <span>Instruksi Khusus Admin</span>
-                        </div>
-                        <p className="text-[11px] text-amber-900/90 leading-relaxed">
-                          {item.infoNote ||
-                            "Fokus inspeksi pada display rak depan, kebersihan area kasir, dan kesesuaian label harga promo."}
-                        </p>
-                      </div>
+                      {/* Instruksi Khusus Admin (dinamis dari jadwal/template database) */}
+                      {(() => {
+                        const adminInstr = getAdminInstruction(item);
+                        if (!adminInstr) return null;
+                        return (
+                          <div className="mt-3 p-3 bg-[#fef9c3]/70 border border-amber-200/70 rounded-xl space-y-0.5">
+                            <div className="flex items-center gap-1.5 text-amber-900 text-xs font-bold">
+                              <span>📢</span>
+                              <span>Instruksi Khusus Admin</span>
+                            </div>
+                            <p className="text-[11px] text-amber-900/90 leading-relaxed whitespace-pre-line">
+                              {adminInstr}
+                            </p>
+                          </div>
+                        );
+                      })()}
 
                       {/* Big Action Button */}
                       <button
@@ -1231,17 +1263,22 @@ function JadwalStaffContent() {
                 </div>
               </div>
 
-              {/* 4. Instruksi Khusus Admin Box (Persis Mockup Gambar) */}
-              <div className="mx-5 mt-3 p-3 bg-[#fef9c3]/70 border border-amber-200/80 rounded-2xl space-y-0.5">
-                <div className="flex items-center gap-1.5 text-amber-900 text-xs font-bold">
-                  <span>📢</span>
-                  <span>Instruksi Khusus Admin</span>
-                </div>
-                <p className="text-xs text-amber-900/90 leading-relaxed mt-0.5">
-                  {activeStartModal.infoNote ||
-                    "Fokus inspeksi pada display rak depan, kebersihan area kasir, dan kesesuaian label harga promo."}
-                </p>
-              </div>
+              {/* 4. Instruksi Khusus Admin Box (dinamis dari database) */}
+              {(() => {
+                const modalAdminInstruction = getAdminInstruction(activeStartModal);
+                if (!modalAdminInstruction) return null;
+                return (
+                  <div className="mx-5 mt-3 p-3 bg-[#fef9c3]/70 border border-amber-200/80 rounded-2xl space-y-0.5">
+                    <div className="flex items-center gap-1.5 text-amber-900 text-xs font-bold">
+                      <span>📢</span>
+                      <span>Instruksi Khusus Admin</span>
+                    </div>
+                    <p className="text-xs text-amber-900/90 leading-relaxed mt-0.5 whitespace-pre-line">
+                      {modalAdminInstruction}
+                    </p>
+                  </div>
+                );
+              })()}
 
               {/* 5. Metadata Card: Toko Target, Waktu, Template Checklist */}
               <div className="mx-5 mt-3 p-3.5 bg-[#f8fafc] border border-slate-100 rounded-2xl space-y-3 text-xs">
