@@ -281,7 +281,7 @@ export default function LandingPage() {
     {
       icon: <ShieldCheck className="w-6 h-6 text-[#26455E] group-hover:text-white transition-colors duration-300" />,
       badge: "Aman & Terenkripsi",
-      title: "Multi-Role & Kontrol Akses",
+      title: "Multi-Role & Kontrol Akses", 
       description:
         "Struktur hak akses aman dan bertingkat untuk Super Admin, Area Manager, Auditor Lapangan, dan Store Supervisor.",
       highlight: "Hak Akses Bertingkat • Audit Log",
@@ -1056,7 +1056,7 @@ export default function LandingPage() {
                         <div
                           className={`w-12 h-12 rounded-2xl flex items-center justify-center border shadow-xs transition-all duration-300 group-hover:scale-110 group-hover:shadow-md ${step.iconBoxBg}`}
                         >
-                          {step.icon}
+                          {step.icon} 
                         </div>
                         <span
                           className={`text-[11px] font-extrabold uppercase px-3 py-1 rounded-full border tracking-wider transition-colors duration-300 shadow-2xs ${step.stepPill}`}
@@ -1599,7 +1599,7 @@ export default function LandingPage() {
             <div className="flex items-center gap-3">
               <span className="text-lg font-bold tracking-tight text-white">
                 StoreAudit
-              </span>
+              </span> 
             </div>
 
             <div className="flex items-center gap-6 text-xs text-slate-400">
